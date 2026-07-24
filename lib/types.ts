@@ -55,6 +55,8 @@ export interface SourceProgress {
   status: "pending" | "running" | "done" | "skipped" | "error";
   /** Count of raw hits returned (Phase 2 fills this in). */
   hits?: number;
+  /** Honest reason a source was skipped or errored (e.g. "credentials not configured"). */
+  note?: string;
 }
 
 /** A single finding surfaced in the brief. */
@@ -88,6 +90,47 @@ export interface Subject {
   promoters: string[];
 }
 
+// ── Retrieval (Phase 2) ────────────────────────────────────────────────────
+
+/** A generated search query, tied to the entity and keyword it came from. */
+export interface GeneratedQuery {
+  /** The entity this query targets. */
+  entity: string;
+  entityKind: "company" | "promoter";
+  /** The keyword that seeded it, if any. */
+  keyword?: string;
+  /** The final query string handed to the source. */
+  query: string;
+}
+
+/** A single raw result from a source, before normalisation/synthesis. */
+export interface RawHit {
+  title: string;
+  url?: string;
+  snippet?: string;
+  /** Which entity this hit concerns. */
+  entity?: string;
+  /** Red-flag keywords found in the hit. */
+  matchedKeywords?: string[];
+  /** Free-form date/period string as the source reported it. */
+  date?: string;
+  /** Source-specific extra fields, kept for the record. */
+  extra?: Record<string, unknown>;
+}
+
+/** The outcome of running one collector. */
+export interface CollectorResult {
+  sourceId: string;
+  sourceName: string;
+  kind: Source["kind"];
+  status: "done" | "skipped" | "error";
+  /** Honest reason for skip/error — surfaced to the user, never hidden. */
+  note?: string;
+  hits: RawHit[];
+  /** The queries this collector actually ran (for transparency). */
+  queries?: string[];
+}
+
 /** A full research run — from input through to the finished brief. */
 export interface Run {
   id: string;
@@ -95,6 +138,8 @@ export interface Run {
   status: RunStatus;
   createdAt: string;
   progress: SourceProgress[];
+  /** Raw collector output (Phase 2). Synthesis (Phase 3) reads from here. */
+  collected?: CollectorResult[];
   /** Populated once synthesis (Phase 3) completes. */
   brief?: {
     verdict: Severity;

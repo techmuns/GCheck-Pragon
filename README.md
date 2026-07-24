@@ -25,9 +25,16 @@ Sources, keywords, prompts, and brief sections are all editable in an admin pane
 | Phase | Scope | Status |
 |-------|-------|--------|
 | **1 — Foundation & Input** | Next.js + Paragon design system, autocomplete input, progress + brief shell, config/run data layer, mocked workflow | ✅ done |
-| **2 — Retrieval engine** | Real collectors: Google + Indian Kanoon APIs, PrivateCircle + CIBIL via Playwright | pending |
+| **2 — Retrieval engine** | Real collectors: Google + Indian Kanoon (keyless out of the box, API-key upgrade), PrivateCircle + CIBIL via Playwright; query generation; honest assembler | ✅ done |
 | **3 — Aggregation & AI** | Extract/normalise/dedupe + OpenAI-synthesised brief | pending |
 | **4 — Admin panel** | Edit sources, keywords, prompts, section templates | pending |
+
+## Credentials
+
+Copy `.env.example` to `.env.local`. **Everything is optional** — a source that
+lacks its key/login skips honestly and says so in the run. Out of the box,
+Google/News and Indian Kanoon work keyless; PrivateCircle and CIBIL light up
+once their logins are set.
 
 ## Design system
 
@@ -55,5 +62,14 @@ lib/
   types.ts                 # shared domain types
   config.ts                # seed sources / keywords / sections (from the client checklist)
   store.ts                 # file-backed config + in-memory run store
-  workflow.ts              # mocked workflow (Phase 2/3 replace this)
+  queries.ts               # generate queries from subject × keywords
+  workflow.ts              # runs every enabled collector, then assembles the brief
+  assemble.ts              # turns raw hits into an honest, source-linked brief
+  collectors/
+    google.ts              # SerpAPI / Programmable Search / keyless fallback
+    indiankanoon.ts        # official API / public search
+    privatecircle.ts       # Playwright — directorships
+    cibil.ts               # Playwright — defaulter checks
+    browser.ts             # shared Playwright launch helper
+    env.ts                 # credential/key configuration
 ```

@@ -1,104 +1,75 @@
-import { getConfig, updateRun } from "./store";
-import type { Run, RenderedSection, Citation, Severity } from "./types";
+import { getConfig, updateRun, getRun } from "./store";
+import { collectors, type CollectorContext } from "./collectors";
+import { assembleBrief } from "./assemble";
+import type { CollectorResult, SourceProgress } from "./types";
 
-// ── Mocked research workflow (Phase 1) ─────────────────────────────────────
-// Simulates the multi-source retrieval + synthesis so the input→output shell
-// works end to end. Phase 2 replaces the per-source steps with real collectors
-// (Google + Indian Kanoon APIs, PrivateCircle + CIBIL via Playwright); Phase 3
-// swaps the mock brief for an OpenAI-synthesised one.
+// ── Research workflow (Phase 2) ────────────────────────────────────────────
+// Real multi-source retrieval. For the run's subject + enabled keywords it runs
+// every enabled source's collector concurrently, streaming per-source progress,
+// then assembles an honest, source-linked brief.
+//
+// Phase 3 will replace `assembleBrief` with OpenAI narrative synthesis over the
+// same collected data.
 
-const STEP_MS = 900;
-
-export async function runMockWorkflow(runId: string): Promise<void> {
+export async function runWorkflow(runId: string): Promise<void> {
   const config = await getConfig();
   updateRun(runId, { status: "running" });
 
-  const run = () => updateRun(runId, {}); // no-op fetch helper
-  void run;
-
+  const enabledKeywords = config.keywords.filter((k) => k.enabled).map((k) => k.term);
   const enabledSources = config.sources.filter((s) => s.enabled);
 
-  // Advance each source in sequence with a small delay.
-  for (let i = 0; i < enabledSources.length; i++) {
-    await delay(STEP_MS);
-    updateRun(runId, {
-      progress: buildProgress(runId, i, "running"),
-    });
-    await delay(STEP_MS);
-    updateRun(runId, {
-      progress: buildProgress(runId, i, "done"),
-    });
+  const run = getRun(runId);
+  if (!run) return;
+
+  const ctx: CollectorContext = { subject: run.subject, keywords: enabledKeywords };
+
+  // Run each collector concurrently, updating its progress line as it resolves.
+  const results = await Promise.all(
+    enabledSources.map(async (source): Promise<CollectorResult> => {
+      setProgress(runId, source.id, { status: "running" });
+      const collector = collectors[source.id];
+      if (!collector) {
+        const r: CollectorResult = {
+          sourceId: source.id,
+          sourceName: source.name,
+          kind: source.kind,
+          status: "skipped",
+          note: "No collector registered for this source.",
+          hits: [],
+        };
+        setProgress(runId, source.id, { status: "skipped", note: r.note });
+        return r;
+      }
+      try {
+        const result = await collector(ctx);
+        setProgress(runId, source.id, {
+          status: result.status,
+          hits: result.hits.length,
+          note: result.note,
+        });
+        return result;
+      } catch (err) {
+        const note = err instanceof Error ? err.message : String(err);
+        setProgress(runId, source.id, { status: "error", note });
+        return { sourceId: source.id, sourceName: source.name, kind: source.kind, status: "error", note, hits: [] };
+      }
+    }),
+  );
+
+  updateRun(runId, { collected: results });
+
+  // Assemble the brief from the collected data.
+  try {
+    const brief = assembleBrief(run.subject, results, config);
+    updateRun(runId, { status: "complete", brief });
+  } catch (err) {
+    updateRun(runId, { status: "error", error: err instanceof Error ? err.message : "Failed to assemble the brief." });
   }
-
-  // Synthesise a mock brief in the design-system shape.
-  await delay(STEP_MS);
-  const brief = buildMockBrief(runId);
-  updateRun(runId, { status: "complete", brief });
 }
 
-function buildProgress(runId: string, upTo: number, state: "running" | "done") {
-  const existing = getProgress(runId);
-  return existing.map((p, idx) => {
-    if (idx < upTo) return { ...p, status: "done" as const, hits: p.hits ?? 0 };
-    if (idx === upTo) return { ...p, status: state, hits: state === "done" ? mockHits(idx) : p.hits };
-    return p;
-  });
-}
-
-function getProgress(runId: string) {
-  // Read current progress off the store via updateRun's return.
-  const r = updateRun(runId, {});
-  return r?.progress ?? [];
-}
-
-function mockHits(idx: number): number {
-  return [3, 5, 8, 2][idx % 4];
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((res) => setTimeout(res, ms));
-}
-
-// ── Mock brief builder ─────────────────────────────────────────────────────
-
-function buildMockBrief(runId: string): NonNullable<Run["brief"]> {
-  const citations: Citation[] = [
-    { ref: 1, sourceName: "Indian Kanoon", label: "Sample matter — civil suit (illustrative)", url: "https://indiankanoon.org" },
-    { ref: 2, sourceName: "Google / News", label: "Illustrative press mention", url: "https://www.google.com" },
-    { ref: 3, sourceName: "PrivateCircle", label: "Director profile (illustrative)", url: "https://www.privatecircle.co" },
-  ];
-
-  const sections: RenderedSection[] = [
-    {
-      id: "red-flags",
-      title: "Red-Flag Summary",
-      findings: [
-        { severity: "amber" as Severity, text: "Sample keyword hit on a promoter name — needs manual review before the meeting.", sourceRef: 2 },
-        { severity: "clear" as Severity, text: "No suit-filed / wilful-defaulter records surfaced in the illustrative run." },
-      ],
-    },
-    {
-      id: "snapshot",
-      title: "Company Snapshot",
-      findings: [{ severity: "info" as Severity, text: "Placeholder snapshot — real company profile arrives with the Phase 2 retrieval engine." }],
-    },
-    {
-      id: "litigation",
-      title: "Litigation (Indian Kanoon)",
-      findings: [{ severity: "amber" as Severity, text: "One illustrative civil matter captured (heading + link).", sourceRef: 1 }],
-    },
-    {
-      id: "directorships",
-      title: "Directorships (PrivateCircle)",
-      findings: [{ severity: "info" as Severity, text: "Directorship graph will populate here once PrivateCircle is wired.", sourceRef: 3 }],
-    },
-  ];
-
-  void runId;
-  return {
-    verdict: "amber",
-    headline: "Illustrative pre-screen — one amber flag for manual review, no defaulter records.",
-    sections,
-    citations,
-  };
+function setProgress(runId: string, sourceId: string, patch: Partial<SourceProgress>): void {
+  const run = getRun(runId);
+  if (!run) return;
+  const progress = run.progress.map((p) => (p.sourceId === sourceId ? { ...p, ...patch } : p));
+  updateRun(runId, { progress });
 }

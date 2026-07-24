@@ -103,7 +103,7 @@ export default function BriefView({ run, onReset }: Props) {
       )}
 
       <p className="mt-4 text-center text-[11px] text-ink-secondary/70">
-        Illustrative results — the live retrieval engine and AI synthesis arrive in the next phases.
+        Assembled from live source data. AI narrative synthesis arrives in Phase 3.
       </p>
     </div>
   );

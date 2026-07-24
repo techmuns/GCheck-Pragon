@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getConfig, createRun } from "@/lib/store";
-import { runMockWorkflow } from "@/lib/workflow";
+import { runWorkflow } from "@/lib/workflow";
 import type { SourceProgress, Subject } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
   const run = createRun(subject, progressSeed);
 
   // Fire the workflow without blocking the response.
-  void runMockWorkflow(run.id);
+  void runWorkflow(run.id);
 
   return NextResponse.json({ id: run.id });
 }

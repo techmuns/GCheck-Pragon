@@ -25,18 +25,23 @@ export async function saveConfig(config: AppConfig): Promise<void> {
   await fs.writeFile(CONFIG_PATH, JSON.stringify(config, null, 2), "utf8");
 }
 
-// ── Run store (in-memory for Phase 1) ──────────────────────────────────────
-// Persistence swaps in with the retrieval engine. A module-level Map survives
-// across requests within the dev/server process.
+// ── Run store (in-memory) ──────────────────────────────────────────────────
+// Held on globalThis so every route bundle and the fire-and-forget workflow
+// share one instance (Next.js gives separate route handlers separate module
+// instances otherwise). Persistence to a DB is the production swap.
 
-const runs = new Map<string, Run>();
+interface RunStore {
+  runs: Map<string, Run>;
+  seq: number;
+}
 
-// Stable, non-random id (Math.random / Date.now are fine at runtime here, but
-// we keep a simple monotonic counter for readability).
-let seq = 0;
+const g = globalThis as unknown as { __paragonRunStore?: RunStore };
+const store: RunStore = (g.__paragonRunStore ??= { runs: new Map(), seq: 0 });
+const runs = store.runs;
+
 function newId(): string {
-  seq += 1;
-  return `run_${Date.now().toString(36)}_${seq}`;
+  store.seq += 1;
+  return `run_${Date.now().toString(36)}_${store.seq}`;
 }
 
 export function createRun(subject: Subject, progressSeed: Run["progress"]): Run {

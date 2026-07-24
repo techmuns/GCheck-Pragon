@@ -41,27 +41,28 @@ export default function ResearchProgress({ subject, progress }: Props) {
       <ul className="mt-5 space-y-2">
         {progress.map((p) => {
           const running = p.status === "running";
+          const showNote = p.note && (p.status === "skipped" || p.status === "error" || (p.status === "done" && p.hits === 0));
           return (
-            <li
-              key={p.sourceId}
-              className="surface-soft flex items-center justify-between px-3.5 py-2.5"
-            >
-              <div className="flex items-center gap-2.5">
-                <span
-                  className="inline-block h-2 w-2 rounded-full"
-                  style={{
-                    backgroundColor: statusDot(p.status),
-                    boxShadow: running ? "0 0 0 3px rgba(183,121,31,0.14)" : "none",
-                  }}
-                />
-                <span className="text-[14px] text-ink-primary">{p.name}</span>
-                <span className="eyebrow !text-[9px] !tracking-[0.06em] rounded bg-ice px-1.5 py-0.5">
-                  {p.kind === "api" ? "API" : "Browser"}
+            <li key={p.sourceId} className="surface-soft px-3.5 py-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <span
+                    className="inline-block h-2 w-2 rounded-full"
+                    style={{
+                      backgroundColor: statusDot(p.status),
+                      boxShadow: running ? "0 0 0 3px rgba(183,121,31,0.14)" : "none",
+                    }}
+                  />
+                  <span className="text-[14px] text-ink-primary">{p.name}</span>
+                  <span className="eyebrow !text-[9px] !tracking-[0.06em] rounded bg-ice px-1.5 py-0.5">
+                    {p.kind === "api" ? "API" : "Browser"}
+                  </span>
+                </div>
+                <span className="tabular text-[12.5px] text-ink-secondary">
+                  {p.status === "done" && p.hits !== undefined ? `${p.hits} hits` : STATUS_LABEL[p.status]}
                 </span>
               </div>
-              <span className="tabular text-[12.5px] text-ink-secondary">
-                {p.status === "done" && p.hits !== undefined ? `${p.hits} hits` : STATUS_LABEL[p.status]}
-              </span>
+              {showNote && <p className="mt-1.5 pl-[18px] text-[11.5px] leading-snug text-ink-secondary/80">{p.note}</p>}
             </li>
           );
         })}
