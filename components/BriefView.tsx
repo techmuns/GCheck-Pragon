@@ -27,7 +27,7 @@ export default function BriefView({ run, onReset }: Props) {
   const sourcesLocked = run.progress.filter((p) => p.status === "locked").length;
 
   return (
-    <div className="fade-in w-full max-w-2xl">
+    <div className="fade-in mx-auto w-full max-w-6xl">
       {/* Action row — hidden in print */}
       <div className="no-print mb-4 flex items-center justify-between">
         <div className="eyebrow">Pre-Meeting Brief</div>
@@ -96,15 +96,15 @@ export default function BriefView({ run, onReset }: Props) {
           <SourceCoverage progress={run.progress} />
         </div>
 
-        {/* Sections */}
-        <div className="space-y-3">
+        {/* Sections — full width summary, two columns below on large screens */}
+        <div className="grid gap-3 lg:grid-cols-2">
           {brief.sections.map((section) => {
             const isSummary = section.id === "red-flags";
             const count = section.findings.filter((f) => f.severity !== "info").length;
             return (
               <div
                 key={section.id}
-                className="card-surface p-5"
+                className={`card-surface p-5 ${isSummary ? "lg:col-span-2" : ""}`}
                 style={isSummary ? { borderLeft: `3px solid ${meta.color}` } : undefined}
               >
                 <div className="mb-2 flex items-center justify-between">

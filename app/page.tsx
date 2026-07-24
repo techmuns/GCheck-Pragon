@@ -69,8 +69,14 @@ export default function Home() {
     setPhase("idle");
   }, [stopPolling]);
 
+  const centered = phase === "idle" || phase === "error" || (phase === "running" && !run);
+
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center px-4 py-12">
+    <main
+      className={`flex min-h-screen w-full flex-col items-center px-4 py-10 sm:px-6 lg:px-8 ${
+        centered ? "justify-center" : ""
+      }`}
+    >
       {phase === "idle" && <SearchForm onSubmit={start} />}
 
       {phase === "running" && run && <ResearchProgress subject={run.subject} progress={run.progress} />}

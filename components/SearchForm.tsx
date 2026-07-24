@@ -34,7 +34,7 @@ export default function SearchForm({ onSubmit, busy }: Props) {
   }
 
   return (
-    <div className="card-surface fade-in w-full max-w-xl p-6 sm:p-7">
+    <div className="card-surface fade-in mx-auto w-full max-w-2xl p-6 sm:p-8">
       <div className="mb-5">
         <div className="eyebrow mb-1">Pre-Meeting Governance Pre-Screen</div>
         <h1 className="font-display text-[26px] leading-tight text-navy-deep">

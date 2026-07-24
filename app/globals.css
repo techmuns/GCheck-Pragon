@@ -117,20 +117,102 @@ body {
   }
 }
 
+/* ── Waiting-state motion (kept lively but on-brand) ───────────────────── */
+
+/* Shimmer sweep across a running row. */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.shimmer {
+  background-image: linear-gradient(90deg, transparent 0%, rgba(39, 69, 126, 0.09) 50%, transparent 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.7s var(--ease) infinite;
+}
+
+/* Indeterminate progress bar. */
+.bar-track {
+  position: relative;
+  overflow: hidden;
+}
+.bar-track::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -45%;
+  width: 45%;
+  border-radius: inherit;
+  background-image: linear-gradient(90deg, #27457e, #168e8e);
+  animation: indeterminate 1.25s var(--ease) infinite;
+}
+@keyframes indeterminate {
+  0% { left: -45%; }
+  100% { left: 100%; }
+}
+
+/* Pulsing ring around the active dot. */
+.pulse-ring {
+  position: relative;
+}
+.pulse-ring::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  box-shadow: 0 0 0 0 rgba(183, 121, 31, 0.5);
+  animation: pulsering 1.5s var(--ease) infinite;
+}
+@keyframes pulsering {
+  0% { box-shadow: 0 0 0 0 rgba(183, 121, 31, 0.45); }
+  70% { box-shadow: 0 0 0 8px rgba(183, 121, 31, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(183, 121, 31, 0); }
+}
+
+/* Slow rotating scanner ring. */
+.spin {
+  animation: spin 0.95s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Breathing scan orb. */
+.scan-orb {
+  animation: breathe 2.4s var(--ease) infinite;
+}
+@keyframes breathe {
+  0%, 100% { transform: scale(1); opacity: 0.9; }
+  50% { transform: scale(1.06); opacity: 1; }
+}
+
+/* Fading in cycled status lines. */
+.msg-swap {
+  animation: msgSwap 400ms var(--ease) both;
+}
+@keyframes msgSwap {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .fade-in {
     animation: fadeInReduced 160ms var(--ease) both;
   }
   @keyframes fadeInReduced {
-    from {
-      opacity: 0;
-    }
-    to {
-      opacity: 1;
-    }
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
   .hover-lift:hover {
     transform: none;
+  }
+  /* Silence looping motion, keep a gentle indeterminate hint only. */
+  .shimmer,
+  .pulse-ring::before,
+  .scan-orb,
+  .spin,
+  .msg-swap {
+    animation: none !important;
   }
 }
 
@@ -154,6 +236,13 @@ body {
   /* The brief fills the page cleanly. */
   #brief-print {
     max-width: 100% !important;
+  }
+  /* Single column in print for readable PDF pages. */
+  #brief-print .grid {
+    display: block !important;
+  }
+  #brief-print .grid > * {
+    margin-bottom: 12px;
   }
   .card-surface,
   .surface-soft {
