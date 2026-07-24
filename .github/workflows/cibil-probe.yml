@@ -1,0 +1,52 @@
+name: CIBIL Probe
+
+# One-off reachability test: can a GitHub-hosted runner reach suit.cibil.com,
+# both as a plain request and via a real Chromium browser? This tells us
+# whether GitHub Actions is a viable free path for the CIBIL source.
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Plain curl
+        run: |
+          echo "=== curl (no browser) ==="
+          curl -s -o /dev/null -w "suit.cibil.com HTTP %{http_code}\n" https://suit.cibil.com/ || true
+          echo "--- first bytes ---"
+          curl -s https://suit.cibil.com/ | head -c 600 || true
+          echo
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Real browser probe (Playwright)
+        run: |
+          npm init -y >/dev/null 2>&1
+          npm i playwright@1.47.0 >/dev/null 2>&1
+          npx playwright install --with-deps chromium
+          cat > probe.mjs <<'EOF'
+          import { chromium } from 'playwright';
+          const b = await chromium.launch({ args: ['--no-sandbox'] });
+          const ctx = await b.newContext({
+            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+          });
+          const p = await ctx.newPage();
+          try {
+            const resp = await p.goto('https://suit.cibil.com/', { waitUntil: 'domcontentloaded', timeout: 40000 });
+            console.log('BROWSER STATUS:', resp && resp.status());
+            console.log('FINAL URL   :', p.url());
+            console.log('PAGE TITLE  :', await p.title());
+            const html = await p.content();
+            const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 400);
+            console.log('TEXT SNIPPET:', text);
+            const blocked = /captcha|access denied|forbidden|cloudflare|blocked|attention required/i.test(html);
+            console.log('LOOKS BLOCKED:', blocked);
+          } catch (e) {
+            console.log('BROWSER ERROR:', e.message);
+          }
+          await b.close();
+          EOF
+          node probe.mjs
