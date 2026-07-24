@@ -133,3 +133,38 @@ body {
     transform: none;
   }
 }
+
+/* ── Print / Download-to-PDF ────────────────────────────────────────────── */
+@media print {
+  @page {
+    margin: 14mm;
+  }
+  body {
+    background: #ffffff !important;
+    background-image: none !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  main {
+    display: block !important;
+    padding: 0 !important;
+    min-height: 0 !important;
+  }
+  /* The brief fills the page cleanly. */
+  #brief-print {
+    max-width: 100% !important;
+  }
+  .card-surface,
+  .surface-soft {
+    box-shadow: none !important;
+    break-inside: avoid;
+  }
+  /* Keep each section together where possible. */
+  #brief-print > div > div {
+    break-inside: avoid;
+  }
+  footer {
+    display: none !important;
+  }
+}

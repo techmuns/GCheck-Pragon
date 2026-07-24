@@ -56,8 +56,9 @@ async function enhanceRedFlagSummary(
     "1. Every finding must cite one [ref] number from the evidence. Never cite a ref that is not listed. Never invent facts.",
     "2. Severity: 'red' = serious governance risk (fraud, wilful default, criminal/CBI/EOW, suit-filed defaulter); 'amber' = review-worthy (litigation, adverse press, keyword hits); 'clear' = verified clean; 'info' = context.",
     "3. Lead with the sharpest risks. One tight sentence per finding — a partner reads this in under a minute.",
-    "4. If the evidence shows no genuine red or amber risk, return a single 'clear' finding saying so.",
-    "5. Also return a one-line headline summarising the overall picture for this subject.",
+    "4. Write in PLAIN ENGLISH a busy, non-lawyer partner understands instantly. No legalese, no jargon, no long clauses. Say what happened and why it matters.",
+    "5. If the evidence shows no genuine red or amber risk, return a single 'clear' finding saying so.",
+    "6. Also return a one-line headline in plain English summarising the overall picture for this subject.",
   ].join("\n");
 
   const user = [
