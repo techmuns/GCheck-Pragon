@@ -6,7 +6,8 @@ services:
     name: paragon
     runtime: docker
     dockerfilePath: ./Dockerfile
-    plan: starter        # needs a real instance (Playwright) — not a static site
+    plan: free           # free tier — fine for Google + Indian Kanoon + OpenAI
+                         # (PrivateCircle/CIBIL Playwright need a paid instance later)
     healthCheckPath: /
     autoDeploy: true
     envVars:
