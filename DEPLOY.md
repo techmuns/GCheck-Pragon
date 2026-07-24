@@ -12,7 +12,41 @@ host. Three hard requirements:
 - **Long-running background jobs** — the research workflow runs after the
   request returns
 
-Deploy it as a **container** (recommended) or on a **Node VM**.
+Deploy it as a **container**, on a **Node VM**, or **hybrid** (static UI on
+Cloudflare Pages + backend on a Node host).
+
+---
+
+## Hybrid — Cloudflare Pages (UI) + Node backend
+
+Use this to serve the UI from Cloudflare while the engine runs on a real Node
+host. Two deploys from this one repo.
+
+### 1. Backend (the engine) — Render / Railway / Fly / container
+
+Deploy the app normally (Option A or B below). Note its public URL, e.g.
+`https://paragon-api.onrender.com`. Set `CORS_ALLOW_ORIGIN` to your Pages URL
+(or leave `*`).
+
+### 2. Frontend (static UI) — Cloudflare Pages
+
+In the Cloudflare Pages project settings:
+
+| Setting | Value |
+|---|---|
+| Build command | `npm run build:static` |
+| Build output directory | `out` |
+| Environment variable | `NEXT_PUBLIC_API_BASE` = your backend URL |
+
+`build:static` produces a static export of the UI (API routes are excluded —
+they live on the backend) with the backend URL baked in. The **build command is
+the piece Cloudflare was missing** — that's why the earlier deploy showed raw
+files.
+
+> The browser collectors (PrivateCircle / CIBIL) run on the **backend**, not on
+> Cloudflare — this split keeps them working.
+
+---
 
 ## Option A — Container (recommended)
 
@@ -55,6 +89,8 @@ All optional — every source degrades honestly if its key/login is absent.
 | `INDIANKANOON_API_TOKEN` | official Indian Kanoon API (public search otherwise) |
 | `PRIVATECIRCLE_EMAIL` / `PRIVATECIRCLE_PASSWORD` | PrivateCircle collector |
 | `CIBIL_USERNAME` / `CIBIL_PASSWORD` | CIBIL collector |
+| `NEXT_PUBLIC_API_BASE` | hybrid frontend → backend URL (build-time) |
+| `CORS_ALLOW_ORIGIN` | backend: restrict to your Pages origin (default `*`) |
 
 ## Note on persistence
 

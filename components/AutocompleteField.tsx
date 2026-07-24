@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { apiUrl } from "@/lib/api";
 
 interface Props {
   kind: "company" | "promoter";
@@ -37,7 +38,7 @@ export default function AutocompleteField({
     let cancelled = false;
     const t = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/autocomplete?kind=${kind}&q=${encodeURIComponent(q)}`);
+        const res = await fetch(apiUrl(`/api/autocomplete?kind=${kind}&q=${encodeURIComponent(q)}`));
         const data = await res.json();
         if (!cancelled) {
           setSuggestions(data.suggestions ?? []);

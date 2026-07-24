@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import Toggle from "@/components/Toggle";
+import { apiUrl } from "@/lib/api";
 import type { AppConfig, BriefSection, Keyword, Source } from "@/lib/types";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -14,7 +15,7 @@ export default function AdminPage() {
   const [newKeyword, setNewKeyword] = useState("");
 
   useEffect(() => {
-    fetch("/api/config")
+    fetch(apiUrl("/api/config"))
       .then((r) => r.json())
       .then(setConfig)
       .catch(() => setLoadError("Could not load config."));
@@ -77,7 +78,7 @@ export default function AdminPage() {
     if (!config) return;
     setSave("saving");
     try {
-      const res = await fetch("/api/config", {
+      const res = await fetch(apiUrl("/api/config"), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(config),
@@ -94,7 +95,7 @@ export default function AdminPage() {
     if (!confirm("Reset sources, keywords, sections and the prompt to defaults?")) return;
     setSave("saving");
     try {
-      const res = await fetch("/api/config?reset=1", { method: "POST" });
+      const res = await fetch(apiUrl("/api/config?reset=1"), { method: "POST" });
       setConfig(await res.json());
       setSave("saved");
     } catch {

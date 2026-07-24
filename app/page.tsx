@@ -5,6 +5,7 @@ import Link from "next/link";
 import SearchForm from "@/components/SearchForm";
 import ResearchProgress from "@/components/ResearchProgress";
 import BriefView from "@/components/BriefView";
+import { apiUrl } from "@/lib/api";
 import type { Run } from "@/lib/types";
 
 type Phase = "idle" | "running" | "done" | "error";
@@ -29,7 +30,7 @@ export default function Home() {
       setError(null);
       setPhase("running");
       try {
-        const res = await fetch("/api/research", {
+        const res = await fetch(apiUrl("/api/research"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ company, promoters }),
@@ -40,7 +41,7 @@ export default function Home() {
         // Poll the run until it completes.
         stopPolling();
         pollRef.current = setInterval(async () => {
-          const r = await fetch(`/api/research/${id}`);
+          const r = await fetch(apiUrl(`/api/research/${id}`));
           if (!r.ok) return;
           const data: Run = await r.json();
           setRun(data);
