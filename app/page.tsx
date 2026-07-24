@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import SearchForm from "@/components/SearchForm";
 import ResearchProgress from "@/components/ResearchProgress";
 import BriefView from "@/components/BriefView";
@@ -94,7 +95,13 @@ export default function Home() {
         </div>
       )}
 
-      <footer className="mt-10 text-[11px] text-ink-secondary/60">Paragon Partners · Governance Pre-Screen</footer>
+      <footer className="mt-10 flex items-center gap-2 text-[11px] text-ink-secondary/60">
+        <span>Paragon Partners · Governance Pre-Screen</span>
+        <span aria-hidden>·</span>
+        <Link href="/admin" className="text-navy-primary/60 transition hover:text-navy-primary">
+          Admin
+        </Link>
+      </footer>
     </main>
   );
 }

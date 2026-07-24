@@ -27,7 +27,7 @@ Sources, keywords, prompts, and brief sections are all editable in an admin pane
 | **1 — Foundation & Input** | Next.js + Paragon design system, autocomplete input, progress + brief shell, config/run data layer, mocked workflow | ✅ done |
 | **2 — Retrieval engine** | Real collectors: Google + Indian Kanoon (keyless out of the box, API-key upgrade), PrivateCircle + CIBIL via Playwright; query generation; honest assembler | ✅ done |
 | **3 — Aggregation & AI** | Extract/normalise/dedupe evidence + OpenAI-synthesised brief with validated citations; rules-based fallback | ✅ done |
-| **4 — Admin panel** | Edit sources, keywords, prompts, section templates | pending |
+| **4 — Admin panel** | Edit sources, keywords, sections & the synthesis prompt; persisted to config, live into the next run | ✅ done |
 
 ## Credentials
 
@@ -55,9 +55,11 @@ npm run dev      # http://localhost:3000
 ```
 app/
   page.tsx                 # input → progress → brief state machine
+  admin/                   # config editor — sources, keywords, sections, prompt
   api/research/            # trigger + poll a research run
   api/autocomplete/        # company / promoter suggestions
-components/                 # SearchForm, AutocompleteField, ResearchProgress, BriefView
+  api/config/              # read / persist / reset the editable config
+components/                 # SearchForm, AutocompleteField, ResearchProgress, BriefView, Toggle
 lib/
   types.ts                 # shared domain types
   config.ts                # seed sources / keywords / sections (from the client checklist)
