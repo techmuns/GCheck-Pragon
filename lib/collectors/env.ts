@@ -4,8 +4,14 @@
 // the collector reports that honestly.
 
 export const env = {
-  // Google — Programmable Search (key + cx) OR SerpAPI. Either enables the
-  // richer mode; without them the collector uses a keyless fallback engine.
+  // Google / web search backends, in priority order:
+  //   1. Munshot web-search (Brave) — MUNSHOT_TOKEN
+  //   2. SerpAPI — SERPAPI_KEY
+  //   3. Google Programmable Search — GOOGLE_API_KEY + GOOGLE_CX
+  //   4. keyless fallback (works locally, blocked from most servers)
+  munshotToken: process.env.MUNSHOT_TOKEN,
+  munshotSearchUrl: process.env.MUNSHOT_SEARCH_URL || "https://fastapi.muns.io/tools/web-search",
+  munshotCountry: process.env.MUNSHOT_COUNTRY || "IN",
   googleApiKey: process.env.GOOGLE_API_KEY,
   googleCx: process.env.GOOGLE_CX,
   serpApiKey: process.env.SERPAPI_KEY,

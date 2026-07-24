@@ -21,11 +21,21 @@ interface WebResult {
 
 const MAX_PER_ENTITY = 8;
 
-function backendName(): "serpapi" | "programmable" | "fallback" {
+type Backend = "munshot" | "serpapi" | "programmable" | "fallback";
+
+function backendName(): Backend {
+  if (env.munshotToken) return "munshot";
   if (env.serpApiKey) return "serpapi";
   if (env.googleApiKey && env.googleCx) return "programmable";
   return "fallback";
 }
+
+const BACKEND_NOTE: Record<Backend, string | undefined> = {
+  munshot: undefined,
+  serpapi: undefined,
+  programmable: undefined,
+  fallback: "Keyless fallback engine (blocked from most servers — set MUNSHOT_TOKEN, SERPAPI_KEY, or GOOGLE_API_KEY).",
+};
 
 export const googleCollector: Collector = async ({ subject, keywords }) => {
   const base: Omit<CollectorResult, "status" | "hits"> = {
@@ -76,7 +86,7 @@ export const googleCollector: Collector = async ({ subject, keywords }) => {
   return {
     ...base,
     status: "done",
-    note: backend === "fallback" ? "Keyless fallback engine (add SERPAPI_KEY or GOOGLE_API_KEY for richer results)." : undefined,
+    note: BACKEND_NOTE[backend],
     hits,
     queries: ranQueries,
   };
@@ -96,8 +106,10 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-async function runBackend(backend: ReturnType<typeof backendName>, query: string): Promise<WebResult[]> {
+async function runBackend(backend: Backend, query: string): Promise<WebResult[]> {
   switch (backend) {
+    case "munshot":
+      return searchMunshot(query);
     case "serpapi":
       return searchSerpApi(query);
     case "programmable":
@@ -105,6 +117,57 @@ async function runBackend(backend: ReturnType<typeof backendName>, query: string
     default:
       return searchDuckDuckGo(query);
   }
+}
+
+// Munshot web-search (Brave-powered). POST { query, country } with a bearer
+// token. Parses the common result shapes defensively.
+async function searchMunshot(query: string): Promise<WebResult[]> {
+  const res = await fetchWithTimeout(env.munshotSearchUrl, {
+    method: "POST",
+    timeoutMs: 15000,
+    headers: {
+      "Content-Type": "application/json",
+      accept: "application/json",
+      Authorization: `Bearer ${env.munshotToken}`,
+    },
+    body: JSON.stringify({ query, country: env.munshotCountry }),
+  });
+  if (!res.ok) throw new Error(`Munshot search ${res.status}`);
+  const data = await res.json();
+  return parseMunshot(data);
+}
+
+// Handle the likely response shapes: Brave-native ({web:{results:[]}}),
+// a flat {results:[]}, a bare array, or a {data:...} wrapper of any of these.
+function parseMunshot(data: unknown): WebResult[] {
+  const rows = extractRows(data);
+  return rows
+    .map((r) => {
+      const o = r as Record<string, unknown>;
+      const title = String(o.title ?? o.name ?? "").trim();
+      const url = o.url ?? o.link ?? o.href;
+      const snippet = o.description ?? o.snippet ?? o.text ?? o.desc;
+      return {
+        title,
+        url: url ? String(url) : undefined,
+        snippet: snippet ? stripHtml(String(snippet)) : undefined,
+      };
+    })
+    .filter((r) => r.title.length > 0 || r.url);
+}
+
+function extractRows(data: unknown): unknown[] {
+  if (Array.isArray(data)) return data;
+  if (data && typeof data === "object") {
+    const o = data as Record<string, unknown>;
+    // Unwrap a { data: ... } envelope first.
+    if (o.data !== undefined) return extractRows(o.data);
+    const web = o.web as Record<string, unknown> | undefined;
+    if (web && Array.isArray(web.results)) return web.results;
+    if (Array.isArray(o.results)) return o.results;
+    if (Array.isArray(o.web_results)) return o.web_results;
+  }
+  return [];
 }
 
 async function searchSerpApi(query: string): Promise<WebResult[]> {
