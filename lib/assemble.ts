@@ -135,9 +135,10 @@ function redFlagSection(title: string, ctx: Ctx): RenderedSection {
     findings.push({ severity: "amber", text: `${ik.hits.length} litigation record(s) surfaced on Indian Kanoon.` });
   }
 
-  // Honest notes for sources that didn't return data — skips and errors alike.
+  // Honest notes for sources that didn't return data.
   for (const c of Object.values(ctx.byId)) {
-    if (c?.status === "skipped") findings.push({ severity: "info", text: `${c.sourceName}: ${c.note ?? "not run"}.` });
+    if (c?.status === "locked") findings.push({ severity: "info", text: `${c.sourceName}: 🔒 Upgrade to enable — ${c.note ?? "paid source"}.` });
+    else if (c?.status === "skipped") findings.push({ severity: "info", text: `${c.sourceName}: ${c.note ?? "not run"}.` });
     else if (c?.status === "error") findings.push({ severity: "info", text: `${c.sourceName}: unavailable — ${c.note ?? "error"}.` });
   }
 
@@ -169,6 +170,7 @@ function managementSection(id: string, title: string, ctx: Ctx): RenderedSection
 function sourceSection(id: string, title: string, sourceId: string, ctx: Ctx, hitSeverity: Severity): RenderedSection {
   const c = ctx.byId[sourceId];
   if (!c) return { id, title, findings: [], empty: true };
+  if (c.status === "locked") return { id, title, findings: [{ severity: "info", text: `🔒 Upgrade to enable — ${c.note ?? "paid source"}` }] };
   if (c.status === "skipped") return { id, title, findings: [{ severity: "info", text: c.note ?? "Source not run." }] };
   if (c.status === "error") return { id, title, findings: [{ severity: "info", text: `Source unavailable — ${c.note ?? "unknown error"}` }] };
   if (c.hits.length === 0) {
@@ -188,6 +190,7 @@ function sourceSection(id: string, title: string, sourceId: string, ctx: Ctx, hi
 function defaulterSection(id: string, title: string, ctx: Ctx): RenderedSection {
   const c = ctx.byId["cibil"];
   if (!c) return { id, title, findings: [], empty: true };
+  if (c.status === "locked") return { id, title, findings: [{ severity: "info", text: `🔒 Upgrade to enable — ${c.note ?? "paid source"}` }] };
   if (c.status === "skipped") return { id, title, findings: [{ severity: "info", text: c.note ?? "Not run." }] };
   if (c.status === "error") return { id, title, findings: [{ severity: "info", text: `Source unavailable — ${c.note ?? "unknown error"}` }] };
   if (c.hits.length === 0) {
@@ -207,6 +210,7 @@ function defaulterSection(id: string, title: string, ctx: Ctx): RenderedSection 
 function pressSection(id: string, title: string, ctx: Ctx): RenderedSection {
   const c = ctx.byId["google"];
   if (!c) return { id, title, findings: [], empty: true };
+  if (c.status === "locked") return { id, title, findings: [{ severity: "info", text: `🔒 Upgrade to enable — ${c.note ?? "paid source"}` }] };
   if (c.status === "skipped") return { id, title, findings: [{ severity: "info", text: c.note ?? "Not run." }] };
   if (c.status === "error") return { id, title, findings: [{ severity: "info", text: `Source unavailable — ${c.note ?? "unknown error"}` }] };
   const hits = c.hits.slice(0, 6);

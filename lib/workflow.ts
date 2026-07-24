@@ -26,6 +26,12 @@ export async function runWorkflow(runId: string): Promise<void> {
   // Run each collector concurrently, updating its progress line as it resolves.
   const results = await Promise.all(
     enabledSources.map(async (source): Promise<CollectorResult> => {
+      // Locked (paid) sources are shown as "Upgrade required", never run.
+      if (source.locked) {
+        const note = source.lockReason ?? "Upgrade required.";
+        setProgress(runId, source.id, { status: "locked", note });
+        return { sourceId: source.id, sourceName: source.name, kind: source.kind, status: "locked", note, hits: [] };
+      }
       setProgress(runId, source.id, { status: "running" });
       const collector = collectors[source.id];
       if (!collector) {

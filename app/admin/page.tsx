@@ -31,6 +31,10 @@ export default function AdminPage() {
     if (!config) return;
     patch({ sources: config.sources.map((s) => (s.id === id ? { ...s, enabled } : s)) });
   }
+  function toggleLock(id: string, locked: boolean) {
+    if (!config) return;
+    patch({ sources: config.sources.map((s) => (s.id === id ? { ...s, locked } : s)) });
+  }
 
   // ── Keywords ─────────────────────────────────────────────────────────────
   function toggleKeyword(id: string, enabled: boolean) {
@@ -124,18 +128,35 @@ export default function AdminPage() {
 
       <div className="space-y-4">
         {/* Sources */}
-        <Card title="Sources" note="Turn a source on or off for the workflow.">
+        <Card title="Sources" note="Turn a source on or off. Locked sources show “Upgrade” and don’t run until you add the paid piece.">
           <ul className="space-y-2.5">
             {config.sources.map((s: Source) => (
               <li key={s.id} className="surface-soft flex items-start justify-between gap-3 px-3.5 py-3">
-                <div>
-                  <div className="flex items-center gap-2">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="text-[14px] font-medium text-ink-primary">{s.name}</span>
                     <span className="eyebrow !text-[9px] rounded bg-ice px-1.5 py-0.5">{s.kind === "api" ? "API" : "Browser"}</span>
+                    {s.locked && (
+                      <span className="inline-flex items-center gap-1 rounded-full border border-[rgba(182,139,58,0.4)] bg-gold-soft px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wide text-[#8A5D14]">
+                        🔒 Upgrade
+                      </span>
+                    )}
                   </div>
                   <p className="mt-0.5 text-[12px] leading-snug text-ink-secondary">{s.description}</p>
+                  {s.locked && s.lockReason && (
+                    <p className="mt-1 text-[11px] leading-snug text-[#8A5D14]">{s.lockReason}</p>
+                  )}
                 </div>
-                <Toggle checked={s.enabled} onChange={(v) => toggleSource(s.id, v)} label={s.name} />
+                <div className="flex shrink-0 flex-col items-end gap-1.5">
+                  <Toggle checked={s.enabled} onChange={(v) => toggleSource(s.id, v)} label={s.name} />
+                  <button
+                    type="button"
+                    onClick={() => toggleLock(s.id, !s.locked)}
+                    className="whitespace-nowrap text-[10.5px] font-medium text-navy-primary/60 transition hover:text-navy-primary"
+                  >
+                    {s.locked ? "Unlock" : "Lock"}
+                  </button>
+                </div>
               </li>
             ))}
           </ul>

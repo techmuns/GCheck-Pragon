@@ -48,6 +48,8 @@ function normalise(input: Partial<AppConfig>): AppConfig {
         description: String(s.description ?? ""),
         enabled: Boolean(s.enabled),
         url: s.url ? String(s.url) : undefined,
+        locked: Boolean(s.locked),
+        lockReason: s.lockReason ? String(s.lockReason) : undefined,
       }))
     : base.sources;
 

@@ -13,6 +13,7 @@ const STATUS_LABEL: Record<SourceProgress["status"], string> = {
   done: "Done",
   skipped: "Skipped",
   error: "Error",
+  locked: "Upgrade",
 };
 
 function statusDot(status: SourceProgress["status"]): string {
@@ -23,6 +24,8 @@ function statusDot(status: SourceProgress["status"]): string {
       return "#B7791F";
     case "error":
       return "#C75D54";
+    case "locked":
+      return "#B68B3A";
     default:
       return "#94A3B8";
   }
@@ -41,7 +44,8 @@ export default function ResearchProgress({ subject, progress }: Props) {
       <ul className="mt-5 space-y-2">
         {progress.map((p) => {
           const running = p.status === "running";
-          const showNote = p.note && (p.status === "skipped" || p.status === "error" || (p.status === "done" && p.hits === 0));
+          const locked = p.status === "locked";
+          const showNote = p.note && (locked || p.status === "skipped" || p.status === "error" || (p.status === "done" && p.hits === 0));
           return (
             <li key={p.sourceId} className="surface-soft px-3.5 py-2.5">
               <div className="flex items-center justify-between">
@@ -58,9 +62,15 @@ export default function ResearchProgress({ subject, progress }: Props) {
                     {p.kind === "api" ? "API" : "Browser"}
                   </span>
                 </div>
-                <span className="tabular text-[12.5px] text-ink-secondary">
-                  {p.status === "done" && p.hits !== undefined ? `${p.hits} hits` : STATUS_LABEL[p.status]}
-                </span>
+                {locked ? (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-[rgba(182,139,58,0.4)] bg-gold-soft px-2 py-0.5 text-[11px] font-semibold text-[#8A5D14]">
+                    🔒 Upgrade
+                  </span>
+                ) : (
+                  <span className="tabular text-[12.5px] text-ink-secondary">
+                    {p.status === "done" && p.hits !== undefined ? `${p.hits} hits` : STATUS_LABEL[p.status]}
+                  </span>
+                )}
               </div>
               {showNote && <p className="mt-1.5 pl-[18px] text-[11.5px] leading-snug text-ink-secondary/80">{p.note}</p>}
             </li>

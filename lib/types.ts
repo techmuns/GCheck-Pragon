@@ -16,6 +16,11 @@ export interface Source {
   enabled: boolean;
   /** Optional site the source lives at (for the sources appendix). */
   url?: string;
+  /** Gated behind a paid upgrade (paid server / paid API). Shown as
+   * "Upgrade required" in the UI and skipped by the workflow until unlocked. */
+  locked?: boolean;
+  /** Why it's locked — e.g. "Requires the paid Indian Kanoon API token". */
+  lockReason?: string;
 }
 
 /** A red-flag keyword used to build Google/news queries. Editable by admin. */
@@ -54,10 +59,10 @@ export interface SourceProgress {
   sourceId: string;
   name: string;
   kind: Source["kind"];
-  status: "pending" | "running" | "done" | "skipped" | "error";
+  status: "pending" | "running" | "done" | "skipped" | "error" | "locked";
   /** Count of raw hits returned (Phase 2 fills this in). */
   hits?: number;
-  /** Honest reason a source was skipped or errored (e.g. "credentials not configured"). */
+  /** Honest reason a source was skipped, errored, or is locked. */
   note?: string;
 }
 
@@ -125,7 +130,7 @@ export interface CollectorResult {
   sourceId: string;
   sourceName: string;
   kind: Source["kind"];
-  status: "done" | "skipped" | "error";
+  status: "done" | "skipped" | "error" | "locked";
   /** Honest reason for skip/error — surfaced to the user, never hidden. */
   note?: string;
   hits: RawHit[];
