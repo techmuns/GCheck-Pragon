@@ -79,6 +79,28 @@ export const googleCollector: Collector = async ({ subject, keywords }) => {
     }
   }
 
+  // News pass (Munshot only) — recent press per entity, for the client's
+  // "search for news on the company + promoter, highlight negative press".
+  if (env.munshotToken) {
+    const seen = new Set(hits.map((h) => h.url).filter(Boolean) as string[]);
+    for (let i = 0; i < entities.length; i++) {
+      const e = entities[i];
+      ranQueries.push(`news: ${e.name}`);
+      if (i > 0) await sleep(300);
+      try {
+        const news = await withRetry(() => searchMunshotNews(e.name));
+        for (const r of news.slice(0, MAX_PER_ENTITY)) {
+          if (r.url && seen.has(r.url)) continue;
+          if (r.url) seen.add(r.url);
+          const haystack = `${r.title} ${r.snippet ?? ""}`;
+          hits.push({ title: r.title, url: r.url, snippet: r.snippet, entity: e.name, matchedKeywords: matchKeywords(haystack, kw) });
+        }
+      } catch (err) {
+        anyError = err instanceof Error ? err.message : String(err);
+      }
+    }
+  }
+
   if (hits.length === 0 && anyError) {
     return { ...base, status: "error", note: `Search failed: ${anyError}`, hits: [], queries: ranQueries };
   }
@@ -135,6 +157,22 @@ async function searchMunshot(query: string): Promise<WebResult[]> {
   if (!res.ok) throw new Error(`Munshot search ${res.status}`);
   const data = await res.json();
   return parseMunshot(data);
+}
+
+// Munshot news-search (recent articles). Same auth + body shape as web-search.
+async function searchMunshotNews(query: string): Promise<WebResult[]> {
+  const res = await fetchWithTimeout(env.munshotNewsUrl, {
+    method: "POST",
+    timeoutMs: 15000,
+    headers: {
+      "Content-Type": "application/json",
+      accept: "application/json",
+      Authorization: `Bearer ${env.munshotToken}`,
+    },
+    body: JSON.stringify({ query, country: env.munshotCountry }),
+  });
+  if (!res.ok) throw new Error(`Munshot news ${res.status}`);
+  return parseMunshot(await res.json());
 }
 
 // Handle the likely response shapes: Brave-native ({web:{results:[]}}),

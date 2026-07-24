@@ -11,6 +11,7 @@ export const env = {
   //   4. keyless fallback (works locally, blocked from most servers)
   munshotToken: process.env.MUNSHOT_TOKEN,
   munshotSearchUrl: process.env.MUNSHOT_SEARCH_URL || "https://fastapi.muns.io/tools/web-search",
+  munshotNewsUrl: process.env.MUNSHOT_NEWS_URL || "https://fastapi.muns.io/tools/news-search",
   munshotCountry: process.env.MUNSHOT_COUNTRY || "IN",
   googleApiKey: process.env.GOOGLE_API_KEY,
   googleCx: process.env.GOOGLE_CX,
