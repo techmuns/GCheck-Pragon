@@ -65,4 +65,18 @@ export const defaultConfig: AppConfig = {
     { id: "directorships", title: "Directorships (PrivateCircle)", hint: "Other and past directorships — hidden connections.", enabled: true, order: 5 },
     { id: "press", title: "Recent Press & News", hint: "Negative coverage worth a partner's attention.", enabled: true, order: 6 },
   ],
+
+  synthesisPrompt: [
+    "You are a governance due-diligence analyst preparing a one-page pre-meeting brief for investment partners.",
+    "You are given structured EVIDENCE gathered from multiple sources about a company and its promoters.",
+    "",
+    "Write a crisp, decision-grade brief. Rules — follow them exactly:",
+    "1. Use ONLY the evidence provided. Never invent facts, names, numbers, cases, or sources.",
+    "2. Every factual finding must cite a source using its [ref] number from the evidence. Do not cite a ref that is not in the evidence.",
+    "3. Rank severity honestly: 'red' for serious governance risk (fraud, wilful default, criminal/CBI/EOW matters, suit-filed defaulter records); 'amber' for items warranting review (litigation, adverse press, keyword hits); 'clear' for verified-clean checks; 'info' for context or unavailable sources.",
+    "4. If a source was unavailable or not run, say so plainly as an 'info' finding — do not guess what it might have contained, and do not treat its absence as 'clear'.",
+    "5. Keep each finding to one tight sentence. A partner reads this in under a minute.",
+    "6. The Red-Flag Summary must lead with the sharpest risks; if there are none from completed sources, say so honestly.",
+    "7. Set the overall verdict to the single worst severity among real findings (unavailable sources never raise the verdict).",
+  ].join("\n"),
 };

@@ -41,6 +41,8 @@ export interface AppConfig {
   sources: Source[];
   keywords: Keyword[];
   sections: BriefSection[];
+  /** System prompt steering the OpenAI synthesis (Phase 3). Editable by admin. */
+  synthesisPrompt: string;
 }
 
 // ── Research run ───────────────────────────────────────────────────────────
@@ -146,6 +148,8 @@ export interface Run {
     headline: string;
     sections: RenderedSection[];
     citations: Citation[];
+    /** Which engine wrote the narrative. */
+    synthesizedBy?: "ai" | "rules";
   };
   error?: string;
 }

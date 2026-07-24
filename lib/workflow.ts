@@ -1,6 +1,6 @@
 import { getConfig, updateRun, getRun } from "./store";
 import { collectors, type CollectorContext } from "./collectors";
-import { assembleBrief } from "./assemble";
+import { synthesizeBrief } from "./synthesize";
 import type { CollectorResult, SourceProgress } from "./types";
 
 // ── Research workflow (Phase 2) ────────────────────────────────────────────
@@ -58,9 +58,9 @@ export async function runWorkflow(runId: string): Promise<void> {
 
   updateRun(runId, { collected: results });
 
-  // Assemble the brief from the collected data.
+  // Synthesise the brief (OpenAI when configured, deterministic fallback else).
   try {
-    const brief = assembleBrief(run.subject, results, config);
+    const brief = await synthesizeBrief(run.subject, results, config);
     updateRun(runId, { status: "complete", brief });
   } catch (err) {
     updateRun(runId, { status: "error", error: err instanceof Error ? err.message : "Failed to assemble the brief." });

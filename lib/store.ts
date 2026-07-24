@@ -13,7 +13,14 @@ const CONFIG_PATH = path.join(DATA_DIR, "config.json");
 export async function getConfig(): Promise<AppConfig> {
   try {
     const raw = await fs.readFile(CONFIG_PATH, "utf8");
-    return JSON.parse(raw) as AppConfig;
+    const parsed = JSON.parse(raw) as Partial<AppConfig>;
+    // Backfill any fields a older config file predates (e.g. synthesisPrompt).
+    return {
+      sources: parsed.sources ?? defaultConfig.sources,
+      keywords: parsed.keywords ?? defaultConfig.keywords,
+      sections: parsed.sections ?? defaultConfig.sections,
+      synthesisPrompt: parsed.synthesisPrompt ?? defaultConfig.synthesisPrompt,
+    };
   } catch {
     await saveConfig(defaultConfig);
     return defaultConfig;

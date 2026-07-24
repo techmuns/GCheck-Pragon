@@ -103,7 +103,9 @@ export default function BriefView({ run, onReset }: Props) {
       )}
 
       <p className="mt-4 text-center text-[11px] text-ink-secondary/70">
-        Assembled from live source data. AI narrative synthesis arrives in Phase 3.
+        {brief.synthesizedBy === "ai"
+          ? "Synthesised by AI from live source data — every claim links to a source above."
+          : "Assembled from live source data (rules-based). Set OPENAI_API_KEY for AI narrative synthesis."}
       </p>
     </div>
   );

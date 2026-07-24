@@ -21,7 +21,16 @@ export const env = {
   // CIBIL Suit-filed portal — login for the Playwright collector.
   cibilUsername: process.env.CIBIL_USERNAME,
   cibilPassword: process.env.CIBIL_PASSWORD,
+
+  // OpenAI — narrative synthesis (Phase 3). Without a key, the deterministic
+  // assembler is used instead.
+  openaiApiKey: process.env.OPENAI_API_KEY,
+  openaiModel: process.env.OPENAI_MODEL || "gpt-4o-mini",
 };
+
+export function hasOpenAI(): boolean {
+  return Boolean(env.openaiApiKey);
+}
 
 export function hasPrivateCircleCreds(): boolean {
   return Boolean(env.privateCircleEmail && env.privateCirclePassword);

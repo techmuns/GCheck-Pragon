@@ -26,7 +26,7 @@ Sources, keywords, prompts, and brief sections are all editable in an admin pane
 |-------|-------|--------|
 | **1 — Foundation & Input** | Next.js + Paragon design system, autocomplete input, progress + brief shell, config/run data layer, mocked workflow | ✅ done |
 | **2 — Retrieval engine** | Real collectors: Google + Indian Kanoon (keyless out of the box, API-key upgrade), PrivateCircle + CIBIL via Playwright; query generation; honest assembler | ✅ done |
-| **3 — Aggregation & AI** | Extract/normalise/dedupe + OpenAI-synthesised brief | pending |
+| **3 — Aggregation & AI** | Extract/normalise/dedupe evidence + OpenAI-synthesised brief with validated citations; rules-based fallback | ✅ done |
 | **4 — Admin panel** | Edit sources, keywords, prompts, section templates | pending |
 
 ## Credentials
@@ -63,8 +63,10 @@ lib/
   config.ts                # seed sources / keywords / sections (from the client checklist)
   store.ts                 # file-backed config + in-memory run store
   queries.ts               # generate queries from subject × keywords
-  workflow.ts              # runs every enabled collector, then assembles the brief
-  assemble.ts              # turns raw hits into an honest, source-linked brief
+  workflow.ts              # runs every enabled collector, then synthesises the brief
+  evidence.ts              # extract · normalise · dedupe raw hits -> cited evidence
+  synthesize.ts            # OpenAI narrative synthesis with validated citations
+  assemble.ts              # deterministic fallback brief (no OpenAI key)
   collectors/
     google.ts              # SerpAPI / Programmable Search / keyless fallback
     indiankanoon.ts        # official API / public search
