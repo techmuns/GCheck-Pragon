@@ -31,10 +31,6 @@ export default function AdminPage() {
     if (!config) return;
     patch({ sources: config.sources.map((s) => (s.id === id ? { ...s, enabled } : s)) });
   }
-  function toggleLock(id: string, locked: boolean) {
-    if (!config) return;
-    patch({ sources: config.sources.map((s) => (s.id === id ? { ...s, locked } : s)) });
-  }
 
   // ── Keywords ─────────────────────────────────────────────────────────────
   function toggleKeyword(id: string, enabled: boolean) {
@@ -96,7 +92,7 @@ export default function AdminPage() {
   }
 
   async function resetDefaults() {
-    if (!confirm("Reset sources, keywords, sections and the prompt to defaults?")) return;
+    if (!confirm("Reset everything back to the default settings?")) return;
     setSave("saving");
     try {
       const res = await fetch(apiUrl("/api/config?reset=1"), { method: "POST" });
@@ -115,10 +111,10 @@ export default function AdminPage() {
       {/* Header */}
       <div className="mb-6 flex items-end justify-between">
         <div>
-          <div className="eyebrow mb-1">Admin</div>
-          <h1 className="font-display text-[26px] leading-tight text-navy-deep">Pre-screen configuration</h1>
+          <div className="eyebrow mb-1">Settings</div>
+          <h1 className="font-display text-[26px] leading-tight text-navy-deep">Report settings</h1>
           <p className="mt-1 text-[13px] text-ink-secondary">
-            Edits flow into the next research run. Nothing here is retroactive.
+            Changes apply to your next report.
           </p>
         </div>
         <Link href="/" className="rounded-lg border border-[rgba(23,43,77,0.12)] bg-white/70 px-3.5 py-2 text-[13px] font-medium text-navy-primary transition hover:bg-white">
@@ -127,17 +123,16 @@ export default function AdminPage() {
       </div>
 
       <div className="space-y-4">
-        {/* Sources */}
-        <Card title="Sources" note="Turn a source on or off. Locked sources show “Upgrade” and don’t run until you add the paid piece.">
+        {/* Where we check */}
+        <Card title="Where we check" note="Choose which places we look into for each report.">
           <ul className="space-y-2.5">
             {config.sources.map((s: Source) => (
               <li key={s.id} className="surface-soft flex items-start justify-between gap-3 px-3.5 py-3">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-[14px] font-medium text-ink-primary">{s.name}</span>
-                    <span className="eyebrow !text-[9px] rounded bg-ice px-1.5 py-0.5">{s.kind === "api" ? "API" : "Browser"}</span>
                     {s.locked && (
-                      <span className="inline-flex items-center gap-1 rounded-full border border-[rgba(182,139,58,0.4)] bg-gold-soft px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wide text-[#8A5D14]">
+                      <span className="inline-flex items-center gap-1 rounded-full border border-[rgba(182,139,58,0.4)] bg-gold-soft px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#8A5D14]">
                         🔒 Upgrade
                       </span>
                     )}
@@ -147,23 +142,27 @@ export default function AdminPage() {
                     <p className="mt-1 text-[11px] leading-snug text-[#8A5D14]">{s.lockReason}</p>
                   )}
                 </div>
-                <div className="flex shrink-0 flex-col items-end gap-1.5">
-                  <Toggle checked={s.enabled} onChange={(v) => toggleSource(s.id, v)} label={s.name} />
-                  <button
-                    type="button"
-                    onClick={() => toggleLock(s.id, !s.locked)}
-                    className="whitespace-nowrap text-[10.5px] font-medium text-navy-primary/60 transition hover:text-navy-primary"
-                  >
-                    {s.locked ? "Unlock" : "Lock"}
-                  </button>
+                <div className="flex shrink-0 flex-col items-center gap-1">
+                  {s.locked ? (
+                    <span className="whitespace-nowrap rounded-lg bg-gold-soft px-2.5 py-1 text-[11px] font-semibold text-[#8A5D14]">
+                      Upgrade
+                    </span>
+                  ) : (
+                    <>
+                      <Toggle checked={s.enabled} onChange={(v) => toggleSource(s.id, v)} label={s.name} />
+                      <span className={`text-[10.5px] font-medium ${s.enabled ? "text-signal-positive" : "text-ink-secondary"}`}>
+                        {s.enabled ? "Included" : "Skipped"}
+                      </span>
+                    </>
+                  )}
                 </div>
               </li>
             ))}
           </ul>
         </Card>
 
-        {/* Keywords */}
-        <Card title="Red-flag keywords" note="Paired with each entity to build the Google / news sweep.">
+        {/* Words we watch for */}
+        <Card title="Words we watch for" note="We flag these words in news and search — like “fraud” or “court”. Tap a word to turn it off, or × to remove it.">
           <div className="flex flex-wrap gap-1.5">
             {config.keywords.map((k: Keyword) => (
               <span
@@ -174,7 +173,7 @@ export default function AdminPage() {
                     : "border-soft-border bg-ice text-ink-secondary line-through"
                 }`}
               >
-                <button type="button" onClick={() => toggleKeyword(k.id, !k.enabled)} title={k.enabled ? "Disable" : "Enable"}>
+                <button type="button" onClick={() => toggleKeyword(k.id, !k.enabled)} title={k.enabled ? "Turn off" : "Turn on"}>
                   {k.term}
                 </button>
                 <button type="button" onClick={() => removeKeyword(k.id)} className="text-navy-primary/50 hover:text-coral" aria-label={`Remove ${k.term}`}>
@@ -188,7 +187,7 @@ export default function AdminPage() {
               value={newKeyword}
               onChange={(e) => setNewKeyword(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addKeyword())}
-              placeholder="Add a keyword…"
+              placeholder="Add a word…"
               className="flex-1 rounded-lg border border-[rgba(23,43,77,0.14)] bg-white/90 px-3 py-2 text-[13.5px] outline-none focus:border-navy-primary/40"
             />
             <button type="button" onClick={addKeyword} className="rounded-lg border border-[rgba(23,43,77,0.14)] bg-white px-3.5 py-2 text-[13px] font-medium text-navy-primary hover:bg-ice">
@@ -197,8 +196,8 @@ export default function AdminPage() {
           </div>
         </Card>
 
-        {/* Sections */}
-        <Card title="Brief sections" note="Rename, reorder, or hide the sections of the one-pager.">
+        {/* Report sections */}
+        <Card title="Report sections" note="Rename, reorder, or hide sections of the report.">
           <ul className="space-y-2">
             {config.sections.map((s: BriefSection, i) => (
               <li key={s.id} className="surface-soft flex items-center gap-2 px-3 py-2">
@@ -211,22 +210,33 @@ export default function AdminPage() {
                   onChange={(e) => renameSection(s.id, e.target.value)}
                   className="flex-1 rounded-md border border-transparent bg-transparent px-1.5 py-1 text-[14px] text-ink-primary outline-none focus:border-navy-primary/30 focus:bg-white"
                 />
-                <Toggle checked={s.enabled} onChange={(v) => toggleSection(s.id, v)} label={s.title} />
+                <div className="flex flex-col items-center gap-0.5">
+                  <Toggle checked={s.enabled} onChange={(v) => toggleSection(s.id, v)} label={s.title} />
+                  <span className={`text-[10px] font-medium ${s.enabled ? "text-signal-positive" : "text-ink-secondary"}`}>
+                    {s.enabled ? "Shown" : "Hidden"}
+                  </span>
+                </div>
               </li>
             ))}
           </ul>
         </Card>
 
-        {/* Synthesis prompt */}
-        <Card title="AI synthesis prompt" note="Steers how OpenAI writes the brief. The citation & honesty guardrails always apply.">
+        {/* Advanced — writing style (tucked away so it never confuses a first-time user) */}
+        <details className="card-surface p-5">
+          <summary className="cursor-pointer list-none font-display text-[16px] text-navy-deep">
+            Advanced ▸
+          </summary>
+          <p className="mt-1 text-[12px] text-ink-secondary">
+            How the report is written. Only change this if you know what you’re doing.
+          </p>
           <textarea
             value={config.synthesisPrompt}
             onChange={(e) => patch({ synthesisPrompt: e.target.value })}
-            rows={10}
-            className="w-full rounded-lg border border-[rgba(23,43,77,0.14)] bg-white/90 px-3 py-2.5 font-mono text-[12.5px] leading-relaxed text-ink-primary outline-none focus:border-navy-primary/40"
+            rows={8}
+            className="mt-3 w-full rounded-lg border border-[rgba(23,43,77,0.14)] bg-white/90 px-3 py-2.5 text-[12.5px] leading-relaxed text-ink-primary outline-none focus:border-navy-primary/40"
             spellCheck={false}
           />
-        </Card>
+        </details>
       </div>
 
       {/* Sticky action bar */}

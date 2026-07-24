@@ -100,7 +100,7 @@ export default function Home() {
         <span>Paragon Partners · Governance Pre-Screen</span>
         <span aria-hidden>·</span>
         <Link href="/admin" className="text-navy-primary/60 transition hover:text-navy-primary">
-          Admin
+          Settings
         </Link>
       </footer>
     </main>
