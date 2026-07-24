@@ -1,0 +1,34 @@
+# Render blueprint — one-click deploy of the Paragon research agent.
+# On Render: New + → Blueprint → point at this repo → it reads this file.
+# Builds the included Dockerfile (Playwright + Chromium already inside).
+services:
+  - type: web
+    name: paragon
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter        # needs a real instance (Playwright) — not a static site
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      # Set this in the Render dashboard to enable the AI-written brief.
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+      # Optional richer / more reliable sources — set in the dashboard if you have them.
+      - key: SERPAPI_KEY
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: GOOGLE_CX
+        sync: false
+      - key: INDIANKANOON_API_TOKEN
+        sync: false
+      - key: PRIVATECIRCLE_EMAIL
+        sync: false
+      - key: PRIVATECIRCLE_PASSWORD
+        sync: false
+      - key: CIBIL_USERNAME
+        sync: false
+      - key: CIBIL_PASSWORD
+        sync: false
