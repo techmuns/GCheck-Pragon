@@ -21,8 +21,6 @@ export const defaultConfig: AppConfig = {
       description: "Litigation search for company and promoters. Last 5 cases by relevance — heading + link.",
       enabled: true,
       url: "https://indiankanoon.org",
-      locked: true,
-      lockReason: "Requires the paid Indian Kanoon API token (their public search blocks servers).",
     },
     {
       id: "privatecircle",
