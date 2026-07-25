@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import SearchForm from "@/components/SearchForm";
+import PrepCountdown from "@/components/PrepCountdown";
 import ResearchProgress from "@/components/ResearchProgress";
 import BriefView from "@/components/BriefView";
 import { apiUrl } from "@/lib/api";
@@ -19,9 +20,14 @@ export default function Home() {
   // that walk to finish even if the backend answers first, so the user always
   // sees the full "collecting, one source at a time" sequence.
   const [walked, setWalked] = useState(false);
+  // The counted pre-search countdown runs first, over the request kick-off.
+  const [prepped, setPrepped] = useState(false);
+  // Subject shown during the countdown, before the run object comes back.
+  const [pending, setPending] = useState<Run["subject"] | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const onWalkComplete = useCallback(() => setWalked(true), []);
+  const onPrepped = useCallback(() => setPrepped(true), []);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -36,6 +42,8 @@ export default function Home() {
     async (company: string, promoters: string[], type: "company" | "director" = "company") => {
       setError(null);
       setWalked(false);
+      setPrepped(false);
+      setPending({ type, company, promoters });
       setPhase("running");
       addRecentSearch({ type, company, promoters });
       try {
@@ -76,17 +84,23 @@ export default function Home() {
     setRun(null);
     setError(null);
     setWalked(false);
+    setPrepped(false);
+    setPending(null);
     setPhase("idle");
   }, [stopPolling]);
 
+  // Three staged views, in order: the counted countdown, the source walk, then
+  // the brief. Each waits for the one before it to finish its own beat, so a
+  // fast backend never cuts the sequence short.
+  const busy = phase === "running" || phase === "done";
+  const showPrep = busy && !prepped && (pending !== null || run !== null);
   // Hold on the progress view until BOTH the run is complete and the walk has
-  // visited every source, so the sequence is never cut short by a fast backend.
-  // A run with no sources to walk has nothing to hold for.
+  // visited every source. A run with no sources to walk has nothing to hold for.
   const nothingToWalk = (run?.progress.length ?? 0) === 0;
   const revealed = walked || nothingToWalk;
-  const showProgress = run !== null && (phase === "running" || (phase === "done" && !revealed));
-  const showBrief = phase === "done" && revealed && run?.brief;
-  const centered = phase === "idle" || phase === "error" || (phase === "running" && !run);
+  const showProgress = prepped && run !== null && (phase === "running" || (phase === "done" && !revealed));
+  const showBrief = phase === "done" && prepped && revealed && run?.brief;
+  const centered = phase === "idle" || phase === "error" || showPrep || (phase === "running" && !run);
 
   return (
     <main
@@ -96,10 +110,15 @@ export default function Home() {
     >
       {phase === "idle" && <SearchForm onSubmit={start} />}
 
+      {showPrep && (
+        <PrepCountdown subject={run?.subject ?? pending!} onDone={onPrepped} />
+      )}
+
       {showProgress && run && (
         <ResearchProgress subject={run.subject} progress={run.progress} onWalkComplete={onWalkComplete} />
       )}
-      {phase === "running" && !run && (
+      {/* Countdown done but the run hasn't landed yet — brief, and rare. */}
+      {phase === "running" && prepped && !run && (
         <div className="card-surface fade-in w-full max-w-xl p-7 text-center text-ink-secondary">
           Starting pre-screen…
         </div>
