@@ -87,6 +87,7 @@ All optional — every source degrades honestly if its key/login is absent.
 | `OPENAI_MODEL` | model override (default `gpt-4o-mini`) |
 | `SERPAPI_KEY` **or** `GOOGLE_API_KEY` + `GOOGLE_CX` | richer Google results (keyless fallback otherwise) |
 | `INDIANKANOON_API_TOKEN` | official Indian Kanoon API (public search otherwise) |
+| `MCA_API_TOKEN` / `MCA_API_URL` | MCA registry — directors + financials of unlisted companies (skips otherwise) |
 | `PRIVATECIRCLE_EMAIL` / `PRIVATECIRCLE_PASSWORD` | PrivateCircle collector |
 | `CIBIL_USERNAME` / `CIBIL_PASSWORD` | CIBIL collector |
 | `NEXT_PUBLIC_API_BASE` | hybrid frontend → backend URL (build-time) |

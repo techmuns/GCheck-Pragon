@@ -89,7 +89,7 @@ function buildSection(id: string, title: string, ctx: Ctx): RenderedSection {
     case "red-flags":
       return redFlagSection(title, ctx);
     case "snapshot":
-      return { id, title, findings: [], empty: true }; // needs a company-profile source (future)
+      return snapshotSection(id, title, ctx);
     case "management":
       return managementSection(id, title, ctx);
     case "litigation":
@@ -98,6 +98,8 @@ function buildSection(id: string, title: string, ctx: Ctx): RenderedSection {
       return defaulterSection(id, title, ctx);
     case "directorships":
       return sourceSection(id, title, "privatecircle", ctx, "info");
+    case "filings":
+      return filingsSection(id, title, ctx);
     case "press":
       return pressSection(id, title, ctx);
     default:
@@ -154,15 +156,55 @@ function redFlagSection(title: string, ctx: Ctx): RenderedSection {
   return { id: "red-flags", title, findings };
 }
 
-function managementSection(id: string, title: string, ctx: Ctx): RenderedSection {
-  if (ctx.subject.promoters.length === 0) {
-    return { id, title, findings: [{ severity: "info", text: "No promoters were provided for this pre-screen." }] };
+// Company snapshot — master data + financials from MCA (the official registry,
+// authoritative for unlisted companies). Honest states for locked/skip/error.
+function snapshotSection(id: string, title: string, ctx: Ctx): RenderedSection {
+  const c = ctx.byId["mca"];
+  if (!c) return { id, title, findings: [], empty: true };
+  if (c.status === "locked") return { id, title, findings: [{ severity: "info", text: `🔒 Upgrade to enable — ${c.note ?? "paid source"}` }] };
+  if (c.status === "skipped") return { id, title, findings: [{ severity: "info", text: c.note ?? "MCA not configured." }] };
+  if (c.status === "error") return { id, title, findings: [{ severity: "info", text: `MCA unavailable — ${c.note ?? "unknown error"}` }] };
+
+  // Master data + financials belong in the snapshot; directors surface under Key People.
+  const relevant = c.hits.filter((h) => {
+    const cat = h.extra?.category;
+    return cat === "master" || cat === "financial";
+  });
+  if (relevant.length === 0) {
+    return { id, title, findings: [{ severity: "info", text: c.note ?? "No company master data returned by MCA." }] };
   }
   return {
     id,
     title,
-    findings: ctx.subject.promoters.map((p) => ({ severity: "info" as Severity, text: p })),
+    findings: relevant.map((h) => ({
+      severity: "info" as Severity,
+      text: h.title,
+      sourceRef: ctx.cite(c.sourceName, h.title, h.url),
+    })),
   };
+}
+
+function managementSection(id: string, title: string, ctx: Ctx): RenderedSection {
+  const findings: Finding[] = [];
+
+  // Promoters the user supplied (the meeting subjects).
+  for (const p of ctx.subject.promoters) {
+    findings.push({ severity: "info", text: p });
+  }
+
+  // Registered directors from MCA — the authoritative board of record, cited.
+  const mca = ctx.byId["mca"];
+  if (mca?.status === "done") {
+    const directors = mca.hits.filter((h) => h.extra?.category === "director");
+    for (const d of directors) {
+      findings.push({ severity: "info", text: d.title, sourceRef: ctx.cite(mca.sourceName, d.title, d.url) });
+    }
+  }
+
+  if (findings.length === 0) {
+    return { id, title, findings: [{ severity: "info", text: "No promoters were provided, and no registered directors were returned." }] };
+  }
+  return { id, title, findings };
 }
 
 // Generic per-source section — lists hits, or an honest status line.
@@ -204,6 +246,35 @@ function defaulterSection(id: string, title: string, ctx: Ctx): RenderedSection 
       text: `${h.entity ?? ""} — ${h.title} (${(h.extra?.category as string) ?? "defaulter"})`.trim(),
       sourceRef: ctx.cite(c.sourceName, h.title, h.url),
     })),
+  };
+}
+
+// Exchange filings & disclosures. A filing whose text hits a concern term
+// (resignation, SEBI penalty, auditor qualification, insolvency…) is amber;
+// routine filings are info. Honest states for skip/error/empty.
+function filingsSection(id: string, title: string, ctx: Ctx): RenderedSection {
+  const c = ctx.byId["filings"];
+  if (!c) return { id, title, findings: [], empty: true };
+  if (c.status === "locked") return { id, title, findings: [{ severity: "info", text: `🔒 Upgrade to enable — ${c.note ?? "paid source"}` }] };
+  if (c.status === "skipped") return { id, title, findings: [{ severity: "info", text: c.note ?? "Not run." }] };
+  if (c.status === "error") return { id, title, findings: [{ severity: "info", text: `Source unavailable — ${c.note ?? "unknown error"}` }] };
+  if (c.hits.length === 0) return { id, title, findings: [{ severity: "clear", text: c.note ?? "No filings in the period." }] };
+
+  return {
+    id,
+    title,
+    findings: c.hits.slice(0, 8).map((h) => {
+      const flagged = (h.matchedKeywords?.length ?? 0) > 0;
+      const when = h.date ? ` (${h.date})` : "";
+      const text = flagged
+        ? `${h.title}${when} — flags: ${h.matchedKeywords!.join(", ")}.`
+        : `${h.title}${when}`;
+      return {
+        severity: (flagged ? "amber" : "info") as Severity,
+        text,
+        sourceRef: ctx.cite(c.sourceName, h.title, h.url),
+      };
+    }),
   };
 }
 

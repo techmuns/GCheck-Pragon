@@ -14,17 +14,28 @@ export async function getConfig(): Promise<AppConfig> {
   try {
     const raw = await fs.readFile(CONFIG_PATH, "utf8");
     const parsed = JSON.parse(raw) as Partial<AppConfig>;
-    // Backfill any fields a older config file predates (e.g. synthesisPrompt).
+    // Backfill whole fields an older config file predates (e.g. synthesisPrompt),
+    // and merge in any default sources/sections a saved config doesn't yet have
+    // (e.g. MCA added after a user already persisted their config) — without
+    // discarding the user's existing edits.
     return {
-      sources: parsed.sources ?? defaultConfig.sources,
+      sources: mergeById(parsed.sources, defaultConfig.sources),
       keywords: parsed.keywords ?? defaultConfig.keywords,
-      sections: parsed.sections ?? defaultConfig.sections,
+      sections: mergeById(parsed.sections, defaultConfig.sections),
       synthesisPrompt: parsed.synthesisPrompt ?? defaultConfig.synthesisPrompt,
     };
   } catch {
     await saveConfig(defaultConfig);
     return defaultConfig;
   }
+}
+
+// Keep the saved list (preserving user edits/order) and append any default
+// entries whose id isn't already present.
+function mergeById<T extends { id: string }>(saved: T[] | undefined, defaults: T[]): T[] {
+  if (!saved) return defaults;
+  const have = new Set(saved.map((s) => s.id));
+  return [...saved, ...defaults.filter((d) => !have.has(d.id))];
 }
 
 export async function saveConfig(config: AppConfig): Promise<void> {

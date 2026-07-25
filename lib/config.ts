@@ -23,6 +23,26 @@ export const defaultConfig: AppConfig = {
       url: "https://indiankanoon.org",
     },
     {
+      id: "mca",
+      name: "MCA (Corporate Affairs)",
+      kind: "api",
+      description: "Official company registry — directors and financials, including for unlisted companies.",
+      enabled: true,
+      url: "https://www.mca.gov.in",
+    },
+    {
+      // Listed-company only (keys off a stock ticker), so disabled by default —
+      // this tool targets unlisted-company due diligence. The collector stays
+      // registered and can be re-enabled from the admin panel if a listed
+      // subject ever comes up.
+      id: "filings",
+      name: "Filings & Disclosures",
+      kind: "api",
+      description: "Exchange filings, annual reports, earnings and concalls (BSE/NSE). Listed companies only.",
+      enabled: false,
+      url: "https://www.bseindia.com",
+    },
+    {
       id: "privatecircle",
       name: "Company & Directors",
       kind: "browser",
@@ -67,7 +87,8 @@ export const defaultConfig: AppConfig = {
     { id: "litigation", title: "Court Cases", hint: "Court cases involving the company or its people.", enabled: true, order: 3 },
     { id: "defaulters", title: "Loan Defaults", hint: "Loan-default and defaulter records.", enabled: true, order: 4 },
     { id: "directorships", title: "Company & Directors", hint: "Other and past companies the directors are involved with.", enabled: true, order: 5 },
-    { id: "press", title: "Recent News", hint: "Recent coverage worth attention.", enabled: true, order: 6 },
+    { id: "filings", title: "Filings & Disclosures", hint: "Exchange filings, annual reports and earnings — listed companies only.", enabled: false, order: 6 },
+    { id: "press", title: "Recent News", hint: "Recent coverage worth attention.", enabled: true, order: 7 },
   ],
 
   synthesisPrompt: [

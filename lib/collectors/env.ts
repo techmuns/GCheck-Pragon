@@ -13,6 +13,13 @@ export const env = {
   munshotSearchUrl: process.env.MUNSHOT_SEARCH_URL || "https://fastapi.muns.io/tools/web-search",
   munshotNewsUrl: process.env.MUNSHOT_NEWS_URL || "https://fastapi.muns.io/tools/news-search",
   munshotCountry: process.env.MUNSHOT_COUNTRY || "IN",
+
+  // Exchange filings & announcements (BSE/NSE/DRHP/screener.in). Same Muns
+  // platform as the search backend, so it reuses MUNSHOT_TOKEN unless a
+  // dedicated FILINGS_TOKEN is set. Needs a stock ticker on the subject.
+  filingsUrl: process.env.FILINGS_URL || "https://devde.muns.io/filings/combined_filings_announcements",
+  filingsToken: process.env.FILINGS_TOKEN || process.env.MUNSHOT_TOKEN,
+  filingsCountry: process.env.FILINGS_COUNTRY || "India",
   googleApiKey: process.env.GOOGLE_API_KEY,
   googleCx: process.env.GOOGLE_CX,
   serpApiKey: process.env.SERPAPI_KEY,
@@ -20,6 +27,15 @@ export const env = {
   // Indian Kanoon — optional API token. Without it, the collector uses the
   // public search page.
   indianKanoonToken: process.env.INDIANKANOON_API_TOKEN,
+
+  // MCA (Ministry of Corporate Affairs) — the official Indian company registry,
+  // the authoritative source for directors + financials of unlisted companies.
+  // There is no free/keyless MCA API (financials are paid document access), so
+  // this collector activates only when a data-provider token is configured and
+  // skips honestly otherwise. MCA_API_URL points at the provider endpoint that
+  // takes a company name/CIN and returns master-data + directors + financials.
+  mcaApiToken: process.env.MCA_API_TOKEN,
+  mcaApiUrl: process.env.MCA_API_URL || "https://api.mca.gov.in/company",
 
   // PrivateCircle — login for the Playwright collector.
   privateCircleEmail: process.env.PRIVATECIRCLE_EMAIL,
@@ -45,4 +61,12 @@ export function hasPrivateCircleCreds(): boolean {
 
 export function hasCibilCreds(): boolean {
   return Boolean(env.cibilUsername && env.cibilPassword);
+}
+
+export function hasMca(): boolean {
+  return Boolean(env.mcaApiToken);
+}
+
+export function hasFilings(): boolean {
+  return Boolean(env.filingsToken);
 }
