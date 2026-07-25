@@ -69,12 +69,15 @@ export default function BriefView({ run, onReset }: Props) {
           }}
         >
           <div className="eyebrow mb-2">The verdict</div>
-          <RiskMeter verdict={brief.verdict} />
+          {/* Decorative meter — the printed report leads with the headline text instead. */}
+          <div className="no-print">
+            <RiskMeter verdict={brief.verdict} />
+          </div>
           <p className="mt-3 font-editorial text-[19px] leading-snug text-navy-deep">{brief.headline}</p>
         </div>
 
-        {/* At-a-glance visuals */}
-        <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-5">
+        {/* At-a-glance visuals — screen only; the print report stays text-simple. */}
+        <div className="no-print mb-3 grid grid-cols-1 gap-3 sm:grid-cols-5">
           <div className="card-surface p-4 sm:col-span-2">
             <div className="eyebrow mb-2">What we found</div>
             {counts.red + counts.amber + counts.clear > 0 ? (
@@ -90,8 +93,8 @@ export default function BriefView({ run, onReset }: Props) {
           </div>
         </div>
 
-        {/* Source coverage */}
-        <div className="card-surface mb-4 p-4">
+        {/* Source coverage — screen only; sources are listed in the print appendix. */}
+        <div className="no-print card-surface mb-4 p-4">
           <div className="eyebrow mb-2">Sources checked{sourcesLocked ? ` · ${sourcesLocked} need upgrade` : ""}</div>
           <SourceCoverage progress={run.progress} />
         </div>
