@@ -217,9 +217,13 @@ body {
 }
 
 /* ── Print / Download-to-PDF ────────────────────────────────────────────── */
+/* The brief is meant to be a ONE-PAGE partner brief. Print keeps the dense
+   multi-column layout (not a stacked single column, which overflows to 2-3
+   pages) and tightens type + spacing so the whole thing lands on one A4 page. */
 @media print {
   @page {
-    margin: 14mm;
+    size: A4 portrait;
+    margin: 8mm;
   }
   body {
     background: #ffffff !important;
@@ -233,27 +237,62 @@ body {
     padding: 0 !important;
     min-height: 0 !important;
   }
-  /* The brief fills the page cleanly. */
+  /* The brief fills the page; avoid forced page breaks inside it. */
   #brief-print {
     max-width: 100% !important;
+    break-inside: avoid;
   }
-  /* Single column in print for readable PDF pages. */
+  /* Keep the two-column section grid — it's what fits everything on one page.
+     Responsive breakpoints (lg:/sm:) don't fire in print, so force the column
+     counts explicitly. */
   #brief-print .grid {
-    display: block !important;
+    display: grid !important;
   }
-  #brief-print .grid > * {
-    margin-bottom: 12px;
+  /* Section grid → two columns; the summary keeps its full-width col-span-2. */
+  #brief-print .lg\:grid-cols-2 {
+    grid-template-columns: 1fr 1fr !important;
   }
+  #brief-print .lg\:col-span-2 {
+    grid-column: span 2 / span 2 !important;
+  }
+  /* The at-a-glance visuals row → its 5-col layout. */
+  #brief-print .sm\:grid-cols-5 {
+    grid-template-columns: repeat(5, 1fr) !important;
+  }
+  #brief-print .sm\:col-span-2 { grid-column: span 2 / span 2 !important; }
+  #brief-print .sm\:col-span-3 { grid-column: span 3 / span 3 !important; }
   .card-surface,
   .surface-soft {
     box-shadow: none !important;
     break-inside: avoid;
   }
-  /* Keep each section together where possible. */
   #brief-print > div > div {
     break-inside: avoid;
   }
   footer {
     display: none !important;
   }
+
+  /* ── Compress to fit a single page ─────────────────────────────────────
+     Trim the generous on-screen spacing and step type down a notch. Tuned so
+     a typical brief (verdict + visuals + all sections + sources) fits A4. */
+  #brief-print { font-size: 11px; line-height: 1.35; }
+  #brief-print .mb-4 { margin-bottom: 8px !important; }
+  #brief-print .mb-3 { margin-bottom: 6px !important; }
+  #brief-print .mt-4 { margin-top: 8px !important; }
+  #brief-print .gap-3 { gap: 6px !important; }
+  #brief-print .gap-2 { gap: 4px !important; }
+  #brief-print .space-y-2 > * + * { margin-top: 3px !important; }
+  /* Cards and hero: less padding. */
+  #brief-print .p-5 { padding: 10px !important; }
+  #brief-print .p-4 { padding: 8px !important; }
+  /* Type scale-down for headings and finding text. */
+  #brief-print h2 { font-size: 19px !important; line-height: 1.15 !important; }
+  #brief-print h3 { font-size: 12.5px !important; }
+  #brief-print .font-editorial { font-size: 14px !important; line-height: 1.3 !important; }
+  #brief-print li .text-\[14px\],
+  #brief-print .text-\[14px\] { font-size: 11px !important; line-height: 1.35 !important; }
+  #brief-print .text-\[13px\] { font-size: 10.5px !important; }
+  /* The verdict risk-meter block can be a touch smaller. */
+  #brief-print .rounded-xl2 { padding: 10px !important; }
 }
