@@ -1,5 +1,5 @@
 import type { CollectorResult, RawHit } from "../types";
-import { entitiesOf, matchKeywords } from "../queries";
+import { entitiesOf, matchKeywords, entityMentioned } from "../queries";
 import { env } from "./env";
 import { fetchWithTimeout, stripHtml, type Collector } from "./types";
 
@@ -54,6 +54,10 @@ export const googleCollector: Collector = async ({ subject, keywords }) => {
   const hits: RawHit[] = [];
   const ranQueries: string[] = [];
   let anyError: string | undefined;
+  // Results the engine returned that don't actually name the searched entity
+  // (e.g. sibling brands like Reliance Digital vs Reliance Power) — dropped so
+  // findings aren't misattributed. Counted for an honest note.
+  let offTarget = 0;
 
   for (let i = 0; i < entities.length; i++) {
     const e = entities[i];
@@ -66,6 +70,12 @@ export const googleCollector: Collector = async ({ subject, keywords }) => {
       const results = await withRetry(() => runBackend(backend, query));
       for (const r of results.slice(0, MAX_PER_ENTITY)) {
         const haystack = `${r.title} ${r.snippet ?? ""}`;
+        // Only keep a hit that genuinely names this entity — guards against
+        // brand-family bleed (Reliance Power ≠ Reliance Digital).
+        if (!entityMentioned(haystack, e.name)) {
+          offTarget += 1;
+          continue;
+        }
         hits.push({
           title: r.title,
           url: r.url,
@@ -91,8 +101,12 @@ export const googleCollector: Collector = async ({ subject, keywords }) => {
         const news = await withRetry(() => searchMunshotNews(e.name));
         for (const r of news.slice(0, MAX_PER_ENTITY)) {
           if (r.url && seen.has(r.url)) continue;
-          if (r.url) seen.add(r.url);
           const haystack = `${r.title} ${r.snippet ?? ""}`;
+          if (!entityMentioned(haystack, e.name)) {
+            offTarget += 1;
+            continue;
+          }
+          if (r.url) seen.add(r.url);
           hits.push({ title: r.title, url: r.url, snippet: r.snippet, entity: e.name, matchedKeywords: matchKeywords(haystack, kw) });
         }
       } catch (err) {
@@ -105,10 +119,16 @@ export const googleCollector: Collector = async ({ subject, keywords }) => {
     return { ...base, status: "error", note: `Search failed: ${anyError}`, hits: [], queries: ranQueries };
   }
 
+  const filterNote =
+    offTarget > 0
+      ? `Filtered ${offTarget} result(s) that named a different entity (e.g. a sibling brand).`
+      : undefined;
+  const note = [BACKEND_NOTE[backend], filterNote].filter(Boolean).join(" ") || undefined;
+
   return {
     ...base,
     status: "done",
-    note: BACKEND_NOTE[backend],
+    note,
     hits,
     queries: ranQueries,
   };

@@ -1,5 +1,5 @@
 import type { CollectorResult, RawHit } from "../types";
-import { entitiesOf } from "../queries";
+import { entitiesOf, entityMentioned } from "../queries";
 import { env } from "./env";
 import { fetchWithTimeout, stripHtml, type Collector } from "./types";
 
@@ -31,13 +31,21 @@ export const indianKanoonCollector: Collector = async ({ subject }) => {
   const hits: RawHit[] = [];
   const ranQueries: string[] = [];
   let anyError: string | undefined;
+  let offTarget = 0;
 
   for (const e of entities) {
     ranQueries.push(e.name);
     try {
       const cases =
         mode === "munshot" ? await searchViaMunshot(e.name) : mode === "api" ? await searchApi(e.name) : await searchPublic(e.name);
-      for (const c of cases.slice(0, MAX_CASES)) {
+      // Only keep cases whose title actually names this party — a relevance
+      // search returns neighbouring parties (sibling brands) too.
+      const relevant = cases.filter((c) => {
+        if (entityMentioned(c.title, e.name)) return true;
+        offTarget += 1;
+        return false;
+      });
+      for (const c of relevant.slice(0, MAX_CASES)) {
         hits.push({ title: c.title, url: c.url, entity: e.name, extra: { court: c.court } });
       }
     } catch (err) {
@@ -49,15 +57,18 @@ export const indianKanoonCollector: Collector = async ({ subject }) => {
     return { ...base, status: "error", note: `Search failed: ${anyError}`, hits: [], queries: ranQueries };
   }
 
+  const modeNote =
+    mode === "munshot"
+      ? "via Munshot web search (site:indiankanoon.org)"
+      : mode === "public"
+        ? "Public search (add INDIANKANOON_API_TOKEN or MUNSHOT_TOKEN for reliable results)."
+        : undefined;
+  const filterNote = offTarget > 0 ? `Filtered ${offTarget} case(s) naming a different party.` : undefined;
+
   return {
     ...base,
     status: "done",
-    note:
-      mode === "munshot"
-        ? "via Munshot web search (site:indiankanoon.org)"
-        : mode === "public"
-          ? "Public search (add INDIANKANOON_API_TOKEN or MUNSHOT_TOKEN for reliable results)."
-          : undefined,
+    note: [modeNote, filterNote].filter(Boolean).join(" ") || undefined,
     hits,
     queries: ranQueries,
   };
