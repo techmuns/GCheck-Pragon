@@ -97,7 +97,7 @@ function buildSection(id: string, title: string, ctx: Ctx): RenderedSection {
     case "defaulters":
       return defaulterSection(id, title, ctx);
     case "directorships":
-      return sourceSection(id, title, "privatecircle", ctx, "info");
+      return directorshipsSection(id, title, ctx);
     case "filings":
       return filingsSection(id, title, ctx);
     case "press":
@@ -201,8 +201,25 @@ function managementSection(id: string, title: string, ctx: Ctx): RenderedSection
     }
   }
 
+  // Leadership from Wikidata (free) — CEO / chairperson / founders. In company
+  // mode these are the people to know; in director mode the collector returns
+  // the companies the person leads, which belong under Company & Directors, so
+  // only fold Wikidata in here for a company subject.
+  const wikidata = ctx.byId["wikidata"];
+  if (wikidata?.status === "done" && ctx.subject.type !== "director") {
+    for (const h of wikidata.hits) {
+      findings.push({ severity: "info", text: h.title, sourceRef: ctx.cite(wikidata.sourceName, h.title, h.url) });
+    }
+  }
+
   if (findings.length === 0) {
-    return { id, title, findings: [{ severity: "info", text: "No promoters were provided, and no registered directors were returned." }] };
+    // Honest, and points at the two director sources when neither returned data.
+    const wd = wikidata?.status === "done" ? " Wikidata had no leadership on record" : "";
+    return {
+      id,
+      title,
+      findings: [{ severity: "info", text: `No registered directors were returned${wd}.`.replace(/\s+\./, ".") }],
+    };
   }
   return { id, title, findings };
 }
@@ -227,6 +244,40 @@ function sourceSection(id: string, title: string, sourceId: string, ctx: Ctx, hi
       sourceRef: ctx.cite(c.sourceName, h.title, h.url),
     })),
   };
+}
+
+// Other / past companies the directors are involved with. PrivateCircle (paid,
+// registry-grade) is the primary source; Wikidata (free) adds the companies a
+// person leads — the main signal in director mode, where there's no company to
+// probe on PrivateCircle. Both are cited; honest states when neither returns.
+function directorshipsSection(id: string, title: string, ctx: Ctx): RenderedSection {
+  const findings: Finding[] = [];
+
+  const wikidata = ctx.byId["wikidata"];
+  if (wikidata?.status === "done") {
+    for (const h of wikidata.hits) {
+      findings.push({ severity: "info", text: h.title, sourceRef: ctx.cite(wikidata.sourceName, h.title, h.url) });
+    }
+  }
+
+  const pc = ctx.byId["privatecircle"];
+  if (pc) {
+    if (pc.status === "locked") {
+      findings.push({ severity: "info", text: `🔒 Upgrade to enable — ${pc.note ?? "paid source"}` });
+    } else if (pc.status === "done") {
+      for (const h of pc.hits.slice(0, 6)) {
+        findings.push({ severity: "info", text: h.title, sourceRef: ctx.cite(pc.sourceName, h.title, h.url) });
+      }
+    } else if (pc.status === "error") {
+      findings.push({ severity: "info", text: `PrivateCircle unavailable — ${pc.note ?? "error"}.` });
+    }
+  }
+
+  if (findings.length === 0) {
+    const wdClear = wikidata?.status === "done" ? "No related directorships found." : "No source returned directorship data.";
+    return { id, title, findings: [{ severity: "clear", text: wdClear }] };
+  }
+  return { id, title, findings };
 }
 
 function defaulterSection(id: string, title: string, ctx: Ctx): RenderedSection {

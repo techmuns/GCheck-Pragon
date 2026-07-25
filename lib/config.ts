@@ -31,6 +31,14 @@ export const defaultConfig: AppConfig = {
       url: "https://www.mca.gov.in",
     },
     {
+      id: "wikidata",
+      name: "Wikidata (Directors)",
+      kind: "api",
+      description: "Free public source for a company's directors, CEO and founders — and the companies a person leads.",
+      enabled: true,
+      url: "https://www.wikidata.org",
+    },
+    {
       // Listed-company only (keys off a stock ticker), so disabled by default —
       // this tool targets unlisted-company due diligence. The collector stays
       // registered and can be re-enabled from the admin panel if a listed

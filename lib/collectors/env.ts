@@ -37,6 +37,15 @@ export const env = {
   mcaApiToken: process.env.MCA_API_TOKEN,
   mcaApiUrl: process.env.MCA_API_URL || "https://api.mca.gov.in/company",
 
+  // Wikidata — free, keyless structured data. Used as a director/leadership
+  // source: board members, CEO, chairperson and founders of a company, and the
+  // reverse (companies a person leads) in director mode. No credential needed;
+  // the endpoints are public. A contact URL is sent in the User-Agent per
+  // Wikimedia's API etiquette. Overridable only for self-hosted mirrors.
+  wikidataApiUrl: process.env.WIKIDATA_API_URL || "https://www.wikidata.org/w/api.php",
+  wikidataSparqlUrl: process.env.WIKIDATA_SPARQL_URL || "https://query.wikidata.org/sparql",
+  wikidataContact: process.env.WIKIDATA_CONTACT || "https://github.com/techmuns/GCheck-Pragon",
+
   // PrivateCircle — login for the Playwright collector.
   privateCircleEmail: process.env.PRIVATECIRCLE_EMAIL,
   privateCirclePassword: process.env.PRIVATECIRCLE_PASSWORD,
