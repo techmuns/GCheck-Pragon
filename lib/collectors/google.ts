@@ -13,7 +13,7 @@ import { fetchWithTimeout, stripHtml, type Collector } from "./types";
 // One combined OR-query per entity keeps request volume bounded; matched
 // keywords are detected per result.
 
-interface WebResult {
+export interface WebResult {
   title: string;
   url?: string;
   snippet?: string;
@@ -21,9 +21,9 @@ interface WebResult {
 
 const MAX_PER_ENTITY = 8;
 
-type Backend = "munshot" | "serpapi" | "programmable" | "fallback";
+export type Backend = "munshot" | "serpapi" | "programmable" | "fallback";
 
-function backendName(): Backend {
+export function backendName(): Backend {
   if (env.munshotToken) return "munshot";
   if (env.serpApiKey) return "serpapi";
   if (env.googleApiKey && env.googleCx) return "programmable";
@@ -148,7 +148,7 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-async function runBackend(backend: Backend, query: string): Promise<WebResult[]> {
+export async function runBackend(backend: Backend, query: string): Promise<WebResult[]> {
   switch (backend) {
     case "munshot":
       return searchMunshot(query);

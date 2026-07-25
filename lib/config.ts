@@ -31,6 +31,14 @@ export const defaultConfig: AppConfig = {
       url: "https://www.mca.gov.in",
     },
     {
+      id: "registry",
+      name: "Company Registry (Tofler)",
+      kind: "api",
+      description: "Free public registry record — directors, designations and DINs, including for unlisted companies.",
+      enabled: true,
+      url: "https://www.tofler.in",
+    },
+    {
       id: "wikidata",
       name: "Wikidata (Directors)",
       kind: "api",

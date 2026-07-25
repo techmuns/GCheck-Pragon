@@ -206,6 +206,16 @@ function managementSection(id: string, title: string, ctx: Ctx): RenderedSection
     }
   }
 
+  // Directors from the free public registry record (republished MCA filings) —
+  // the board of record, including for unlisted companies. Cited to the
+  // aggregator, not claimed as MCA-official.
+  const registry = ctx.byId["registry"];
+  if (registry?.status === "done") {
+    for (const d of registry.hits) {
+      findings.push({ severity: "info", text: d.title, sourceRef: ctx.cite(registry.sourceName, d.title, d.url) });
+    }
+  }
+
   // Leadership from Wikidata (free) — CEO / chairperson / founders. In company
   // mode these are the people to know; in director mode the collector returns
   // the companies the person leads, which belong under Company & Directors, so
