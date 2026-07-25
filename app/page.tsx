@@ -6,6 +6,7 @@ import SearchForm from "@/components/SearchForm";
 import ResearchProgress from "@/components/ResearchProgress";
 import BriefView from "@/components/BriefView";
 import { apiUrl } from "@/lib/api";
+import { addRecentSearch } from "@/lib/history";
 import type { Run } from "@/lib/types";
 
 type Phase = "idle" | "running" | "done" | "error";
@@ -29,6 +30,7 @@ export default function Home() {
     async (company: string, promoters: string[]) => {
       setError(null);
       setPhase("running");
+      addRecentSearch({ company, promoters });
       try {
         const res = await fetch(apiUrl("/api/research"), {
           method: "POST",

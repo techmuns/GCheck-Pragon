@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import AutocompleteField from "./AutocompleteField";
+import { getRecentSearches, type RecentSearch } from "@/lib/history";
 
 interface Props {
   onSubmit: (company: string, promoters: string[]) => void;
@@ -14,6 +15,10 @@ export default function SearchForm({ onSubmit, busy }: Props) {
   const [company, setCompany] = useState("");
   const [promoterDraft, setPromoterDraft] = useState("");
   const [promoters, setPromoters] = useState<string[]>([]);
+  const [recent, setRecent] = useState<RecentSearch[]>([]);
+
+  // localStorage is client-only — read after mount to avoid a hydration mismatch.
+  useEffect(() => setRecent(getRecentSearches()), []);
 
   function addPromoter(name: string) {
     const v = name.trim();
@@ -95,6 +100,33 @@ export default function SearchForm({ onSubmit, busy }: Props) {
       >
         {busy ? "Running pre-screen…" : "Run pre-screen"}
       </button>
+
+      {recent.length > 0 && (
+        <div className="mt-6 border-t border-navy-primary/8 pt-4">
+          <div className="eyebrow mb-2">Recent searches</div>
+          <div className="flex flex-col gap-1.5">
+            {recent.map((r) => (
+              <button
+                key={`${r.company}|${r.promoters.join(",")}`}
+                type="button"
+                disabled={busy}
+                onClick={() => onSubmit(r.company, r.promoters)}
+                className="group flex items-center justify-between rounded-lg border border-navy-primary/10 px-3 py-2 text-left transition hover:border-navy-primary/25 hover:bg-navy-primary/5 disabled:opacity-50"
+              >
+                <span className="min-w-0">
+                  <span className="block truncate text-[13.5px] font-medium text-navy-deep">{r.company}</span>
+                  {r.promoters.length > 0 && (
+                    <span className="block truncate text-[12px] text-ink-secondary">{r.promoters.join(", ")}</span>
+                  )}
+                </span>
+                <span className="ml-3 shrink-0 text-[12px] font-semibold text-navy-primary/60 transition group-hover:text-navy-primary">
+                  Run again
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -198,23 +198,54 @@ export default function AdminPage() {
 
         {/* Report sections */}
         <Card title="Report sections" note="Rename, reorder, or hide sections of the report.">
-          <ul className="space-y-2">
+          <ul className="space-y-2.5">
             {config.sections.map((s: BriefSection, i) => (
-              <li key={s.id} className="surface-soft flex items-center gap-2 px-3 py-2">
-                <div className="flex flex-col">
-                  <button type="button" onClick={() => moveSection(i, -1)} disabled={i === 0} className="text-navy-primary/50 disabled:opacity-25 hover:text-navy-primary" aria-label="Move up">▲</button>
-                  <button type="button" onClick={() => moveSection(i, 1)} disabled={i === config.sections.length - 1} className="text-navy-primary/50 disabled:opacity-25 hover:text-navy-primary" aria-label="Move down">▼</button>
+              <li
+                key={s.id}
+                className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 transition ${
+                  s.enabled
+                    ? "border-[rgba(39,69,126,0.18)] bg-white shadow-sm"
+                    : "border-soft-border bg-ice"
+                }`}
+              >
+                {/* Reorder controls — spacer keeps them aligned with the input, not its label */}
+                <div className="flex items-center gap-2 pt-[18px]">
+                  <div className="flex flex-col overflow-hidden rounded-md border border-[rgba(23,43,77,0.14)]">
+                    <button
+                      type="button"
+                      onClick={() => moveSection(i, -1)}
+                      disabled={i === 0}
+                      className="px-1.5 leading-none text-navy-primary/70 transition hover:bg-navy-primary/10 hover:text-navy-primary disabled:opacity-20"
+                      aria-label="Move up"
+                    >
+                      ▲
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => moveSection(i, 1)}
+                      disabled={i === config.sections.length - 1}
+                      className="border-t border-[rgba(23,43,77,0.14)] px-1.5 leading-none text-navy-primary/70 transition hover:bg-navy-primary/10 hover:text-navy-primary disabled:opacity-20"
+                      aria-label="Move down"
+                    >
+                      ▼
+                    </button>
+                  </div>
                 </div>
-                <input
-                  value={s.title}
-                  onChange={(e) => renameSection(s.id, e.target.value)}
-                  className="flex-1 rounded-md border border-transparent bg-transparent px-1.5 py-1 text-[14px] text-ink-primary outline-none focus:border-navy-primary/30 focus:bg-white"
-                />
-                <div className="flex flex-col items-center gap-0.5">
+
+                {/* Editable title */}
+                <label className="flex flex-1 flex-col gap-0.5">
+                  <span className="text-[10px] font-medium uppercase tracking-wide text-ink-secondary/70">Section {i + 1}</span>
+                  <input
+                    value={s.title}
+                    onChange={(e) => renameSection(s.id, e.target.value)}
+                    className={`w-full rounded-md border border-[rgba(23,43,77,0.16)] px-2 py-1.5 text-[14px] text-ink-primary outline-none transition focus:border-navy-primary/50 focus:ring-2 focus:ring-navy-primary/15 ${
+                      s.enabled ? "bg-white" : "bg-white/60"
+                    }`}
+                  />
+                </label>
+
+                <div className="flex shrink-0 items-center pt-[18px]">
                   <Toggle checked={s.enabled} onChange={(v) => toggleSection(s.id, v)} label={s.title} />
-                  <span className={`text-[10px] font-medium ${s.enabled ? "text-signal-positive" : "text-ink-secondary"}`}>
-                    {s.enabled ? "Shown" : "Hidden"}
-                  </span>
                 </div>
               </li>
             ))}
@@ -227,7 +258,7 @@ export default function AdminPage() {
             Advanced ▸
           </summary>
           <p className="mt-1 text-[12px] text-ink-secondary">
-            How the report is written. Only change this if you know what you’re doing.
+            How the report is written. Only change this if absolutely necessary.
           </p>
           <textarea
             value={config.synthesisPrompt}
