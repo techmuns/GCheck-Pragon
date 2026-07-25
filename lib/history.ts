@@ -13,10 +13,10 @@ export interface RecentSearch extends Subject {
   at: string;
 }
 
-/** A stable identity for a subject — same company + same promoter set. */
+/** A stable identity for a subject — type + name + promoter set. */
 function keyOf(s: Subject): string {
   const promoters = [...s.promoters].map((p) => p.toLowerCase()).sort();
-  return `${s.company.toLowerCase()}|${promoters.join(",")}`;
+  return `${s.type ?? "company"}|${s.company.toLowerCase()}|${promoters.join(",")}`;
 }
 
 export function getRecentSearches(): RecentSearch[] {
@@ -34,10 +34,24 @@ export function getRecentSearches(): RecentSearch[] {
   }
 }
 
+/** Remove one recent search by its subject identity. Returns the new list. */
+export function removeRecentSearch(subject: Subject): RecentSearch[] {
+  if (typeof window === "undefined") return [];
+  const key = keyOf(subject);
+  const next = getRecentSearches().filter((r) => keyOf(r) !== key);
+  try {
+    window.localStorage.setItem(KEY, JSON.stringify(next));
+  } catch {
+    /* storage unavailable — best-effort */
+  }
+  return next;
+}
+
 /** Record a search, deduping by subject identity and capping at MAX. */
 export function addRecentSearch(subject: Subject): RecentSearch[] {
   if (typeof window === "undefined") return [];
   const entry: RecentSearch = {
+    type: subject.type ?? "company",
     company: subject.company,
     promoters: subject.promoters,
     at: new Date().toISOString(),
