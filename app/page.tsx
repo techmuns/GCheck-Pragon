@@ -27,15 +27,15 @@ export default function Home() {
   useEffect(() => () => stopPolling(), [stopPolling]);
 
   const start = useCallback(
-    async (company: string, promoters: string[]) => {
+    async (company: string, promoters: string[], type: "company" | "director" = "company") => {
       setError(null);
       setPhase("running");
-      addRecentSearch({ company, promoters });
+      addRecentSearch({ type, company, promoters });
       try {
         const res = await fetch(apiUrl("/api/research"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ company, promoters }),
+          body: JSON.stringify({ type, company, promoters }),
         });
         if (!res.ok) throw new Error((await res.json()).error ?? "Could not start the pre-screen.");
         const { id } = await res.json();

@@ -11,8 +11,10 @@ export interface Entity {
 }
 
 export function entitiesOf(subject: Subject): Entity[] {
+  // In director mode the primary subject is a person, not a company.
+  const primaryKind = subject.type === "director" ? ("promoter" as const) : ("company" as const);
   return [
-    { name: subject.company, kind: "company" as const },
+    { name: subject.company, kind: primaryKind },
     ...subject.promoters.map((p) => ({ name: p, kind: "promoter" as const })),
   ].filter((e) => e.name.trim().length > 0);
 }

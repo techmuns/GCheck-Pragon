@@ -93,8 +93,16 @@ export interface Citation {
 
 /** The subject of a research run. */
 export interface Subject {
+  /** Whether this run targets a company or an individual director/person.
+   * Defaults to "company" when absent (back-compat with earlier runs). */
+  type?: "company" | "director";
+  /** The primary subject name — a company name, or (in director mode) a
+   * person's name. Kept as `company` so existing display code keeps working. */
   company: string;
+  /** Associated promoters/directors — company mode only. */
   promoters: string[];
+  /** Optional stock ticker (e.g. "RELIANCE") — enables exchange-filings lookup. */
+  ticker?: string;
 }
 
 // ── Retrieval (Phase 2) ────────────────────────────────────────────────────

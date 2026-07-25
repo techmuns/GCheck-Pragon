@@ -8,17 +8,24 @@ export const dynamic = "force-dynamic";
 // POST /api/research — trigger a research run.
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
+  const type: Subject["type"] = body.type === "director" ? "director" : "company";
   const company = (body.company ?? "").toString().trim();
-  const promoters: string[] = Array.isArray(body.promoters)
-    ? body.promoters.map((p: unknown) => String(p).trim()).filter(Boolean)
-    : [];
+  // Promoters only apply to a company search; a director search is one person.
+  const promoters: string[] =
+    type === "company" && Array.isArray(body.promoters)
+      ? body.promoters.map((p: unknown) => String(p).trim()).filter(Boolean)
+      : [];
+  const ticker = (body.ticker ?? "").toString().trim().toUpperCase() || undefined;
 
   if (!company) {
-    return NextResponse.json({ error: "Company name is required." }, { status: 400 });
+    return NextResponse.json(
+      { error: type === "director" ? "Director name is required." : "Company name is required." },
+      { status: 400 },
+    );
   }
 
   const config = await getConfig();
-  const subject: Subject = { company, promoters };
+  const subject: Subject = { type, company, promoters, ticker };
 
   const progressSeed: SourceProgress[] = config.sources
     .filter((s) => s.enabled)
