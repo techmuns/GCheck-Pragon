@@ -10,7 +10,7 @@ import { fetchWithTimeout, type Collector } from "./types";
 //
 // Coverage is strong for large/listed groups and thin for small unlisted firms;
 // when nothing matches we say so honestly rather than guessing. It complements
-// MCA (the authoritative registry, key-gated) by working today with no trial.
+// the registry collector, which covers small unlisted companies well.
 //
 // Two steps: resolve the subject name to a Wikidata entity (QID), then run one
 // SPARQL query for its leadership relationships. Ambiguity is handled by

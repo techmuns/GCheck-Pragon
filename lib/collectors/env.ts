@@ -28,15 +28,6 @@ export const env = {
   // public search page.
   indianKanoonToken: process.env.INDIANKANOON_API_TOKEN,
 
-  // MCA (Ministry of Corporate Affairs) — the official Indian company registry,
-  // the authoritative source for directors + financials of unlisted companies.
-  // There is no free/keyless MCA API (financials are paid document access), so
-  // this collector activates only when a data-provider token is configured and
-  // skips honestly otherwise. MCA_API_URL points at the provider endpoint that
-  // takes a company name/CIN and returns master-data + directors + financials.
-  mcaApiToken: process.env.MCA_API_TOKEN,
-  mcaApiUrl: process.env.MCA_API_URL || "https://api.mca.gov.in/company",
-
   // Wikidata — free, keyless structured data. Used as a director/leadership
   // source: board members, CEO, chairperson and founders of a company, and the
   // reverse (companies a person leads) in director mode. No credential needed;
@@ -70,10 +61,6 @@ export function hasPrivateCircleCreds(): boolean {
 
 export function hasCibilCreds(): boolean {
   return Boolean(env.cibilUsername && env.cibilPassword);
-}
-
-export function hasMca(): boolean {
-  return Boolean(env.mcaApiToken);
 }
 
 export function hasFilings(): boolean {

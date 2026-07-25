@@ -23,14 +23,6 @@ export const defaultConfig: AppConfig = {
       url: "https://indiankanoon.org",
     },
     {
-      id: "mca",
-      name: "MCA (Corporate Affairs)",
-      kind: "api",
-      description: "Official company registry — directors and financials, including for unlisted companies.",
-      enabled: true,
-      url: "https://www.mca.gov.in",
-    },
-    {
       id: "registry",
       name: "Company Registry (Tofler)",
       kind: "api",

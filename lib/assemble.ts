@@ -161,32 +161,31 @@ function redFlagSection(title: string, ctx: Ctx): RenderedSection {
   return { id: "red-flags", title, findings };
 }
 
-// Company snapshot — master data + financials from MCA (the official registry,
-// authoritative for unlisted companies). Honest states for locked/skip/error.
+// Company snapshot — identity of the subject as it appears on the public
+// registry record: the CIN and a link to the record itself. Directors surface
+// under Key People, so they are deliberately not repeated here. Honest states
+// when the registry record could not be found.
 function snapshotSection(id: string, title: string, ctx: Ctx): RenderedSection {
-  const c = ctx.byId["mca"];
+  const c = ctx.byId["registry"];
   if (!c) return { id, title, findings: [], empty: true };
-  if (c.status === "locked") return { id, title, findings: [{ severity: "info", text: `🔒 Upgrade to enable — ${c.note ?? "paid source"}` }], empty: true };
-  if (c.status === "skipped") return { id, title, findings: [{ severity: "info", text: c.note ?? "MCA not configured." }], empty: true };
-  if (c.status === "error") return { id, title, findings: [{ severity: "info", text: `MCA unavailable — ${c.note ?? "unknown error"}` }], empty: true };
+  if (c.status === "skipped") return { id, title, findings: [{ severity: "info", text: c.note ?? "Registry not run." }], empty: true };
+  if (c.status === "error") return { id, title, findings: [{ severity: "info", text: `Registry unavailable — ${c.note ?? "unknown error"}` }], empty: true };
 
-  // Master data + financials belong in the snapshot; directors surface under Key People.
-  const relevant = c.hits.filter((h) => {
-    const cat = h.extra?.category;
-    return cat === "master" || cat === "financial";
-  });
-  if (relevant.length === 0) {
-    return { id, title, findings: [{ severity: "info", text: c.note ?? "No company master data returned by MCA." }], empty: true };
+  // Any registry hit carries the record's CIN and URL; one is enough to identify
+  // the company. Master data beyond that isn't free, so we don't pretend to it.
+  const record = c.hits.find((h) => h.extra?.cin) ?? c.hits[0];
+  if (!record) {
+    return { id, title, findings: [{ severity: "info", text: c.note ?? "No registry record found." }], empty: true };
   }
-  return {
-    id,
-    title,
-    findings: relevant.map((h) => ({
-      severity: "info" as Severity,
-      text: h.title,
-      sourceRef: ctx.cite(c.sourceName, h.title, h.url),
-    })),
-  };
+
+  const findings: Finding[] = [
+    { severity: "info", text: ctx.subject.company, sourceRef: ctx.cite(c.sourceName, ctx.subject.company, record.url) },
+  ];
+  const cin = record.extra?.cin;
+  if (typeof cin === "string" && cin) {
+    findings.push({ severity: "info", text: `CIN ${cin}`, sourceRef: ctx.cite(c.sourceName, `CIN ${cin}`, record.url) });
+  }
+  return { id, title, findings };
 }
 
 function managementSection(id: string, title: string, ctx: Ctx): RenderedSection {
@@ -197,18 +196,8 @@ function managementSection(id: string, title: string, ctx: Ctx): RenderedSection
     findings.push({ severity: "info", text: p });
   }
 
-  // Registered directors from MCA — the authoritative board of record, cited.
-  const mca = ctx.byId["mca"];
-  if (mca?.status === "done") {
-    const directors = mca.hits.filter((h) => h.extra?.category === "director");
-    for (const d of directors) {
-      findings.push({ severity: "info", text: d.title, sourceRef: ctx.cite(mca.sourceName, d.title, d.url) });
-    }
-  }
-
-  // Directors from the free public registry record (republished MCA filings) —
-  // the board of record, including for unlisted companies. Cited to the
-  // aggregator, not claimed as MCA-official.
+  // Directors from the free public registry record — the board of record,
+  // including for unlisted companies. Cited to the aggregator that publishes it.
   const registry = ctx.byId["registry"];
   if (registry?.status === "done") {
     for (const d of registry.hits) {

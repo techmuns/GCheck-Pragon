@@ -16,7 +16,7 @@ export async function getConfig(): Promise<AppConfig> {
     const parsed = JSON.parse(raw) as Partial<AppConfig>;
     // Backfill whole fields an older config file predates (e.g. synthesisPrompt),
     // and merge in any default sources/sections a saved config doesn't yet have
-    // (e.g. MCA added after a user already persisted their config) — without
+    // (e.g. a source added after a user already persisted their config) — without
     // discarding the user's existing edits.
     return {
       sources: mergeById(parsed.sources, defaultConfig.sources),
