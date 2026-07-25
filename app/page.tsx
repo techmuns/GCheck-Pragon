@@ -15,7 +15,13 @@ export default function Home() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [run, setRun] = useState<Run | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The progress UI walks source by source at its own pace. The brief waits for
+  // that walk to finish even if the backend answers first, so the user always
+  // sees the full "collecting, one source at a time" sequence.
+  const [walked, setWalked] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const onWalkComplete = useCallback(() => setWalked(true), []);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -29,6 +35,7 @@ export default function Home() {
   const start = useCallback(
     async (company: string, promoters: string[], type: "company" | "director" = "company") => {
       setError(null);
+      setWalked(false);
       setPhase("running");
       addRecentSearch({ type, company, promoters });
       try {
@@ -68,9 +75,17 @@ export default function Home() {
     stopPolling();
     setRun(null);
     setError(null);
+    setWalked(false);
     setPhase("idle");
   }, [stopPolling]);
 
+  // Hold on the progress view until BOTH the run is complete and the walk has
+  // visited every source, so the sequence is never cut short by a fast backend.
+  // A run with no sources to walk has nothing to hold for.
+  const nothingToWalk = (run?.progress.length ?? 0) === 0;
+  const revealed = walked || nothingToWalk;
+  const showProgress = run !== null && (phase === "running" || (phase === "done" && !revealed));
+  const showBrief = phase === "done" && revealed && run?.brief;
   const centered = phase === "idle" || phase === "error" || (phase === "running" && !run);
 
   return (
@@ -81,14 +96,16 @@ export default function Home() {
     >
       {phase === "idle" && <SearchForm onSubmit={start} />}
 
-      {phase === "running" && run && <ResearchProgress subject={run.subject} progress={run.progress} />}
+      {showProgress && run && (
+        <ResearchProgress subject={run.subject} progress={run.progress} onWalkComplete={onWalkComplete} />
+      )}
       {phase === "running" && !run && (
         <div className="card-surface fade-in w-full max-w-xl p-7 text-center text-ink-secondary">
           Starting pre-screen…
         </div>
       )}
 
-      {phase === "done" && run && <BriefView run={run} onReset={reset} />}
+      {showBrief && run && <BriefView run={run} onReset={reset} />}
 
       {phase === "error" && (
         <div className="card-surface fade-in w-full max-w-md p-6 text-center">

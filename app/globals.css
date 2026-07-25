@@ -195,6 +195,23 @@ body {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* ── Staggered reveal ──────────────────────────────────────────────────────
+   Used for both the source rows (as the pre-screen walks source to source) and
+   the brief's sections, which fade in one segment at a time. The delay is set
+   inline per item, so `both` keeps an item invisible until its turn. */
+.reveal {
+  animation: reveal 520ms var(--ease) both;
+}
+@keyframes reveal {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* The countdown ring's sweeping trail. */
+.ring-trail {
+  transition: stroke-dashoffset 980ms linear;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .fade-in {
     animation: fadeInReduced 160ms var(--ease) both;
@@ -213,6 +230,15 @@ body {
   .spin,
   .msg-swap {
     animation: none !important;
+  }
+  /* Keep the staggered reveal as a plain fade with no delay or travel, so the
+     sequence still reads as ordered without motion. */
+  .reveal {
+    animation: fadeInReduced 160ms var(--ease) both !important;
+    animation-delay: 0ms !important;
+  }
+  .ring-trail {
+    transition: none;
   }
 }
 
@@ -242,6 +268,15 @@ body {
   }
   #brief-print {
     max-width: 100% !important;
+  }
+
+  /* The staggered reveal is a screen affordance — on paper every segment must be
+     fully visible even if printed mid-animation. */
+  #brief-print .reveal,
+  .reveal {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
   }
 
   /* Clean single column — simple and readable on paper. */

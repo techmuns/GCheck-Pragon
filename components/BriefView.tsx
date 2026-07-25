@@ -9,6 +9,13 @@ interface Props {
   onReset: () => void;
 }
 
+// Segment-by-segment reveal. The brief assembles itself top to bottom — title,
+// verdict, glance, coverage, then each section in turn — so the reader's eye is
+// led down the page instead of the whole dashboard landing at once. Delays are
+// presentation only; the data is already complete when this renders.
+const STEP_MS = 130;
+const revealAt = (i: number) => ({ animationDelay: `${i * STEP_MS}ms` });
+
 // The one-page partner brief. Verdict hero + at-a-glance visuals up top, then
 // configurable sections, then the source appendix. Printable to PDF.
 export default function BriefView({ run, onReset }: Props) {
@@ -52,7 +59,7 @@ export default function BriefView({ run, onReset }: Props) {
       {/* Printable brief */}
       <div id="brief-print" data-dashboard-capture-root="true">
         {/* Title */}
-        <div className="mb-4">
+        <div className="reveal mb-4" style={revealAt(0)}>
           <h2 className="font-display text-[26px] leading-tight text-navy-deep">{run.subject.company}</h2>
           {run.subject.promoters.length > 0 && (
             <p className="text-[13px] text-ink-secondary">{run.subject.promoters.join(" · ")}</p>
@@ -61,8 +68,9 @@ export default function BriefView({ run, onReset }: Props) {
 
         {/* Verdict hero */}
         <div
-          className="mb-3 rounded-xl2 p-5"
+          className="reveal mb-3 rounded-xl2 p-5"
           style={{
+            ...revealAt(1),
             backgroundImage: `linear-gradient(135deg, #ffffff, ${meta.soft})`,
             border: `1px solid ${meta.color}33`,
             boxShadow: "0 1px 3px rgba(23,43,77,0.05), 0 16px 38px rgba(23,43,77,0.10)",
@@ -77,7 +85,7 @@ export default function BriefView({ run, onReset }: Props) {
         </div>
 
         {/* At-a-glance visuals — screen only; the print report stays text-simple. */}
-        <div className="no-print mb-3 grid grid-cols-1 gap-3 sm:grid-cols-5">
+        <div className="no-print reveal mb-3 grid grid-cols-1 gap-3 sm:grid-cols-5" style={revealAt(2)}>
           <div className="card-surface p-4 sm:col-span-2">
             <div className="eyebrow mb-2">What we found</div>
             {counts.red + counts.amber + counts.clear > 0 ? (
@@ -94,21 +102,24 @@ export default function BriefView({ run, onReset }: Props) {
         </div>
 
         {/* Source coverage — screen only; sources are listed in the print appendix. */}
-        <div className="no-print card-surface mb-4 p-4">
+        <div className="no-print card-surface reveal mb-4 p-4" style={revealAt(3)}>
           <div className="eyebrow mb-2">Sources checked{sourcesLocked ? ` · ${sourcesLocked} need upgrade` : ""}</div>
           <SourceCoverage progress={run.progress} />
         </div>
 
         {/* Sections — full width summary, two columns below on large screens */}
         <div className="grid gap-3 lg:grid-cols-2">
-          {brief.sections.map((section) => {
+          {brief.sections.map((section, si) => {
             const isSummary = section.id === "red-flags";
             const count = section.findings.filter((f) => f.severity !== "info").length;
             return (
               <div
                 key={section.id}
-                className={`card-surface p-5 ${isSummary ? "lg:col-span-2" : ""}`}
-                style={isSummary ? { borderLeft: `3px solid ${meta.color}` } : undefined}
+                className={`card-surface reveal p-5 ${isSummary ? "lg:col-span-2" : ""}`}
+                style={{
+                  ...revealAt(4 + si),
+                  ...(isSummary ? { borderLeft: `3px solid ${meta.color}` } : null),
+                }}
               >
                 <div className="mb-2 flex items-center justify-between">
                   <h3 className="font-display text-[15.5px] text-navy-deep">{section.title}</h3>
@@ -145,7 +156,10 @@ export default function BriefView({ run, onReset }: Props) {
 
         {/* Sources appendix */}
         {brief.citations.length > 0 && (
-          <div className="mt-4 rounded-xl border border-soft-border bg-surface-band/60 p-4">
+          <div
+            className="reveal mt-4 rounded-xl border border-soft-border bg-surface-band/60 p-4"
+            style={revealAt(4 + brief.sections.length)}
+          >
             <div className="eyebrow mb-2">Sources</div>
             <ol className="space-y-1">
               {brief.citations.map((c) => (
@@ -162,7 +176,7 @@ export default function BriefView({ run, onReset }: Props) {
           </div>
         )}
 
-        <p className="mt-4 text-[10.5px] text-ink-secondary/70">
+        <p className="reveal mt-4 text-[10.5px] text-ink-secondary/70" style={revealAt(5 + brief.sections.length)}>
           {brief.synthesizedBy === "ai"
             ? "Summary written by AI from live source data — every claim links to a source above. Illustrative pre-screen; verify before relying."
             : "Assembled from live source data. Illustrative pre-screen; verify before relying."}
