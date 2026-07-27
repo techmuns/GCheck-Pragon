@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import Toggle from "@/components/Toggle";
 import { apiUrl } from "@/lib/api";
-import type { AppConfig, BriefSection, Keyword, Source } from "@/lib/types";
+import type { AppConfig, Keyword, Source } from "@/lib/types";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -52,25 +52,6 @@ export default function AdminPage() {
     const id = `kw-${Date.now().toString(36)}`;
     patch({ keywords: [...config.keywords, { id, term, enabled: true }] });
     setNewKeyword("");
-  }
-
-  // ── Sections ─────────────────────────────────────────────────────────────
-  function toggleSection(id: string, enabled: boolean) {
-    if (!config) return;
-    patch({ sections: config.sections.map((s) => (s.id === id ? { ...s, enabled } : s)) });
-  }
-  function renameSection(id: string, title: string) {
-    if (!config) return;
-    patch({ sections: config.sections.map((s) => (s.id === id ? { ...s, title } : s)) });
-  }
-  function moveSection(idx: number, dir: -1 | 1) {
-    if (!config) return;
-    const next = [...config.sections];
-    const j = idx + dir;
-    if (j < 0 || j >= next.length) return;
-    [next[idx], next[j]] = [next[j], next[idx]];
-    next.forEach((s, i) => (s.order = i));
-    patch({ sections: next });
   }
 
   // ── Persist ──────────────────────────────────────────────────────────────
@@ -194,62 +175,6 @@ export default function AdminPage() {
               Add
             </button>
           </div>
-        </Card>
-
-        {/* Report sections */}
-        <Card title="Report sections" note="Rename, reorder, or hide sections of the report.">
-          <ul className="space-y-2.5">
-            {config.sections.map((s: BriefSection, i) => (
-              <li
-                key={s.id}
-                className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 transition ${
-                  s.enabled
-                    ? "border-[rgba(39,69,126,0.18)] bg-white shadow-sm"
-                    : "border-soft-border bg-ice"
-                }`}
-              >
-                {/* Reorder controls — spacer keeps them aligned with the input, not its label */}
-                <div className="flex items-center gap-2 pt-[18px]">
-                  <div className="flex flex-col overflow-hidden rounded-md border border-[rgba(23,43,77,0.14)]">
-                    <button
-                      type="button"
-                      onClick={() => moveSection(i, -1)}
-                      disabled={i === 0}
-                      className="px-1.5 leading-none text-navy-primary/70 transition hover:bg-navy-primary/10 hover:text-navy-primary disabled:opacity-20"
-                      aria-label="Move up"
-                    >
-                      ▲
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => moveSection(i, 1)}
-                      disabled={i === config.sections.length - 1}
-                      className="border-t border-[rgba(23,43,77,0.14)] px-1.5 leading-none text-navy-primary/70 transition hover:bg-navy-primary/10 hover:text-navy-primary disabled:opacity-20"
-                      aria-label="Move down"
-                    >
-                      ▼
-                    </button>
-                  </div>
-                </div>
-
-                {/* Editable title */}
-                <label className="flex flex-1 flex-col gap-0.5">
-                  <span className="text-[10px] font-medium uppercase tracking-wide text-ink-secondary/70">Section {i + 1}</span>
-                  <input
-                    value={s.title}
-                    onChange={(e) => renameSection(s.id, e.target.value)}
-                    className={`w-full rounded-md border border-[rgba(23,43,77,0.16)] px-2 py-1.5 text-[14px] text-ink-primary outline-none transition focus:border-navy-primary/50 focus:ring-2 focus:ring-navy-primary/15 ${
-                      s.enabled ? "bg-white" : "bg-white/60"
-                    }`}
-                  />
-                </label>
-
-                <div className="flex shrink-0 items-center pt-[18px]">
-                  <Toggle checked={s.enabled} onChange={(v) => toggleSection(s.id, v)} label={s.title} />
-                </div>
-              </li>
-            ))}
-          </ul>
         </Card>
 
         {/* Advanced — writing style (tucked away so it never confuses a first-time user) */}
