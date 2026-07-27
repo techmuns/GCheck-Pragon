@@ -71,7 +71,9 @@ export const registryCollector: Collector = async ({ subject }) => {
         .join(" — "),
       url: page.url,
       entity: company,
-      extra: { category: "director", din: d.din, designation: d.designation, cin: page.cin },
+      // Keep the parsed fields discrete (not only baked into the title) so the
+      // brief can render a clean Name / Role / Tenure people table.
+      extra: { category: "director", name: d.name, din: d.din, designation: d.designation, tenure: d.tenure, cin: page.cin },
     }));
 
     return {
