@@ -81,8 +81,9 @@ export default function Home() {
 
       {phase === "running" && run && <ResearchProgress subject={run.subject} progress={run.progress} />}
       {phase === "running" && !run && (
-        <div className="card-surface fade-in w-full max-w-xl p-7 text-center text-ink-secondary">
-          Starting pre-screen…
+        <div className="card-surface fade-in w-full max-w-xl p-7 text-center">
+          <p className="text-[15px] font-medium text-ink-primary">Starting now — this may take a minute…</p>
+          <p className="mt-1.5 text-[13px] text-ink-secondary">Setting things up, your brief will be ready shortly.</p>
         </div>
       )}
 
