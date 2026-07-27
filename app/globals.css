@@ -28,15 +28,15 @@ body {
   font-optical-sizing: auto;
 }
 
-/* Canvas — warm mist with three faint tonal pools (navy · teal · gold) */
+/* Canvas — cool blue mist with three faint tonal pools (navy · royal · sky) */
 body {
   min-height: 100vh;
-  background-color: #f6f5f2;
+  background-color: #eef3fa;
   background-image:
-    radial-gradient(1100px 560px at 100% -10%, rgba(39, 69, 126, 0.045), transparent 60%),
-    radial-gradient(820px 460px at -8% 108%, rgba(22, 142, 142, 0.04), transparent 58%),
-    radial-gradient(700px 420px at 52% 122%, rgba(182, 139, 58, 0.03), transparent 60%),
-    linear-gradient(180deg, #faf9f6 0%, #f4f3ef 100%);
+    radial-gradient(1100px 560px at 100% -10%, rgba(39, 69, 126, 0.07), transparent 60%),
+    radial-gradient(820px 460px at -8% 108%, rgba(61, 125, 214, 0.06), transparent 58%),
+    radial-gradient(700px 420px at 52% 122%, rgba(96, 165, 214, 0.05), transparent 60%),
+    linear-gradient(180deg, #f3f7fc 0%, #e7eef8 100%);
   background-attachment: fixed;
 }
 
@@ -64,7 +64,7 @@ body {
   height: 48vw;
   left: -8vw;
   top: -10vh;
-  background: radial-gradient(circle at 32% 32%, rgba(39, 69, 126, 0.30), transparent 70%);
+  background: radial-gradient(circle at 32% 32%, rgba(39, 69, 126, 0.34), transparent 70%);
   animation: aurora-drift-a 26s var(--ease) infinite alternate;
 }
 .aurora-2 {
@@ -72,7 +72,7 @@ body {
   height: 42vw;
   right: -10vw;
   top: 8vh;
-  background: radial-gradient(circle at 50% 50%, rgba(22, 142, 142, 0.24), transparent 70%);
+  background: radial-gradient(circle at 50% 50%, rgba(61, 125, 214, 0.26), transparent 70%);
   animation: aurora-drift-b 32s var(--ease) infinite alternate;
 }
 .aurora-3 {
@@ -80,19 +80,8 @@ body {
   height: 40vw;
   left: 26vw;
   bottom: -18vh;
-  background: radial-gradient(circle at 50% 50%, rgba(182, 139, 58, 0.22), transparent 70%);
+  background: radial-gradient(circle at 50% 50%, rgba(96, 165, 214, 0.22), transparent 70%);
   animation: aurora-drift-c 38s var(--ease) infinite alternate;
-}
-/* Whisper-fine grid — texture without noise. Fades out toward the edges. */
-.aurora-grid {
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(to right, rgba(23, 43, 77, 0.05) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(23, 43, 77, 0.05) 1px, transparent 1px);
-  background-size: 44px 44px;
-  -webkit-mask-image: radial-gradient(120% 90% at 50% 40%, #000 30%, transparent 78%);
-  mask-image: radial-gradient(120% 90% at 50% 40%, #000 30%, transparent 78%);
 }
 @keyframes aurora-drift-a {
   from { transform: translate3d(0, 0, 0) scale(1); }
