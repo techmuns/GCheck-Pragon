@@ -1,6 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import type { Run, Severity } from "@/lib/types";
+import { apiUrl } from "@/lib/api";
 import { severityStyle } from "./severity";
 import { RiskMeter, SeverityBar, StatTile, SourceCoverage, VERDICT_META } from "./BriefViz";
 
@@ -20,6 +22,34 @@ const revealAt = (i: number) => ({ animationDelay: `${i * STEP_MS}ms` });
 // configurable sections, then the source appendix. Printable to PDF.
 export default function BriefView({ run, onReset }: Props) {
   const brief = run.brief;
+  const [downloading, setDownloading] = useState(false);
+
+  // Pull the server-rendered PDF and save it straight to disk — no browser
+  // print dialog. The endpoint returns the file as an attachment; we read it
+  // as a blob so the download works cross-origin in the hybrid deploy too.
+  async function download() {
+    if (downloading) return;
+    setDownloading(true);
+    try {
+      const res = await fetch(apiUrl(`/api/research/${run.id}/pdf`));
+      if (!res.ok) throw new Error("Download failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Pre-Screen — ${run.subject.company}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      // Fall back to the browser's own print-to-PDF if the server render fails.
+      window.print();
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   if (!brief) return null;
   const meta = VERDICT_META[brief.verdict] ?? VERDICT_META.info;
 
@@ -41,10 +71,11 @@ export default function BriefView({ run, onReset }: Props) {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => window.print()}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-[rgba(23,43,77,0.12)] bg-white/70 px-3.5 py-2 text-[13px] font-medium text-navy-primary transition hover:bg-white"
+            onClick={download}
+            disabled={downloading}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-[rgba(23,43,77,0.12)] bg-white/70 px-3.5 py-2 text-[13px] font-medium text-navy-primary transition hover:bg-white disabled:opacity-60"
           >
-            ↓ Download
+            {downloading ? "Preparing…" : "↓ Download"}
           </button>
           <button
             type="button"
