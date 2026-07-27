@@ -21,13 +21,16 @@ export default function Home() {
   // sees the full "collecting, one source at a time" sequence.
   const [walked, setWalked] = useState(false);
   // The counted pre-search countdown runs first, over the request kick-off.
-  const [prepped, setPrepped] = useState(false);
+  // We track only whether its beats have finished; the prep view then *holds*
+  // until the run actually lands, so a slow/cold-started backend never drops
+  // the user onto a bare interstitial.
+  const [countdownDone, setCountdownDone] = useState(false);
   // Subject shown during the countdown, before the run object comes back.
   const [pending, setPending] = useState<Run["subject"] | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const onWalkComplete = useCallback(() => setWalked(true), []);
-  const onPrepped = useCallback(() => setPrepped(true), []);
+  const onPrepped = useCallback(() => setCountdownDone(true), []);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -42,7 +45,7 @@ export default function Home() {
     async (company: string, promoters: string[], type: "company" | "director" = "company") => {
       setError(null);
       setWalked(false);
-      setPrepped(false);
+      setCountdownDone(false);
       setPending({ type, company, promoters });
       setPhase("running");
       addRecentSearch({ type, company, promoters });
@@ -84,7 +87,7 @@ export default function Home() {
     setRun(null);
     setError(null);
     setWalked(false);
-    setPrepped(false);
+    setCountdownDone(false);
     setPending(null);
     setPhase("idle");
   }, [stopPolling]);
@@ -93,14 +96,21 @@ export default function Home() {
   // the brief. Each waits for the one before it to finish its own beat, so a
   // fast backend never cuts the sequence short.
   const busy = phase === "running" || phase === "done";
+  // "Prepped" means the countdown has finished AND the run has landed. Until the
+  // run arrives, the prep view stays up (holding), so the wait is never a bare
+  // screen — even when a cold-started backend takes a while to answer.
+  const prepped = countdownDone && run !== null;
   const showPrep = busy && !prepped && (pending !== null || run !== null);
+  // Once the beats are done but the run still hasn't landed, the prep card holds
+  // on a reassuring "setting things up" state instead of counting further.
+  const prepHolding = countdownDone && run === null;
   // Hold on the progress view until BOTH the run is complete and the walk has
   // visited every source. A run with no sources to walk has nothing to hold for.
   const nothingToWalk = (run?.progress.length ?? 0) === 0;
   const revealed = walked || nothingToWalk;
   const showProgress = prepped && run !== null && (phase === "running" || (phase === "done" && !revealed));
   const showBrief = phase === "done" && prepped && revealed && run?.brief;
-  const centered = phase === "idle" || phase === "error" || showPrep || (phase === "running" && !run);
+  const centered = phase === "idle" || phase === "error" || showPrep;
 
   return (
     <main
@@ -111,17 +121,11 @@ export default function Home() {
       {phase === "idle" && <SearchForm onSubmit={start} />}
 
       {showPrep && (
-        <PrepCountdown subject={run?.subject ?? pending!} onDone={onPrepped} />
+        <PrepCountdown subject={run?.subject ?? pending!} onDone={onPrepped} holding={prepHolding} />
       )}
 
       {showProgress && run && (
         <ResearchProgress subject={run.subject} progress={run.progress} onWalkComplete={onWalkComplete} />
-      )}
-      {/* Countdown done but the run hasn't landed yet — brief, and rare. */}
-      {phase === "running" && prepped && !run && (
-        <div className="card-surface fade-in w-full max-w-xl p-7 text-center text-ink-secondary">
-          Starting pre-screen…
-        </div>
       )}
 
       {showBrief && run && <BriefView run={run} onReset={reset} />}

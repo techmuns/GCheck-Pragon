@@ -5,6 +5,8 @@ import type { Run, Severity } from "@/lib/types";
 import { apiUrl } from "@/lib/api";
 import { severityStyle } from "./severity";
 import { RiskMeter, SeverityBar, StatTile, SourceCoverage, VERDICT_META } from "./BriefViz";
+import BriefPrint from "./BriefPrint";
+import { buildPrintBrief, formatGenerated } from "@/lib/printBrief";
 
 interface Props {
   run: Run;
@@ -62,6 +64,10 @@ export default function BriefView({ run, onReset }: Props) {
   }
   const sourcesChecked = run.progress.filter((p) => p.status === "done").length;
   const sourcesLocked = run.progress.filter((p) => p.status === "locked").length;
+
+  // The downloadable one-pager is a purpose-built document, derived from the run
+  // and rendered (print-only) by BriefPrint — not this on-screen dashboard.
+  const printBrief = buildPrintBrief(run, formatGenerated(run.createdAt));
 
   return (
     <div className="fade-in mx-auto w-full max-w-6xl">
@@ -213,6 +219,10 @@ export default function BriefView({ run, onReset }: Props) {
             : "Assembled from live source data. Illustrative pre-screen; verify before relying."}
         </p>
       </div>
+
+      {/* The download / print output — a purpose-built one-page A4-landscape brief.
+          Portalled to <body> and print-only, so it never touches the screen view. */}
+      {printBrief && <BriefPrint brief={printBrief} />}
     </div>
   );
 }

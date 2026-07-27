@@ -7,6 +7,9 @@ interface Props {
   subject: Subject;
   /** Fired once the countdown has closed the ring. */
   onDone?: () => void;
+  /** True once the beats are done but the run hasn't landed yet — the ring
+      stays closed and the caption reassures instead of declaring "Ready". */
+  holding?: boolean;
 }
 
 // ── Pre-search countdown ────────────────────────────────────────────────────
@@ -23,7 +26,7 @@ const BEAT_MS = 850;
 // A short hold on the closed ring, so "Ready" registers before the walk begins.
 const READY_MS = 620;
 
-export default function PrepCountdown({ subject, onDone }: Props) {
+export default function PrepCountdown({ subject, onDone, holding = false }: Props) {
   // 0..2 = counting, 3 = ring closed / "Ready".
   const [beat, setBeat] = useState(0);
 
@@ -83,9 +86,17 @@ export default function PrepCountdown({ subject, onDone }: Props) {
         {/* Counter — the numeral swaps per beat, then gives way to a tick */}
         <div className="absolute inset-0 flex items-center justify-center">
           {ready ? (
-            <span key="ready" className="count-pop font-display text-[40px] leading-none text-signal-positive">
-              ✓
-            </span>
+            holding ? (
+              <span key="holding" className="flex items-center gap-1.5">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-navy-primary [animation-delay:0ms]" />
+                <span className="h-2 w-2 animate-pulse rounded-full bg-navy-primary [animation-delay:150ms]" />
+                <span className="h-2 w-2 animate-pulse rounded-full bg-navy-primary [animation-delay:300ms]" />
+              </span>
+            ) : (
+              <span key="ready" className="count-pop font-display text-[40px] leading-none text-signal-positive">
+                ✓
+              </span>
+            )
           ) : (
             <span key={current!.n} className="count-pop tabular font-display text-[44px] leading-none text-navy-deep">
               {current!.n}
@@ -96,11 +107,15 @@ export default function PrepCountdown({ subject, onDone }: Props) {
 
       {/* Beat caption */}
       <div className="mt-6 min-h-[46px]">
-        <p key={`l-${beat}`} className="msg-swap font-display text-[17px] leading-tight text-navy-deep">
-          {ready ? "Ready" : current!.label}
+        <p key={`l-${beat}-${holding}`} className="msg-swap font-display text-[17px] leading-tight text-navy-deep">
+          {ready ? (holding ? "Setting things up…" : "Ready") : current!.label}
         </p>
-        <p key={`s-${beat}`} className="msg-swap mt-1 text-[12.5px] text-ink-secondary">
-          {ready ? `Screening ${subject.company}` : current!.sub}
+        <p key={`s-${beat}-${holding}`} className="msg-swap mt-1 text-[12.5px] text-ink-secondary">
+          {ready
+            ? holding
+              ? "This can take a minute — hang tight, your brief is on the way"
+              : `Screening ${subject.company}`
+            : current!.sub}
         </p>
       </div>
 
