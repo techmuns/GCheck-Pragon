@@ -40,6 +40,78 @@ body {
   background-attachment: fixed;
 }
 
+/* ── Aurora backdrop (home screen) ─────────────────────────────────────────
+   A living-but-calm layer behind the search box: three soft colour pools drift
+   on long, offset cycles over a whisper-fine grid. Sits behind all content
+   (opaque cards paint over it); decorative only, so pointer-events are off. */
+.aurora {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+.aurora-blob {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(72px);
+  opacity: 0.55;
+  mix-blend-mode: multiply;
+  will-change: transform;
+}
+.aurora-1 {
+  width: 48vw;
+  height: 48vw;
+  left: -8vw;
+  top: -10vh;
+  background: radial-gradient(circle at 32% 32%, rgba(39, 69, 126, 0.30), transparent 70%);
+  animation: aurora-drift-a 26s var(--ease) infinite alternate;
+}
+.aurora-2 {
+  width: 42vw;
+  height: 42vw;
+  right: -10vw;
+  top: 8vh;
+  background: radial-gradient(circle at 50% 50%, rgba(22, 142, 142, 0.24), transparent 70%);
+  animation: aurora-drift-b 32s var(--ease) infinite alternate;
+}
+.aurora-3 {
+  width: 40vw;
+  height: 40vw;
+  left: 26vw;
+  bottom: -18vh;
+  background: radial-gradient(circle at 50% 50%, rgba(182, 139, 58, 0.22), transparent 70%);
+  animation: aurora-drift-c 38s var(--ease) infinite alternate;
+}
+/* Whisper-fine grid — texture without noise. Fades out toward the edges. */
+.aurora-grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(to right, rgba(23, 43, 77, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(23, 43, 77, 0.05) 1px, transparent 1px);
+  background-size: 44px 44px;
+  -webkit-mask-image: radial-gradient(120% 90% at 50% 40%, #000 30%, transparent 78%);
+  mask-image: radial-gradient(120% 90% at 50% 40%, #000 30%, transparent 78%);
+}
+@keyframes aurora-drift-a {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to   { transform: translate3d(6vw, 5vh, 0) scale(1.12); }
+}
+@keyframes aurora-drift-b {
+  from { transform: translate3d(0, 0, 0) scale(1.05); }
+  to   { transform: translate3d(-7vw, 6vh, 0) scale(0.95); }
+}
+@keyframes aurora-drift-c {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to   { transform: translate3d(-5vw, -7vh, 0) scale(1.14); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .aurora-blob {
+    animation: none !important;
+  }
+}
+
 /* Numbers align in columns */
 .tabular {
   font-variant-numeric: tabular-nums;

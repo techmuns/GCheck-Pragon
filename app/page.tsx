@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import SearchForm from "@/components/SearchForm";
+import AuroraBackground from "@/components/AuroraBackground";
 import PrepCountdown from "@/components/PrepCountdown";
 import ResearchProgress from "@/components/ResearchProgress";
 import BriefView from "@/components/BriefView";
@@ -118,6 +119,10 @@ export default function Home() {
         centered ? "justify-center" : ""
       }`}
     >
+      {/* Calm aurora backdrop — behind the search box and lead-in states; it
+          steps aside once the data brief takes over. */}
+      {centered && <AuroraBackground />}
+
       {phase === "idle" && <SearchForm onSubmit={start} />}
 
       {showPrep && (
