@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { anchorNames, directorByDin, companyByUrl, cinUrl, resolveDirector } from "@/lib/collectors/indiafilings";
 import { queryLadder } from "@/lib/collectors/news";
+import { readArticles } from "@/lib/collectors/reader";
+import { extractInsights, readerTask } from "@/lib/insights";
+import { hasReader } from "@/lib/collectors/env";
 import { getConfig } from "@/lib/store";
+import type { Subject } from "@/lib/types";
 
 // ── Development probe ───────────────────────────────────────────────────────
 // The repo has no test runner, and the parsers here read third-party HTML that
@@ -57,6 +61,29 @@ export async function GET(req: Request): Promise<NextResponse> {
       return ok({ subject: record.name, din: record.din, queries: plan.length, plan }, started);
     }
 
+    // Open one article and extract from it, so the reader chain and the role
+    // extraction can be checked against a real page one at a time.
+    const read = params.get("read");
+    if (read) {
+      if (!hasReader()) return ok({ error: "No reader configured — set MUNSHOT_TOKEN or FIRECRAWL_API_KEY." }, started);
+      const subject: Subject = {
+        type: "director",
+        company: params.get("subject") ?? "CHIRAAG KAPIL",
+        promoters: [],
+        din: params.get("din2") ?? "07013291",
+        anchors: (params.get("companies") ?? "SAARTHI TECHPRO PRIVATE LIMITED").split(",").filter(Boolean),
+      };
+      const articles = await readArticles([read], readerTask(subject));
+      const insights = await extractInsights(subject, articles);
+      return ok(
+        {
+          read: articles.map((a) => ({ url: a.url, readBy: a.readBy, chars: a.text.length, preview: a.text.slice(0, 400) })),
+          insights,
+        },
+        started,
+      );
+    }
+
     return NextResponse.json(
       {
         usage: [
@@ -64,6 +91,7 @@ export async function GET(req: Request): Promise<NextResponse> {
           "?cin=U72900DL2019PTC358371",
           "?name=Manik+Mehta&company=Saarthi+Techpro",
           "?ladder=07013291",
+          "?read=<article-url>",
         ],
       },
       { status: 400 },

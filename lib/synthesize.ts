@@ -74,11 +74,39 @@ async function enhanceRedFlagSummary(
     collected.flatMap((c) => c.hits.filter((h) => h.confidence === "unverified").map((h) => h.url ?? h.title)),
   );
 
-  // The evidence the model may cite — exactly the brief's real citations.
+  // What each cited article turned out to say, once it was actually opened.
+  // Keyed by URL so it can be attached to the citation it belongs to — the
+  // citation numbering stays the deterministic brief's, which is what keeps
+  // every [ref] in the output checkable.
+  const insightByUrl = new Map<string, Record<string, unknown>>();
+  for (const c of collected) {
+    for (const h of c.hits) {
+      if (h.extra?.category !== "insight" || !h.url) continue;
+      insightByUrl.set(h.url, { ...h.extra, what: h.title, quote: h.snippet });
+    }
+  }
+
+  // The evidence the model may cite — exactly the brief's real citations. A
+  // title alone was never enough to write from: it says a matter exists and
+  // nothing about what it was or who was on which side of it.
   const evidenceLines = det.citations
     .map((c) => {
       const caveat = nameOnly.has(c.url ?? c.label) ? "  ⚠ NAME MATCH ONLY — not confirmed as the subject" : "";
-      return `[${c.ref}] (${c.sourceName}) ${c.label}${caveat}`;
+      const insight = c.url ? insightByUrl.get(c.url) : undefined;
+      const detail = insight
+        ? "\n    " +
+          [
+            `READ IN FULL: ${insight.what}`,
+            insight.subjectRole ? `subject's role: ${insight.subjectRole}` : "",
+            insight.authority ? `authority: ${insight.authority}` : "",
+            insight.status ? `status: ${insight.status}` : "",
+            insight.amount ? `amount: ${insight.amount}` : "",
+            insight.polarity ? `polarity: ${insight.polarity}` : "",
+          ]
+            .filter(Boolean)
+            .join(" · ")
+        : "";
+      return `[${c.ref}] (${c.sourceName}) ${c.label}${caveat}${detail}`;
     })
     .join("\n");
 
@@ -94,6 +122,8 @@ async function enhanceRedFlagSummary(
     "6. Also return a one-line headline in plain English summarising the overall picture for this subject.",
     "7. Evidence marked 'NAME MATCH ONLY' concerns someone who shares the subject's name and may not be them. Never write it as something the subject did, and never let it set the severity. Mention it at most once, as 'info', worded as unconfirmed.",
     "8. If SUBJECT IDENTITY says it was not established, say so in the headline — the reader must know the brief could not confirm which person of that name it covers.",
+    "9. Where the evidence gives the subject's ROLE in a matter (complainant, petitioner, accused, defendant, respondent), the finding MUST state it. 'X filed a suit alleging Y' and 'X was sued for Y' are opposite facts; never write one for the other. A complainant is not accused of the thing they complained about, and their severity must reflect that. Where the role is given as 'unclear' or 'not_mentioned', say the matter names X without stating their role, and keep it as 'info'.",
+    "10. Evidence marked READ IN FULL was opened and read; its wording is what the article actually says. Prefer it over the headline beside it, which is only a title.",
   ].join("\n");
 
   const user = [

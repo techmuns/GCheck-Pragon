@@ -14,6 +14,14 @@ export const env = {
   munshotNewsUrl: process.env.MUNSHOT_NEWS_URL || "https://fastapi.muns.io/tools/news-search",
   munshotCountry: process.env.MUNSHOT_COUNTRY || "IN",
 
+  // Article reader. A headline says a matter exists; only the body says what it
+  // was and — the part that changes the whole reading — whether the subject
+  // brought the complaint or answered it. Muns reuses MUNSHOT_TOKEN; Firecrawl
+  // is the optional fallback for a publisher it cannot open.
+  munshotReaderUrl: process.env.MUNSHOT_READER_URL || "https://fastapi.muns.io/tools/web-reader",
+  firecrawlApiKey: process.env.FIRECRAWL_API_KEY,
+  firecrawlUrl: process.env.FIRECRAWL_URL || "https://api.firecrawl.dev/v1/scrape",
+
   // Exchange filings & announcements (BSE/NSE/DRHP/screener.in). Same Muns
   // platform as the search backend, so it reuses MUNSHOT_TOKEN unless a
   // dedicated FILINGS_TOKEN is set. Needs a stock ticker on the subject.
@@ -53,6 +61,19 @@ export const env = {
 
 export function hasOpenAI(): boolean {
   return Boolean(env.openaiApiKey);
+}
+
+/** Can an article be opened at all? With neither credential the brief is built
+ *  from headlines, and says so rather than pretending it read anything. */
+export function hasReader(): boolean {
+  return Boolean(env.munshotToken || env.firecrawlApiKey);
+}
+
+/** How many articles one run may open. Each costs a reader call and an LLM
+ *  extraction, so it is the main cost dial on a deep run. */
+export function maxArticleReads(): number {
+  const raw = Number(process.env.MAX_ARTICLE_READS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 8;
 }
 
 export function hasPrivateCircleCreds(): boolean {

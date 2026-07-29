@@ -1,8 +1,10 @@
 import type { CollectorResult, RawHit, Subject } from "../types";
 import { allAnchorsOf, entitiesOf, entityMentioned, gradesIdentity, matchKeywords, subjectConfidence } from "../queries";
-import { env } from "./env";
-import { canonicalUrl, fetchWithTimeout, stripHtml, type Collector } from "./types";
+import { env, hasReader, maxArticleReads } from "./env";
+import { canonicalUrl, fetchWithTimeout, stripHtml, type Collector, type CollectorContext } from "./types";
 import { EmptyAnswer, describe, extractRows, sleep, withRetry, type Backend, type WebResult } from "./google";
+import { readArticles } from "./reader";
+import { extractInsights, readerTask } from "../insights";
 import { cached } from "../searchCache";
 
 // ── News deep dive ──────────────────────────────────────────────────────────
@@ -109,16 +111,137 @@ export const newsCollector: Collector = async (ctx) => {
     return { ...base, status: "error", note: `News search unavailable: ${failure}`, hits: [], queries: ran };
   }
 
+  const read = await readTheImportantOnes(ctx, hits);
+  hits.push(...read.hits);
+
   const flagged = hits.filter((h) => (h.matchedKeywords?.length ?? 0) > 0).length;
   const note =
-    `${plan.length} searches across the subject and their companies; ${hits.length} distinct article(s)` +
+    `${plan.length} searches across the subject and their companies; ${hits.length - read.hits.length} distinct article(s)` +
     (flagged > 0 ? `, ${flagged} matching a red-flag keyword` : "") +
     (offTarget > 0 ? `. Dropped ${offTarget} naming a different entity` : "") +
-    (failure ? `. Some searches failed: ${failure}` : "") +
-    ".";
+    `. ${read.note}` +
+    (failure ? ` Some searches failed: ${failure}` : "");
 
-  return { ...base, status: "done", note, hits, queries: ran };
+  return { ...base, status: "done", note, hits, queries: [...ran, ...read.urls] };
 };
+
+// ── Reading the ones that matter ────────────────────────────────────────────
+
+/**
+ * Open the highest-signal articles and turn them into structured findings.
+ *
+ * Reading is the expensive step — a fetch and an LLM call each — so it is spent
+ * where the answer is most likely to change the brief: on stories that hit a
+ * red-flag keyword, that are confirmed as this person's, or whose wording
+ * suggests a proceeding. Everything else stays a headline, and the note says
+ * how many were left that way rather than implying the whole sweep was read.
+ */
+async function readTheImportantOnes(
+  ctx: CollectorContext,
+  hits: RawHit[],
+): Promise<{ hits: RawHit[]; urls: string[]; note: string }> {
+  const { subject, emit } = ctx;
+
+  if (!hasReader()) {
+    return { hits: [], urls: [], note: "Articles were not opened — no reader configured, so findings are from headlines only." };
+  }
+
+  const ranked = hits
+    .filter((h) => h.url)
+    .map((h) => ({ hit: h, score: readScore(h) }))
+    .filter((r) => r.score >= 3)
+    .sort((a, b) => b.score - a.score);
+
+  const cap = maxArticleReads();
+  const chosen = ranked.slice(0, cap);
+  if (chosen.length === 0) {
+    return { hits: [], urls: [], note: "No article scored high enough to be worth opening." };
+  }
+
+  const skipped = ranked.length - chosen.length;
+  emit?.(
+    `Opening ${chosen.length} of ${hits.length} article(s)` + (skipped > 0 ? ` — ${skipped} more qualified but were over the cap of ${cap}` : ""),
+  );
+
+  const urls = chosen.map((c) => c.hit.url!);
+  const articles = await readArticles(urls, readerTask(subject), emit);
+  if (articles.length === 0) {
+    return { hits: [], urls, note: `Tried to open ${urls.length} article(s); none could be read.` };
+  }
+
+  emit?.(`Read ${articles.length} article(s) — extracting what concerns the subject`);
+  const insights = await extractInsights(subject, articles, emit);
+
+  const byUrl = new Map(hits.map((h) => [canonicalUrl(h.url), h] as const));
+  const out: RawHit[] = insights.map((insight) => {
+    const origin = byUrl.get(canonicalUrl(insight.url));
+    return {
+      title: insight.what,
+      url: insight.url,
+      snippet: insight.quote,
+      entity: insight.entity ?? origin?.entity,
+      date: insight.date ?? origin?.date,
+      matchedKeywords: origin?.matchedKeywords,
+      // The article was opened and read, so attribution rests on what it says
+      // rather than on whether the name happened to appear in a snippet.
+      confidence: insight.role === "not_mentioned" ? origin?.confidence : "confirmed",
+      extra: {
+        category: "insight",
+        subjectRole: insight.role,
+        roleEvidence: insight.roleEvidence,
+        about: insight.about,
+        severity: insight.severity,
+        polarity: insight.polarity,
+        authority: insight.authority,
+        status: insight.status,
+        amount: insight.amount,
+        readBy: articles.find((a) => canonicalUrl(a.url) === canonicalUrl(insight.url))?.readBy,
+        sourceTitle: insight.title,
+      },
+    };
+  });
+
+  const note =
+    `Opened ${articles.length} of ${urls.length} article(s) and extracted ${out.length} finding(s)` +
+    (skipped > 0 ? `; ${skipped} further article(s) qualified but were over the read cap` : "") +
+    ".";
+  return { hits: out, urls, note };
+}
+
+/** Wording that means a proceeding, not merely a mention. */
+const PROCEEDING =
+  /allegation|complaint|\bFIR\b|police|court|suit|petition|probe|arrest|cheating|extortion|breach of trust|default|insolvency|NCLT|SEBI|\bED\b|tribunal|summons|injunction/i;
+
+const HARD_KEYWORDS = ["fraud", "wilful", "defaulter", "cbi", "criminal", "eow"];
+
+/** Low-signal hosts: aggregators and directories restate a headline without
+ *  adding the facts a read exists to recover. */
+const LOW_VALUE_HOST = /blogspot|wordpress|\.pdf$|zaubacorp|indiafilings|tofler|justdial|linkedin|facebook|twitter|x\.com/i;
+
+function readScore(h: RawHit): number {
+  const kws = h.matchedKeywords ?? [];
+  const text = `${h.title} ${h.snippet ?? ""}`;
+  let score = 0;
+
+  if (kws.some((k) => HARD_KEYWORDS.includes(k.toLowerCase()))) score += 4;
+  else if (kws.length > 0) score += 2;
+  if (h.confidence === "confirmed") score += 2;
+  if (PROCEEDING.test(text)) score += 2;
+  if (h.extra?.namesSubject) score += 2;
+  // Found by searching one of the subject's companies: the company IS the link,
+  // so the person being absent from the headline is expected rather than
+  // suspicious. This is the shape the sharpest story takes — a report that
+  // names the company in the headline and the director in the body.
+  if (h.extra?.via === "company") score += 1;
+  // An unconfirmed hit is worth less, but only mildly: reading it is precisely
+  // how we find out whether it is a namesake, and the LLM pass says so
+  // explicitly when it is. Penalising it heavily would skip the article that
+  // would have settled the question.
+  if (h.confidence === "unverified" && !h.extra?.namesSubject) score -= 1;
+  if (LOW_VALUE_HOST.test(h.url ?? "")) score -= 2;
+
+  return score;
+}
 
 // ── The ladder ──────────────────────────────────────────────────────────────
 

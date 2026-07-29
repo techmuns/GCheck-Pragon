@@ -125,6 +125,10 @@ export const googleCollector: Collector = async ({ subject, keywords }) => {
           entity: e.name,
           matchedKeywords: matchKeywords(haystack, kw),
           confidence,
+          // Whether the subject is actually named, as distinct from whether the
+          // result is on-topic. Downstream this decides both how a finding is
+          // worded and whether the article is worth opening.
+          extra: { namesSubject: entityMentioned(haystack, subject.company), via: "subject" },
         });
       }
     } catch (err) {

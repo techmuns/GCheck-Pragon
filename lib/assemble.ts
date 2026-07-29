@@ -157,14 +157,26 @@ function redFlagSection(title: string, ctx: Ctx): RenderedSection {
   // just as plainly, because then everything below is only name-matched.
   if (ctx.subject.type === "director") findings.push(identityFinding(ctx));
 
+  // Articles that were actually opened and read come first. They carry what a
+  // headline cannot — the authority, the status, and which side of the matter
+  // the subject was on — so they are the sharpest thing in the section.
+  findings.push(...insightFindings(ctx));
+
   // Keyword hits from the coverage sweeps. Both are read, deduped on the
   // canonical URL, so a story indexed by the news engine and the web engine
   // alike is one finding rather than two.
+  // An article that was opened has already been stated above, with the role the
+  // report actually gave it. Repeating its headline here would say the same
+  // thing again in the vaguer words the read exists to replace.
+  const alreadyRead = new Set(insightHits(ctx).map(({ hit }) => canonicalUrl(hit.url)).filter(Boolean));
+
   const flagged = new Map<string, { hit: RawHit; source: CollectorResult }>();
   for (const c of PRESS_IDS.map((sid) => ctx.byId[sid])) {
     if (c?.status !== "done") continue;
     for (const h of c.hits) {
       if ((h.matchedKeywords?.length ?? 0) === 0) continue;
+      if (h.extra?.category === "insight") continue;
+      if (alreadyRead.has(canonicalUrl(h.url))) continue;
       const key = canonicalUrl(h.url) ?? `title:${h.title.toLowerCase()}`;
       const existing = flagged.get(key);
       if (!existing || rankHit(h) > rankHit(existing.hit)) flagged.set(key, { hit: h, source: c });
@@ -247,6 +259,68 @@ function redFlagSection(title: string, ctx: Ctx): RenderedSection {
     );
   }
   return { id: "red-flags", title, findings };
+}
+
+/** Insight hits: the structured facts read out of a full article. */
+function insightHits(ctx: Ctx): Array<{ hit: RawHit; source: CollectorResult }> {
+  const out: Array<{ hit: RawHit; source: CollectorResult }> = [];
+  for (const sid of PRESS_IDS) {
+    const c = ctx.byId[sid];
+    if (c?.status !== "done") continue;
+    for (const hit of c.hits) if (hit.extra?.category === "insight") out.push({ hit, source: c });
+  }
+  return out;
+}
+
+/**
+ * Findings from articles that were read rather than skimmed.
+ *
+ * The wording is decided by the role, and that is not a stylistic choice: "X
+ * filed a suit alleging fraud" and "X was sued for fraud" are opposite facts,
+ * and a brief that prints the second when the source says the first has
+ * defamed the person it was meant to inform. Where the article does not settle
+ * the role, the finding says so instead of choosing.
+ */
+function insightFindings(ctx: Ctx): Finding[] {
+  const out: Finding[] = [];
+  for (const { hit, source } of insightHits(ctx)) {
+    // Positives belong in their own section, never in the concerns list.
+    if (hit.extra?.polarity === "positive") continue;
+
+    const role = strField(hit.extra?.subjectRole);
+    const authority = strField(hit.extra?.authority);
+    const status = strField(hit.extra?.status);
+    const name = ctx.subject.company;
+    const what = hit.title;
+
+    let text: string;
+    if (role === "complainant" || role === "petitioner") {
+      // The subject brought this. It is still worth knowing they are in
+      // litigation — but it is not an allegation against them.
+      text = `${name} is the ${role} in this matter: ${what}`;
+    } else if (role === "accused" || role === "defendant" || role === "respondent") {
+      text = `${what} — ${name} is named as ${role}.`;
+    } else if (role === "not_mentioned") {
+      text = `${what} — ${name} is not named in the report.`;
+    } else {
+      text = `${what} — the report does not state ${name}'s role in it.`;
+    }
+    if (authority) text += ` ${authority}.`;
+    if (status) text += ` Status: ${status}.`;
+
+    // An unsettled role cannot carry a risk severity: the brief would be
+    // asserting a position the article declined to take.
+    const claimed = strField(hit.extra?.severity);
+    const settled = role !== "unclear" && role !== "not_mentioned";
+    const severity: Severity = !settled ? "info" : claimed === "red" ? "red" : claimed === "amber" ? "amber" : "info";
+
+    out.push({
+      severity,
+      text: text.replace(/\s+/g, " ").trim(),
+      sourceRef: ctx.cite(source.sourceName, strField(hit.extra?.sourceTitle) ?? hit.title, hit.url),
+    });
+  }
+  return out.slice(0, 6);
 }
 
 /**
@@ -653,6 +727,10 @@ function pressSection(id: string, title: string, ctx: Ctx): RenderedSection {
   const byKey = new Map<string, { hit: RawHit; source: CollectorResult }>();
   for (const c of completed) {
     for (const h of c.hits) {
+      // An insight is what an article SAID, not the article. It leads Key
+      // Concerns; here it would replace the headline with a sentence about the
+      // headline and read as a second, different story.
+      if (h.extra?.category === "insight") continue;
       const key = canonicalUrl(h.url) ?? `title:${h.title.toLowerCase()}`;
       const existing = byKey.get(key);
       if (!existing || rankHit(h) > rankHit(existing.hit)) byKey.set(key, { hit: h, source: c });
