@@ -137,7 +137,15 @@ Search backends are metered (SerpAPI's free tier is 100 calls a **month**, and a
 brief costs roughly three per entity), so identical queries reuse a recent
 result instead of spending quota twice. Re-running the same company is free.
 
-- TTL defaults to 6 hours; override with `SEARCH_CACHE_TTL_SECONDS`.
+Every metered lookup goes through it: the web sweep, the news pass, Indian
+Kanoon, and exchange filings.
+
+- TTL defaults to **15 minutes**; override with `SEARCH_CACHE_TTL_SECONDS`.
+  Short enough that a brief re-run tomorrow reflects tomorrow's news, long
+  enough that re-running a subject while you review it costs nothing.
+- Two runs of the same subject launched at once share a single request rather
+  than both missing the cache — the in-flight call is what's cached, not just
+  its result.
 - Failures are never cached, so replacing an expired token recovers immediately
   rather than after the TTL lapses.
 - The cache is in-memory, so a redeploy or a free-instance spin-down clears it.

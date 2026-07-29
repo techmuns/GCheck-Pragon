@@ -21,6 +21,10 @@ services:
       # it so search falls back instead of going dark when it does.
       - key: MUNSHOT_TOKEN
         sync: false
+      # How long an identical search is reused before it costs quota again.
+      # 15 minutes by default — raise it to stretch a metered plan further.
+      - key: SEARCH_CACHE_TTL_SECONDS
+        value: "900"
       # Optional richer / more reliable sources — set in the dashboard if you have them.
       - key: SERPAPI_KEY
         sync: false

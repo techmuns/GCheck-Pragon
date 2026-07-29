@@ -1,6 +1,7 @@
 import type { CollectorResult, RawHit } from "../types";
 import { env, hasFilings } from "./env";
 import { fetchWithTimeout, stripHtml, type Collector } from "./types";
+import { cached } from "../searchCache";
 
 // ── Filings & Disclosures collector ─────────────────────────────────────────
 // Exchange filings, annual reports, earnings and concalls from
@@ -47,7 +48,9 @@ export const filingsCollector: Collector = async ({ subject }) => {
   }
 
   try {
-    const items = await fetchFilings(ticker);
+    // Metered on the same platform as search, and a ticker's filing list is
+    // identical across two runs minutes apart — share it.
+    const items = await cached(`filings:${env.filingsCountry}:${ticker}`, () => fetchFilings(ticker));
     const hits: RawHit[] = items.map((it): RawHit => {
       const haystack = `${it.title} ${it.description ?? ""}`.toLowerCase();
       const matched = CONCERN_TERMS.filter((t) => haystack.includes(t));

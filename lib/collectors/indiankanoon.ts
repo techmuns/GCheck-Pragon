@@ -2,6 +2,7 @@ import type { CollectorResult, RawHit } from "../types";
 import { entitiesOf, entityMentioned } from "../queries";
 import { env } from "./env";
 import { fetchWithTimeout, stripHtml, type Collector } from "./types";
+import { cached } from "../searchCache";
 
 // ── Indian Kanoon collector ────────────────────────────────────────────────
 // Litigation search for the company and each promoter. Per the checklist:
@@ -36,8 +37,12 @@ export const indianKanoonCollector: Collector = async ({ subject }) => {
   for (const e of entities) {
     ranQueries.push(e.name);
     try {
-      const cases =
-        mode === "munshot" ? await searchViaMunshot(e.name) : mode === "api" ? await searchApi(e.name) : await searchPublic(e.name);
+      // Cached like the web sweep: the munshot mode spends the same metered
+      // search endpoint, and a case list is the slowest-moving thing we fetch —
+      // a judgment handed down mid-window is not a thing that happens.
+      const cases = await cached(`kanoon:${mode}:${e.name}`, () =>
+        mode === "munshot" ? searchViaMunshot(e.name) : mode === "api" ? searchApi(e.name) : searchPublic(e.name),
+      );
       // Only keep cases whose title actually names this party — a relevance
       // search returns neighbouring parties (sibling brands) too.
       const relevant = cases.filter((c) => {
