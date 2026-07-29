@@ -130,3 +130,15 @@ It returns **503** only when search is genuinely broken (no valid token *and* no
 Google backend), so an uptime checker can alert on the status code alone. States
 are `valid`, `expiring` (under 48h left), `expired`, `absent`, and `opaque` (a
 token with no readable expiry).
+
+### Search result cache
+
+Search backends are metered (SerpAPI's free tier is 100 calls a **month**, and a
+brief costs roughly three per entity), so identical queries reuse a recent
+result instead of spending quota twice. Re-running the same company is free.
+
+- TTL defaults to 6 hours; override with `SEARCH_CACHE_TTL_SECONDS`.
+- Failures are never cached, so replacing an expired token recovers immediately
+  rather than after the TTL lapses.
+- The cache is in-memory, so a redeploy or a free-instance spin-down clears it.
+- `GET /api/health` reports `search.cache` — `hits` are metered calls not spent.

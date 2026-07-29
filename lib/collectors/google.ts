@@ -2,6 +2,7 @@ import type { CollectorResult, RawHit } from "../types";
 import { entitiesOf, matchKeywords, entityMentioned } from "../queries";
 import { env } from "./env";
 import { fetchWithTimeout, stripHtml, type Collector } from "./types";
+import { cached } from "../searchCache";
 
 // ── Google / News collector ────────────────────────────────────────────────
 // Sweeps each entity against the red-flag keyword set. Three backends, picked
@@ -184,7 +185,7 @@ async function runChain(
   const failures: string[] = [];
   for (const backend of chain) {
     try {
-      const results = await withRetry(() => runBackend(backend, query));
+      const results = await cached(`web:${backend}:${query}`, () => withRetry(() => runBackend(backend, query)));
       return { results, backend, failure: failures[0] };
     } catch (err) {
       failures.push(err instanceof Error ? err.message : String(err));
@@ -209,8 +210,8 @@ async function runNewsChain(query: string): Promise<WebResult[]> {
   let failure: string | undefined;
   for (const backend of newsChain()) {
     try {
-      return await withRetry(() =>
-        backend === "munshot" ? searchMunshotNews(query) : searchSerpApiNews(query),
+      return await cached(`news:${backend}:${query}`, () =>
+        withRetry(() => (backend === "munshot" ? searchMunshotNews(query) : searchSerpApiNews(query))),
       );
     } catch (err) {
       failure = err instanceof Error ? err.message : String(err);

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { backendChain } from "@/lib/collectors/google";
 import { tokenHealth } from "@/lib/tokenHealth";
+import { cacheStats } from "@/lib/searchCache";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,9 @@ export async function GET() {
         backends: chain,
         primary: chain[0],
         hasDurableFallback: token.hasFallback,
+        // Cache hits are metered calls not spent — the number to watch when
+        // running on SerpAPI's free monthly quota.
+        cache: cacheStats(),
       },
       munshotToken: {
         state: token.state,
