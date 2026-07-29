@@ -65,10 +65,19 @@ export default function SearchForm({ onSubmit, busy }: Props) {
           kind={isDirector ? "promoter" : "company"}
           value={company}
           onChange={setCompany}
-          placeholder={isDirector ? "e.g. Mukesh Ambani" : "e.g. Reliance Industries"}
+          // The box takes a DIN as readily as a name — say so where the user is
+          // already looking, because nothing else on the page reveals it.
+          placeholder={isDirector ? "e.g. Mukesh Ambani — or DIN 00001695" : "e.g. Reliance Industries"}
           label={isDirector ? "Director / Individual" : "Company"}
           autoFocus
         />
+        {/* A placeholder disappears the moment they start typing, so the reason
+            to prefer a DIN is stated under the field, where it stays. */}
+        {isDirector && (
+          <p className="text-[12.5px] leading-relaxed text-ink-secondary">
+            Know their DIN? Type it instead — several directors can share a name, but never a DIN.
+          </p>
+        )}
       </div>
 
       <button

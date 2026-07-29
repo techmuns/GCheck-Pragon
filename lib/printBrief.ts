@@ -279,7 +279,15 @@ function buildExecutive(
       // Lead with the matter itself, not its bucket — the reader should learn
       // what the issue is from the first clause. Left capitalised: the titles
       // start with names and acronyms that must not be de-capitalised.
-      parts.push(`Sharpest signal — ${stripPeriod(top.title)} (${top.claim.toLowerCase()}).`);
+      const lead = stripPeriod(top.title);
+      // A matter too long to state in full ends in an ellipsis; bolting the
+      // claim type onto that makes a sentence that doesn't parse, so the tag is
+      // added only where the sentence actually finished.
+      parts.push(
+        lead.endsWith("…")
+          ? `Sharpest signal — ${lead}`
+          : `Sharpest signal — ${lead} (${top.claim.toLowerCase()}).`,
+      );
     }
     const n = concerns.length;
     if (n > 1) parts.push(`${n} itemised concern${n === 1 ? "" : "s"} rank above the review threshold.`);
@@ -463,20 +471,20 @@ function statementAndEvidence(
   const count = statement.match(/^(\d+)\s+([a-z ]+?)\s+record\(?s?\)?\s+(?:surfaced|found)/i);
   if (count && headline) {
     return {
-      title: shorten(headline, 92),
-      evidence: snippet ? shorten(snippet, 92) : undefined,
+      title: trimToPhrase(headline, 92),
+      evidence: snippet ? trimToPhrase(snippet, 92) : undefined,
       countFact: { label: "Records", value: `${count[1]} on file` },
     };
   }
 
   if (!statement || restatesHeadline) {
-    return { title: shorten(headline || statement, 92), evidence: snippet ? shorten(snippet, 92) : undefined };
+    return { title: trimToPhrase(headline || statement, 92), evidence: snippet ? trimToPhrase(snippet, 92) : undefined };
   }
   const evidence = headline || snippet;
   const duplicate = evidence && dedupeKey(evidence) === dedupeKey(statement);
   return {
-    title: shorten(statement, 92),
-    evidence: evidence && !duplicate ? shorten(evidence, 92) : undefined,
+    title: trimToPhrase(statement, 92),
+    evidence: evidence && !duplicate ? trimToPhrase(evidence, 92) : undefined,
   };
 }
 
@@ -646,7 +654,7 @@ function buildDevelopments(bySource: SourceIndex, citations: Citation[]): Develo
       const flagged = (h.matchedKeywords?.length ?? 0) > 0;
       out.push({
         date: normaliseDate(h.date),
-        headline: shorten(stripQuotes(h.title), 90),
+        headline: trimToPhrase(stripQuotes(h.title), 90),
         // One keyword: the status column shares a narrow portrait column with
         // the headline, and the headline is what carries the news.
         status: flagged ? `Flagged: ${h.matchedKeywords![0]}` : "Routine filing",
@@ -667,7 +675,7 @@ function buildDevelopments(bySource: SourceIndex, citations: Citation[]): Develo
       const hard = kws.some((k) => ["fraud", "cbi", "eow", "criminal", "wilful", "defaulter"].includes(k.toLowerCase()));
       out.push({
         date: normaliseDate(h.date),
-        headline: shorten(stripQuotes(h.title), 90),
+        headline: trimToPhrase(stripQuotes(h.title), 90),
         status: kws.length > 0 ? `Adverse: ${kws[0]}` : "Coverage",
         tone: hard ? "red" : kws.length > 0 ? "amber" : "neutral",
         sourceRef: h.url ? refByUrl.get(h.url) : undefined,
@@ -1040,6 +1048,75 @@ function shorten(s: string, max: number): string {
   const t = s.trim();
   if (t.length <= max) return t;
   return `${t.slice(0, max - 1).trimEnd()}…`;
+}
+
+// ── Trimming prose to fit ────────────────────────────────────────────────────
+// A finding is a written sentence, and a sentence cut at character 92 stops
+// mid-thought: "Rajesh Exports is implicated in a Rs.2,485 crore default,
+// raising serious concerns about it…". Read alone that is merely ugly; read
+// inside the executive verdict, which appends the claim type, it becomes a
+// sentence that doesn't parse — "…concerns about it… (alleged)."
+//
+// So prose is cut where the language already breaks: at the end of the first
+// sentence, else at the last clause boundary that still leaves a substantial
+// phrase. Only when neither exists does it fall back to an ellipsis, and even
+// then on a word boundary. Names and labels keep the plain cut above — a
+// clause-trimmed case name would misstate the case.
+
+/** Words that leave a phrase hanging if it ends on them. */
+const DANGLING =
+  /\s+(?:and|or|but|with|for|of|in|on|at|to|by|from|as|that|which|while|after|before|amid|over|into|under|against|about|including|following|alleging|raising|citing|belonging|relating|regarding|concerning|involving|pertaining|its|their|the|a|an)$/i;
+
+function stripDangling(s: string): string {
+  let out = s.trim();
+  // Repeatedly, because trimming "the" exposes "to" beneath it, and "belonging"
+  // beneath that — a phrase can end on a run of them.
+  for (let i = 0; i < 4; i += 1) {
+    const next = out.replace(/[\s,;:.—–-]+$/, "").replace(DANGLING, "");
+    if (next === out) break;
+    out = next;
+  }
+  return out.trim();
+}
+
+function trimToPhrase(s: string, max: number): string {
+  return balanceQuotes(trimToLength(s, max));
+}
+
+function trimToLength(s: string, max: number): string {
+  const t = s.trim().replace(/\s+/g, " ");
+  if (t.length <= max) return stripDangling(t) || t;
+
+  // Every cut has to leave enough behind to still say something — a two-word
+  // opener followed by an ellipsis is not a finding.
+  const floor = Math.floor(max * 0.4);
+
+  // The first sentence, when there is more than one and it carries the matter.
+  const end = t.search(/[.?!]\s+\S/);
+  if (end > 0) {
+    const first = t.slice(0, end + 1);
+    if (first.length <= max && first.length >= floor) return stripDangling(first) || first;
+  }
+
+  // Otherwise the last clause boundary inside the budget.
+  const head = t.slice(0, max);
+  const cut = Math.max(head.lastIndexOf(", "), head.lastIndexOf("; "), head.lastIndexOf(" — "), head.lastIndexOf(" – "));
+  if (cut >= floor) {
+    const clause = stripDangling(head.slice(0, cut));
+    if (clause) return clause;
+  }
+
+  // Nothing to break on: cut on a word and say so with the ellipsis.
+  const space = head.lastIndexOf(" ");
+  const words = space >= floor ? head.slice(0, space) : head.slice(0, max - 1);
+  return `${stripDangling(words) || words.trim()}…`;
+}
+
+/** An opening quote whose closing half was trimmed away reads as a typo. Drop
+ *  the orphan rather than leave the line half-quoted. */
+function balanceQuotes(s: string): string {
+  const quotes = s.match(/["“”]/g) ?? [];
+  return quotes.length % 2 === 0 ? s : s.replace(/["“”]/, "").replace(/\s{2,}/g, " ").trim();
 }
 
 function normaliseDate(raw?: string): string | undefined {
