@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import type { SourceProgress, Subject } from "@/lib/types";
+import { useMemo } from "react";
+import type { RunEvent, SourceProgress, Subject } from "@/lib/types";
+import ActivityLog from "./ActivityLog";
 
 interface Props {
   subject: Subject;
   progress: SourceProgress[];
-  /** Fired once the UI has walked through every source in turn. */
-  onWalkComplete?: () => void;
+  /** The run's activity log, newest last. */
+  events?: RunEvent[];
 }
 
 const STATUS_LABEL: Record<SourceProgress["status"], string> = {
@@ -49,49 +50,39 @@ const VISITING: Record<string, string> = {
   cibil: "Checking loan-default records",
 };
 
-// ── The walk ────────────────────────────────────────────────────────────────
-// The UI visits one source at a time on its own steady rhythm, so the user reads
-// a clear "now this, then this" sequence rather than watching several backend
-// requests resolve at once in whatever order they happen to finish. The pacing
-// is presentation only — every status and count shown is the real result for
-// that source, and rows the walk has passed keep whatever the backend reported.
-const DWELL_MS = 1000;
-// Don't hold on one source forever if its status never lands.
-const MAX_HOLD_MS = 9000;
+// ── Real progress ───────────────────────────────────────────────────────────
+// This screen used to walk the sources on a one-second dwell timer of its own,
+// which was a nicely paced fiction: the backend runs them all at once, so the
+// row being highlighted was rarely the one actually working, and rows were
+// hidden until the animation reached them. On a run that now takes minutes and
+// opens real pages, that gap stops being cosmetic.
+//
+// The ring, the counter and the rhythm are kept. What drives them is the run.
 
 const RESOLVED = new Set(["done", "skipped", "error", "locked"]);
 
-export default function ResearchProgress({ subject, progress, onWalkComplete }: Props) {
+export default function ResearchProgress({ subject, progress, events = [] }: Props) {
   const total = progress.length;
 
-  // Index of the source being visited. It advances on a steady dwell timer, but
-  // never past a source whose real status hasn't landed yet — so the highlighted
-  // row is always genuinely in flight, and no row is left behind reading
-  // "Waiting". A cap keeps a stuck source from stalling the walk for good.
-  const [cursor, setCursor] = useState(0);
-  const settled = cursor < total && RESOLVED.has(progress[cursor]?.status);
+  const resolved = progress.filter((p) => RESOLVED.has(p.status)).length;
+  const running = progress.filter((p) => p.status === "running");
+  const step = total ? Math.min(resolved + (resolved < total ? 1 : 0), total) : 0;
 
-  useEffect(() => {
-    if (total === 0) return;
-    if (cursor >= total) {
-      onWalkComplete?.();
-      return;
-    }
-    const t = setTimeout(() => setCursor((c) => c + 1), settled ? DWELL_MS : MAX_HOLD_MS);
-    return () => clearTimeout(t);
-  }, [cursor, total, settled, onWalkComplete]);
-
-  const current = cursor < total ? progress[cursor] : null;
-  const step = Math.min(cursor + 1, Math.max(total, 1));
-
-  // Ring geometry — a sweep that closes as the walk moves through the list.
+  // Ring geometry — a sweep that closes as the sources actually settle.
   const R = 26;
   const CIRC = useMemo(() => 2 * Math.PI * R, [R]);
-  const walked = total ? Math.min(cursor, total) / total : 0;
+  const walked = total ? resolved / total : 0;
 
-  const line = current
-    ? `${VISITING[current.sourceId] ?? `Checking ${current.name}`}…`
-    : "Putting the brief together…";
+  // The live line is whatever the run last reported. The per-source narration
+  // is the fallback for the moment before the first event lands.
+  const latest = events[events.length - 1];
+  const line = latest
+    ? latest.text
+    : running.length > 0
+      ? `${VISITING[running[0].sourceId] ?? `Checking ${running[0].name}`}…`
+      : resolved >= total && total > 0
+        ? "Putting the brief together…"
+        : "Starting up…";
 
   return (
     <div className="card-surface fade-in mx-auto w-full max-w-3xl p-6 sm:p-8">
@@ -138,14 +129,14 @@ export default function ResearchProgress({ subject, progress, onWalkComplete }: 
         </div>
       </div>
 
-      {/* What we're doing right now — swaps as the walk moves on */}
-      <div className="mt-5 h-5">
-        <p key={cursor} className="msg-swap text-[13.5px] font-medium text-navy-primary">
+      {/* What the run is doing right now — the newest line of its own log */}
+      <div className="mt-5 min-h-5">
+        <p key={events.length} className="msg-swap text-[13.5px] font-medium text-navy-primary">
           {line}
         </p>
       </div>
 
-      {/* Walk progress */}
+      {/* Overall progress */}
       <div className="mt-2">
         <div className="h-1.5 w-full overflow-hidden rounded-full bg-soft-border">
           <div
@@ -155,17 +146,18 @@ export default function ResearchProgress({ subject, progress, onWalkComplete }: 
         </div>
       </div>
 
-      {/* Per-source rows — each revealed as the walk reaches it */}
+      {/* Per-source rows. All of them, from the start: the backend fans out in
+          parallel, so several are genuinely in flight at once and showing that
+          is the honest picture. Every running row is highlighted, not one. */}
       <ul className="mt-5 space-y-2">
-        {progress.map((p, i) => {
-          const visiting = i === cursor;
-          const upcoming = i > cursor;
-          // Only rows the walk has arrived at are on screen; the rest wait their
-          // turn, so the sequence reads one source at a time.
-          if (upcoming) return null;
+        {progress.map((p) => {
+          const visiting = p.status === "running";
           const locked = p.status === "locked";
           const waiting = p.status === "pending" || p.status === "running";
           const showNote = p.note && (locked || p.status === "error" || (p.status === "done" && p.hits === 0));
+          // The most recent thing this particular source said, shown inline so
+          // a row that is working for a minute shows what it is working on.
+          const own = lastEventFor(events, p.sourceId);
           return (
             <li
               key={p.sourceId}
@@ -192,6 +184,9 @@ export default function ResearchProgress({ subject, progress, onWalkComplete }: 
                   <span className="text-[12.5px] text-ink-secondary">{STATUS_LABEL[p.status]}</span>
                 )}
               </div>
+              {visiting && own && (
+                <p className="mt-1 truncate pl-[22px] text-[11.5px] leading-snug text-ink-secondary/80">{own.text}</p>
+              )}
               {visiting && waiting && (
                 <div className="bar-track mt-2 h-1 w-full overflow-hidden rounded-full bg-[rgba(23,43,77,0.06)]" />
               )}
@@ -201,9 +196,21 @@ export default function ResearchProgress({ subject, progress, onWalkComplete }: 
         })}
       </ul>
 
-      <p className="mt-5 text-center text-[12px] text-ink-secondary/80">
-        {cursor >= total && total > 0 ? "Almost there — writing it up." : "This usually takes under a minute."}
+      <ActivityLog events={events} />
+
+      <p className="mt-4 text-center text-[12px] text-ink-secondary/80">
+        {resolved >= total && total > 0
+          ? "Almost there — writing it up."
+          : "This one runs deep, so give it a few minutes. Everything it checks is listed above as it happens."}
       </p>
     </div>
   );
+}
+
+/** The newest line a given source contributed to the log. */
+function lastEventFor(events: RunEvent[], sourceId: string): RunEvent | undefined {
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].sourceId === sourceId) return events[i];
+  }
+  return undefined;
 }

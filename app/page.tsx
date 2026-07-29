@@ -16,7 +16,9 @@ type Phase = "idle" | "running" | "done" | "error";
 
 // A run is bounded server-side (each source has its own deadline), so anything
 // past this is a run that will never land — a recycled instance, most likely.
-const RUN_TIMEOUT_MS = 4 * 60 * 1000;
+// Generous, because a deep run genuinely takes minutes now: the news sweep runs
+// close to twenty searches and then opens and reads the articles worth reading.
+const RUN_TIMEOUT_MS = 10 * 60 * 1000;
 // Consecutive failed polls tolerated before giving up. At 500ms apart, this
 // rides out a brief blip without stringing the user along through an outage.
 const MAX_POLL_FAILURES = 10;
@@ -25,10 +27,6 @@ export default function Home() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [run, setRun] = useState<Run | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // The progress UI walks source by source at its own pace. The brief waits for
-  // that walk to finish even if the backend answers first, so the user always
-  // sees the full "collecting, one source at a time" sequence.
-  const [walked, setWalked] = useState(false);
   // The counted pre-search countdown runs first, over the request kick-off.
   // We track only whether its beats have finished; the prep view then *holds*
   // until the run actually lands, so a slow/cold-started backend never drops
@@ -38,7 +36,6 @@ export default function Home() {
   const [pending, setPending] = useState<Run["subject"] | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const onWalkComplete = useCallback(() => setWalked(true), []);
   const onPrepped = useCallback(() => setCountdownDone(true), []);
 
   const stopPolling = useCallback(() => {
@@ -53,7 +50,6 @@ export default function Home() {
   const start = useCallback(
     async (company: string, promoters: string[], type: "company" | "director" = "company") => {
       setError(null);
-      setWalked(false);
       setCountdownDone(false);
       // The director box can carry a DIN and a company alongside the name — an
       // autocomplete pick, or a DIN typed straight in. The request needs all of
@@ -130,15 +126,18 @@ export default function Home() {
     stopPolling();
     setRun(null);
     setError(null);
-    setWalked(false);
     setCountdownDone(false);
     setPending(null);
     setPhase("idle");
   }, [stopPolling]);
 
-  // Three staged views, in order: the counted countdown, the source walk, then
-  // the brief. Each waits for the one before it to finish its own beat, so a
-  // fast backend never cuts the sequence short.
+  // Two staged views: the counted countdown, then the run itself — the progress
+  // screen while it works, the brief once it is written.
+  //
+  // The progress screen used to hold the finished brief back until its own
+  // animation had walked every source. That was tolerable when a run took under
+  // a minute; on a run that opens and reads articles it would mean withholding
+  // a completed brief from someone who has been watching the work happen.
   const busy = phase === "running" || phase === "done";
   // "Prepped" means the countdown has finished AND the run has landed. Until the
   // run arrives, the prep view stays up (holding), so the wait is never a bare
@@ -148,12 +147,8 @@ export default function Home() {
   // Once the beats are done but the run still hasn't landed, the prep card holds
   // on a reassuring "setting things up" state instead of counting further.
   const prepHolding = countdownDone && run === null;
-  // Hold on the progress view until BOTH the run is complete and the walk has
-  // visited every source. A run with no sources to walk has nothing to hold for.
-  const nothingToWalk = (run?.progress.length ?? 0) === 0;
-  const revealed = walked || nothingToWalk;
-  const showProgress = prepped && run !== null && (phase === "running" || (phase === "done" && !revealed));
-  const showBrief = phase === "done" && prepped && revealed && run?.brief;
+  const showProgress = prepped && run !== null && phase === "running";
+  const showBrief = phase === "done" && prepped && run?.brief;
   const centered = phase === "idle" || phase === "error" || showPrep;
 
   return (
@@ -173,7 +168,7 @@ export default function Home() {
       )}
 
       {showProgress && run && (
-        <ResearchProgress subject={run.subject} progress={run.progress} onWalkComplete={onWalkComplete} />
+        <ResearchProgress subject={run.subject} progress={run.progress} events={run.events} />
       )}
 
       {showBrief && run && <BriefView run={run} onReset={reset} />}

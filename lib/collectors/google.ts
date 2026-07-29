@@ -57,7 +57,7 @@ const BACKEND_NOTE: Record<Backend, string | undefined> = {
   fallback: "Keyless fallback engine (blocked from most servers — set MUNSHOT_TOKEN, SERPAPI_KEY, or GOOGLE_API_KEY).",
 };
 
-export const googleCollector: Collector = async ({ subject, keywords }) => {
+export const googleCollector: Collector = async ({ subject, keywords, emit }) => {
   const base: Omit<CollectorResult, "status" | "hits"> = {
     sourceId: "google",
     sourceName: "Google / News",
@@ -91,15 +91,21 @@ export const googleCollector: Collector = async ({ subject, keywords }) => {
   const byKey = new Map<string, RawHit>();
 
   const plan = queryPlan(entities, subject, kw);
+  emit?.(`Planned ${plan.length} web searches via ${backend}`);
   for (let i = 0; i < plan.length; i++) {
     const { entity: e, query } = plan[i];
     ranQueries.push(query);
     // Space requests to avoid the keyless engine's burst rate-limiting.
     if (i > 0) await sleep(500);
+    emit?.(`Search ${i + 1}/${plan.length} — ${query}`, { level: "query" });
     try {
       const served = await runChain(chain, query);
       const results = served.results;
+      emit?.(`  ${results.length} result(s)`);
       if (served.backend !== backend) {
+        emit?.(`${backend} search unavailable (${served.failure ?? "returned no results"}) — using ${served.backend}`, {
+          level: "warn",
+        });
         // A backend can be stepped over for either reason — it errored, or it
         // answered with nothing. Say which; "unavailable (undefined)" told the
         // reader nothing at all.
@@ -133,6 +139,7 @@ export const googleCollector: Collector = async ({ subject, keywords }) => {
       }
     } catch (err) {
       anyError = err instanceof Error ? err.message : String(err);
+      emit?.(`  search failed — ${anyError}`, { level: "warn" });
     }
   }
   // The news pass used to live here, sharing this collector's status and note.

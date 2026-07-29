@@ -17,12 +17,27 @@ import type { CollectorResult, RunEvent, SourceProgress, Subject } from "./types
  *  calls, but a source that retries or redirects can still stack those timeouts
  *  into minutes. The run must always finish, so a source that overruns is
  *  recorded as unreachable and the rest of the brief goes ahead without it. */
-const SOURCE_DEADLINE_MS = Number(process.env.SOURCE_DEADLINE_SECONDS ?? 75) * 1000;
+const SOURCE_DEADLINE_MS = Number(process.env.SOURCE_DEADLINE_SECONDS ?? 240) * 1000;
+
+/**
+ * Per-source budgets, because one number cannot fit them all.
+ *
+ * The news sweep runs close to twenty searches and then opens and reads the
+ * articles worth reading, so it genuinely needs minutes. Wikidata is one API
+ * call — giving it four minutes only means waiting four minutes to find out it
+ * was never coming back.
+ */
+const DEADLINE_OVERRIDES: Record<string, number> = {
+  news: 300_000,
+  google: 120_000,
+  indiafilings: 60_000,
+  wikidata: 30_000,
+};
 
 /** The director identity lookup runs BEFORE the sources, so every second it
  *  takes is a second the whole run waits. Kept short deliberately: anchors are
  *  worth waiting a little for, never worth stalling the brief over. */
-const IDENTIFY_DEADLINE_MS = 25000;
+const IDENTIFY_DEADLINE_MS = 40000;
 
 export async function runWorkflow(runId: string): Promise<void> {
   // Everything below runs detached from the request that started it, so an
@@ -56,6 +71,17 @@ async function execute(runId: string): Promise<void> {
   const subject = run.subject.type === "director" ? await identify(runId, run.subject) : run.subject;
   if (subject !== run.subject) updateRun(runId, { subject });
 
+  // Each source's output is published the moment it lands rather than only
+  // after all of them have. On a run that takes minutes, holding everything
+  // back until the slowest source returns means the reader watches work they
+  // cannot see the result of. Synchronous push, then a fresh array into the
+  // patch, so two collectors resolving together cannot lose each other's.
+  const collected: CollectorResult[] = [];
+  const record = (r: CollectorResult): void => {
+    collected.push(r);
+    updateRun(runId, { collected: [...collected] });
+  };
+
   // Run each collector concurrently, updating its progress line as it resolves.
   const results = await Promise.all(
     enabledSources.map(async (source): Promise<CollectorResult> => {
@@ -63,7 +89,9 @@ async function execute(runId: string): Promise<void> {
       if (source.locked) {
         const note = source.lockReason ?? "Upgrade required.";
         setProgress(runId, source.id, { status: "locked", note });
-        return { sourceId: source.id, sourceName: source.name, kind: source.kind, status: "locked", note, hits: [] };
+        const r: CollectorResult = { sourceId: source.id, sourceName: source.name, kind: source.kind, status: "locked", note, hits: [] };
+        record(r);
+        return r;
       }
       setProgress(runId, source.id, { status: "running" });
       const collector = collectors[source.id];
@@ -77,6 +105,7 @@ async function execute(runId: string): Promise<void> {
           hits: [],
         };
         setProgress(runId, source.id, { status: "skipped", note: r.note });
+        record(r);
         return r;
       }
 
@@ -90,7 +119,8 @@ async function execute(runId: string): Promise<void> {
       };
 
       try {
-        const result = await withDeadline(collector(ctx), source.name);
+        const result = await withDeadline(collector(ctx), source.name, DEADLINE_OVERRIDES[source.id]);
+        record(result);
         setProgress(runId, source.id, {
           status: result.status,
           hits: result.hits.length,
@@ -106,11 +136,15 @@ async function execute(runId: string): Promise<void> {
         const note = err instanceof Error ? err.message : String(err);
         setProgress(runId, source.id, { status: "error", note });
         appendEvent(runId, { level: "warn", sourceId: source.id, text: `${source.name} failed — ${note}` });
-        return { sourceId: source.id, sourceName: source.name, kind: source.kind, status: "error", note, hits: [] };
+        const r: CollectorResult = { sourceId: source.id, sourceName: source.name, kind: source.kind, status: "error", note, hits: [] };
+        record(r);
+        return r;
       }
     }),
   );
 
+  // Every source published itself as it landed; this settles the final order,
+  // which `record` cannot guarantee because it appends in completion order.
   updateRun(runId, { collected: results });
 
   // Synthesise the brief (OpenAI when configured, deterministic fallback else).

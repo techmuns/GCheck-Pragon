@@ -5,7 +5,7 @@ import { canonicalUrl, fetchWithTimeout, stripHtml, type Collector, type Collect
 import { EmptyAnswer, describe, extractRows, sleep, withRetry, type Backend, type WebResult } from "./google";
 import { readArticles } from "./reader";
 import { extractInsights, readerTask } from "../insights";
-import { cached } from "../searchCache";
+import { cachedWithMeta } from "../searchCache";
 
 // ── News deep dive ──────────────────────────────────────────────────────────
 // The old news pass ran one query per entity — the subject's name, and nothing
@@ -65,8 +65,9 @@ export const newsCollector: Collector = async (ctx) => {
 
     emit?.(`Search ${i + 1}/${plan.length} — ${step.label}`, { level: "query" });
     try {
-      const results = await runNewsChain(step.query);
+      const { results, reused } = await runNewsChain(step.query);
       succeeded += 1;
+      if (reused) emit?.(`  already had this one — reused it, no search spent`, { level: "cache" });
       let kept = 0;
       for (const r of results.slice(0, MAX_PER_QUERY)) {
         const haystack = `${r.title} ${r.snippet ?? ""}`;
@@ -374,18 +375,19 @@ export function newsChain(): Backend[] {
  * and a "recent news" filter is exactly how a two-year-old allegation gets
  * missed by a check meant to surface it.
  */
-async function runNewsChain(query: string): Promise<NewsResult[]> {
+async function runNewsChain(query: string): Promise<{ results: NewsResult[]; reused: boolean }> {
   let failure: string | undefined;
   let sawEmpty = false;
   for (const backend of newsChain()) {
     try {
-      return await cached(`news:${backend}:${query}`, async () => {
+      const { value, reused } = await cachedWithMeta(`news:${backend}:${query}`, async () => {
         const r = await withRetry(() => (backend === "munshot" ? searchMunshotNews(query) : searchSerpApiNews(query)));
         // Prefer a backend with something to say, and never retain an empty
         // that a changed response shape could have caused.
         if (r.length === 0) throw new EmptyAnswer(backend);
         return r;
       });
+      return { results: value, reused };
     } catch (err) {
       if (err instanceof EmptyAnswer) {
         sawEmpty = true;
@@ -395,7 +397,7 @@ async function runNewsChain(query: string): Promise<NewsResult[]> {
     }
   }
   // Nothing anywhere, but nothing broke — a quiet subject, not a dead source.
-  if (sawEmpty) return [];
+  if (sawEmpty) return { results: [], reused: false };
   throw new Error(failure ?? "No news backend configured.");
 }
 

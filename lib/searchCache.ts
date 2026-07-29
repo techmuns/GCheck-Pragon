@@ -47,11 +47,28 @@ const MAX_ENTRIES = 500;
  * replaced.
  */
 export async function cached<T>(key: string, fn: () => Promise<T>, ttlMs: number = DEFAULT_TTL_MS): Promise<T> {
+  return (await cachedWithMeta(key, fn, ttlMs)).value;
+}
+
+/**
+ * As `cached`, but says whether the answer was reused.
+ *
+ * The activity log needs the distinction: "searched for X" and "already had X
+ * from four minutes ago" are different work, and a log that reports a cache
+ * replay as a fresh search is quietly claiming the run did more than it did —
+ * which matters most on the metered backends, where it is also the difference
+ * between spending quota and not.
+ */
+export async function cachedWithMeta<T>(
+  key: string,
+  fn: () => Promise<T>,
+  ttlMs: number = DEFAULT_TTL_MS,
+): Promise<{ value: T; reused: boolean }> {
   const now = Date.now();
   const hit = store.entries.get(key);
   if (hit && hit.expires > now) {
     store.hits += 1;
-    return hit.promise as Promise<T>;
+    return { value: (await hit.promise) as T, reused: true };
   }
 
   store.misses += 1;
@@ -67,7 +84,7 @@ export async function cached<T>(key: string, fn: () => Promise<T>, ttlMs: number
     const value = await promise;
     // Start the clock from when the answer actually landed.
     entry.expires = Date.now() + ttlMs;
-    return value;
+    return { value, reused: false };
   } catch (err) {
     // Drop it — but only if it is still ours; a later call may already have
     // replaced this entry with a fresh attempt.
