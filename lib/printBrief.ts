@@ -393,26 +393,52 @@ interface ConcernMeta {
   claim: ClaimType;
 }
 
+/** What kind of matter a piece of text describes. */
+interface Kinds {
+  defaulter: boolean;
+  criminal: boolean;
+  regulatory: boolean;
+  court: boolean;
+  /** Did anything match at all? */
+  any: boolean;
+}
+
+// Classify by the SUBSTANCE of the claim (not just its source), so a serious
+// regulatory or criminal matter reported in the press is not filed under
+// generic "adverse media".
+function kindsIn(t: string, sourceId: string | undefined): Kinds {
+  const defaulter = sourceId === "cibil" || /defaulter|suit[- ]filed|wilful default|loan default/.test(t);
+  const criminal = /\b(fraud|cbi|eow|criminal|money[ -]laundering|embezzl|arrest|charge ?sheet|scam|forgery|cheating|siphon)\b/.test(t);
+  const regulatory = /\b(sfio|sebi|enforcement directorate|\bed\b|roc|registrar of companies|serious fraud|investigation|probe|raid|show cause|penalt|insolvency|nclt|ibc)\b/.test(t);
+  const court = sourceId === "indiankanoon" || /\blitigation\b|court case|indian kanoon|\bcase(s)? (on|surfaced)|tribunal|high court|drt\b/.test(t);
+  return { defaulter, criminal, regulatory, court, any: defaulter || criminal || regulatory || court };
+}
+
 function classifyConcern(
   severity: Severity,
   sourceId: string | undefined,
   text: string,
   hit?: RawHit,
 ): ConcernMeta {
+  const statement = text.toLowerCase();
   const t = `${text} ${hit?.title ?? ""} ${hit?.snippet ?? ""}`.toLowerCase();
 
-  // Classify by the SUBSTANCE of the claim (not just its source), so a serious
-  // regulatory or criminal matter reported in the press is not filed under
-  // generic "adverse media". Order matters: most-specific first.
-  const defaulter = sourceId === "cibil" || /defaulter|suit[- ]filed|wilful default|loan default/.test(t);
-  const criminal = /\b(fraud|cbi|eow|criminal|money[ -]laundering|embezzl|arrest|charge ?sheet|scam|forgery|cheating|siphon)\b/.test(t);
-  const regulatory = /\b(sfio|sebi|enforcement directorate|\bed\b|roc|registrar of companies|serious fraud|investigation|probe|raid|show cause|penalt|insolvency|nclt|ibc)\b/.test(t);
-  const court = sourceId === "indiankanoon" || /\blitigation\b|court case|indian kanoon|\bcase(s)? (on|surfaced)|tribunal|high court|drt\b/.test(t);
+  // The finding's own sentence says what the matter is; the source's headline
+  // and snippet only get a vote when the sentence names nothing. One stray
+  // "default" in a news blurb was enough to file an ED asset seizure under Loan
+  // default — and hand the reader advice about lenders for a criminal matter.
+  const own = kindsIn(statement, sourceId);
+  const { defaulter, criminal, regulatory, court } = own.any ? own : kindsIn(t, sourceId);
 
   // An order already passed (a ban, an attachment, a penalty) is a fact; a probe
-  // still running is not. Read that off the language of the record.
-  const ordered = /\b(bars?|barred|banned|attach(ed|es|ment)|penalt(y|ies) (of|imposed)|imposed|convicted|disqualif|order(ed)? (against|passed)|restrain)\b/.test(t);
-  const probing = /\b(prob(e|es|ing)|investigat|enquiry|inquiry|summon|questioned|raid|search(es)?|show cause|scrutin)\b/.test(t);
+  // still running is not. Read that off the language of the record — the
+  // sentence first, on the same reasoning, then the record behind it.
+  const stageIn = (s: string) => ({
+    ordered: /\b(bars?|barred|banned|attach(ed|es|ment)|penalt(y|ies) (of|imposed)|imposed|convicted|disqualif|order(ed)? (against|passed)|restrain)\b/.test(s),
+    probing: /\b(prob(e|es|ing)|investigat|enquiry|inquiry|summon|questioned|raid|search(es)?|show cause|scrutin)\b/.test(s),
+  });
+  const ownStage = stageIn(statement);
+  const { ordered, probing } = ownStage.ordered || ownStage.probing ? ownStage : stageIn(t);
 
   if (defaulter) {
     return { category: "Loan default", stage: "default", claim: "Reported" };
