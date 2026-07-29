@@ -311,6 +311,15 @@ function buildMetrics(
 // investigative matter") answers none of those, so the bucket is demoted to a
 // chip and everything else is read out of the record itself.
 
+/** Every concern a finished run surfaced, ranked, uncapped. The one-pager caps
+ *  the list to what fits the page; the dashboard shows all of them — same
+ *  derivation either way, so the two never disagree. */
+export function listConcerns(run: Run): Concern[] {
+  const brief = run.brief;
+  if (!brief) return [];
+  return buildConcerns(brief.sections, brief.citations, indexHitsByUrl(run.collected ?? []), run.subject);
+}
+
 function buildConcerns(
   sections: RenderedSection[],
   citations: Citation[],

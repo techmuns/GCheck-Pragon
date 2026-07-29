@@ -6,7 +6,8 @@ import { apiUrl } from "@/lib/api";
 import { severityStyle } from "./severity";
 import { RiskMeter, SeverityBar, StatTile, SourceCoverage, VERDICT_META } from "./BriefViz";
 import BriefPrint from "./BriefPrint";
-import { buildPrintBrief, formatGenerated } from "@/lib/printBrief";
+import ConcernCards from "./ConcernCards";
+import { buildPrintBrief, formatGenerated, listConcerns } from "@/lib/printBrief";
 
 interface Props {
   run: Run;
@@ -55,19 +56,28 @@ export default function BriefView({ run, onReset }: Props) {
   if (!brief) return null;
   const meta = VERDICT_META[brief.verdict] ?? VERDICT_META.info;
 
-  // Tally finding severities across the sections (excluding the summary to
-  // avoid double-counting, and excluding info/context).
+  // The downloadable one-pager is a purpose-built document, derived from the run
+  // and rendered (print-only) by BriefPrint — not this on-screen dashboard. Its
+  // short summary and its itemised concerns are the sharpest reading of the run
+  // we have, though, so the dashboard shows those same ones rather than a looser
+  // parallel version. Uncapped here: the screen has room the page doesn't.
+  const printBrief = buildPrintBrief(run, formatGenerated(run.createdAt));
+  const concerns = listConcerns(run);
+
+  // Tally severities: the concerns carry red / to-review, the remaining sections
+  // carry the cleared and contextual items. (Counting only the sections left the
+  // tiles reading zero red flags with the concerns listed right beneath them.)
   const counts: Record<Severity, number> = { red: 0, amber: 0, clear: 0, info: 0 };
+  for (const c of concerns) counts[c.severity] += 1;
   for (const s of brief.sections) {
-    if (s.id === "red-flags") continue;
-    for (const f of s.findings) counts[f.severity] += 1;
+    for (const f of s.findings) {
+      // Red / amber in the summary are already counted as concerns above.
+      if (s.id === "red-flags" && f.severity !== "clear") continue;
+      counts[f.severity] += 1;
+    }
   }
   const sourcesChecked = run.progress.filter((p) => p.status === "done").length;
   const sourcesLocked = run.progress.filter((p) => p.status === "locked").length;
-
-  // The downloadable one-pager is a purpose-built document, derived from the run
-  // and rendered (print-only) by BriefPrint — not this on-screen dashboard.
-  const printBrief = buildPrintBrief(run, formatGenerated(run.createdAt));
 
   return (
     <div className="fade-in mx-auto w-full max-w-6xl">
@@ -119,6 +129,13 @@ export default function BriefView({ run, onReset }: Props) {
             <RiskMeter verdict={brief.verdict} />
           </div>
           <p className="mt-3 font-editorial text-[19px] leading-snug text-navy-deep">{brief.headline}</p>
+          {/* The one-pager's short summary — what the sharpest signal is, how
+              many concerns clear the review threshold, and what to do next. */}
+          {printBrief && (
+            <p className="mt-3 border-t border-[rgba(23,43,77,0.10)] pt-3 text-[13.5px] leading-relaxed text-ink-primary">
+              {printBrief.executive}
+            </p>
+          )}
         </div>
 
         {/* At-a-glance visuals — screen only; the print report stays text-simple. */}
@@ -148,7 +165,12 @@ export default function BriefView({ run, onReset }: Props) {
         <div className="grid gap-3 lg:grid-cols-2">
           {brief.sections.map((section, si) => {
             const isSummary = section.id === "red-flags";
-            const count = section.findings.filter((f) => f.severity !== "info").length;
+            // Key Concerns renders the itemised cards; every other section keeps
+            // its plain finding list.
+            const asCards = isSummary && concerns.length > 0;
+            const count = asCards
+              ? concerns.length
+              : section.findings.filter((f) => f.severity !== "info").length;
             return (
               <div
                 key={section.id}
@@ -166,7 +188,9 @@ export default function BriefView({ run, onReset }: Props) {
                     </span>
                   )}
                 </div>
-                {section.empty || section.findings.length === 0 ? (
+                {asCards ? (
+                  <ConcernCards concerns={concerns} citations={brief.citations} />
+                ) : section.empty || section.findings.length === 0 ? (
                   <p className="text-[13px] italic text-[#9AA6B6]">n/a — no source-backed findings</p>
                 ) : (
                   <ul className="space-y-2">
