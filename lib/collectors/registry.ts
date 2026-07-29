@@ -1,6 +1,6 @@
 import type { CollectorResult, RawHit } from "../types";
 import { fetchWithTimeout, type Collector } from "./types";
-import { backendName, runBackend } from "./google";
+import { searchWeb } from "./google";
 
 // ── Company registry collector (free director data) ─────────────────────────
 // Directors of UNLISTED Indian companies are the core gap in pre-meeting DD:
@@ -107,14 +107,18 @@ interface PageRef {
 // The aggregator's company URL is /<slug>/company/<CIN>; a slug-only URL serves
 // an empty JS shell, so the CIN is required. A site-scoped search yields it.
 //
-// The configured backend is tried first; if it fails or finds nothing (the
-// keyless engine rate-limits aggressively), a direct Bing HTML query is tried as
-// a second opinion so one throttled engine doesn't sink the whole lookup.
+// The search chain is tried first; if it fails or finds nothing (the keyless
+// engine rate-limits aggressively), a direct Bing HTML query is tried as a
+// second opinion so one throttled engine doesn't sink the whole lookup.
+//
+// Goes through searchWeb rather than a single backend: calling one backend
+// directly meant this lookup neither degraded when that backend was down nor
+// shared the cache, so it spent a metered call on every run.
 async function resolveCompanyUrl(company: string): Promise<PageRef | null> {
   const query = siteQuery(company);
 
   try {
-    const found = pickCompanyUrl(await runBackend(backendName(), query));
+    const found = pickCompanyUrl(await searchWeb(query));
     if (found) return found;
   } catch {
     /* fall through to the secondary resolver */

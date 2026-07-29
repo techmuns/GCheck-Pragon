@@ -57,6 +57,12 @@ const g = globalThis as unknown as { __paragonRunStore?: RunStore };
 const store: RunStore = (g.__paragonRunStore ??= { runs: new Map(), seq: 0 });
 const runs = store.runs;
 
+/** How many finished runs to keep. Each holds every collected hit plus the
+ *  rendered brief, so an unbounded map is a slow memory leak — on a small
+ *  instance, eventually an OOM that takes every in-flight run with it. Enough
+ *  history here to re-open or re-download a recent brief. */
+const MAX_RUNS = 100;
+
 function newId(): string {
   store.seq += 1;
   return `run_${Date.now().toString(36)}_${store.seq}`;
@@ -71,7 +77,20 @@ export function createRun(subject: Subject, progressSeed: Run["progress"]): Run 
     progress: progressSeed,
   };
   runs.set(run.id, run);
+  evictOldRuns();
   return run;
+}
+
+/** Drop the coldest runs once over the cap — insertion order is Map's
+ *  iteration order, so the first key is the oldest. A run still being worked on
+ *  is never evicted, however old: it would strand the user's open page. */
+function evictOldRuns(): void {
+  if (runs.size <= MAX_RUNS) return;
+  for (const [id, run] of runs) {
+    if (runs.size <= MAX_RUNS) break;
+    if (run.status === "queued" || run.status === "running") continue;
+    runs.delete(id);
+  }
 }
 
 export function getRun(id: string): Run | undefined {

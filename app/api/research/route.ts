@@ -33,8 +33,13 @@ export async function POST(req: NextRequest) {
 
   const run = createRun(subject, progressSeed);
 
-  // Fire the workflow without blocking the response.
-  void runWorkflow(run.id);
+  // Fire the workflow without blocking the response. runWorkflow contains its
+  // own failures, but the catch here is the backstop that matters: an escaping
+  // rejection from a detached promise takes the Node process down, and every
+  // in-flight run with it.
+  void runWorkflow(run.id).catch((err) => {
+    console.error("[research] workflow rejected:", err);
+  });
 
   return NextResponse.json({ id: run.id });
 }

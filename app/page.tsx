@@ -13,6 +13,13 @@ import type { Run } from "@/lib/types";
 
 type Phase = "idle" | "running" | "done" | "error";
 
+// A run is bounded server-side (each source has its own deadline), so anything
+// past this is a run that will never land — a recycled instance, most likely.
+const RUN_TIMEOUT_MS = 4 * 60 * 1000;
+// Consecutive failed polls tolerated before giving up. At 500ms apart, this
+// rides out a brief blip without stringing the user along through an outage.
+const MAX_POLL_FAILURES = 10;
+
 export default function Home() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [run, setRun] = useState<Run | null>(null);
@@ -59,20 +66,50 @@ export default function Home() {
         if (!res.ok) throw new Error((await res.json()).error ?? "Could not start the pre-screen.");
         const { id } = await res.json();
 
-        // Poll the run until it completes.
+        // Poll the run until it completes. Every exit from this loop has to be
+        // accounted for — a poll that can only stop on success leaves the user
+        // on a progress screen that never resolves.
         stopPolling();
+        const startedAt = Date.now();
+        let consecutiveFailures = 0;
+        const fail = (message: string) => {
+          stopPolling();
+          setError(message);
+          setPhase("error");
+        };
         pollRef.current = setInterval(async () => {
-          const r = await fetch(apiUrl(`/api/research/${id}`));
-          if (!r.ok) return;
-          const data: Run = await r.json();
-          setRun(data);
-          if (data.status === "complete") {
-            stopPolling();
-            setPhase("done");
-          } else if (data.status === "error") {
-            stopPolling();
-            setError(data.error ?? "The pre-screen failed.");
-            setPhase("error");
+          // The instance can be recycled mid-run (the run store is in-memory),
+          // and no amount of further polling will bring that run back.
+          if (Date.now() - startedAt > RUN_TIMEOUT_MS) {
+            fail("The pre-screen is taking longer than expected. Please try again.");
+            return;
+          }
+          try {
+            const r = await fetch(apiUrl(`/api/research/${id}`));
+            if (r.status === 404) {
+              fail("This pre-screen is no longer available — the server restarted. Please run it again.");
+              return;
+            }
+            if (!r.ok) {
+              // A transient 5xx is worth riding out; a persistent one is not.
+              if (++consecutiveFailures >= MAX_POLL_FAILURES) fail("Lost contact with the server. Please try again.");
+              return;
+            }
+            const data: Run = await r.json();
+            consecutiveFailures = 0;
+            setRun(data);
+            if (data.status === "complete") {
+              stopPolling();
+              setPhase("done");
+            } else if (data.status === "error") {
+              fail(data.error ?? "The pre-screen failed.");
+            }
+          } catch {
+            // Offline, or the request was cut off. Same rule as a bad status:
+            // tolerate a blip, give up on a pattern. Without this catch the
+            // rejection escapes the interval callback entirely and the loop
+            // spins on in silence.
+            if (++consecutiveFailures >= MAX_POLL_FAILURES) fail("Lost contact with the server. Please try again.");
           }
         }, 500);
       } catch (e) {

@@ -43,7 +43,11 @@ async function enhanceRedFlagSummary(
   det: NonNullable<Run["brief"]>,
   subject: Subject,
 ): Promise<NonNullable<Run["brief"]>> {
-  const client = new OpenAI({ apiKey: env.openaiApiKey });
+  // The SDK defaults to a 10-minute timeout and two retries — half an hour in
+  // the worst case, during which the run sits at "running" and the user watches
+  // a spinner. A brief that falls back to the deterministic summary in 40s beats
+  // an AI one that may never arrive.
+  const client = new OpenAI({ apiKey: env.openaiApiKey, timeout: 40_000, maxRetries: 1 });
   const validRefs = new Set(det.citations.map((c) => c.ref));
 
   // The evidence the model may cite — exactly the brief's real citations.

@@ -87,7 +87,11 @@ export const googleCollector: Collector = async ({ subject, keywords }) => {
       const served = await runChain(chain, query);
       const results = served.results;
       if (served.backend !== backend) {
-        degraded = `${backend} search unavailable (${served.failure}) — fell back to ${served.backend}.`;
+        // A backend can be stepped over for either reason — it errored, or it
+        // answered with nothing. Say which; "unavailable (undefined)" told the
+        // reader nothing at all.
+        const why = served.failure ?? "returned no results";
+        degraded = `${backend} search unavailable (${why}) — fell back to ${served.backend}.`;
         backend = served.backend;
       }
       for (const r of results.slice(0, MAX_PER_ENTITY)) {
@@ -175,26 +179,65 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-// Walk the chain until one backend answers. Each gets the same single retry it
-// had before; only when a backend is exhausted do we move to the next, so a
-// healthy head-of-chain never pays for the fallbacks existing.
+// A backend that answered, but with nothing in it. Not an error in itself —
+// some subjects genuinely have no coverage — but not an answer worth stopping
+// the chain on either, so it is thrown to fall through to the next backend and
+// caught again at the bottom.
+class EmptyAnswer extends Error {
+  constructor(readonly backend: Backend) {
+    super("no results");
+  }
+}
+
+// Walk the chain until one backend answers with something. Each gets the same
+// single retry it had before; only when a backend is exhausted do we move to
+// the next, so a healthy head-of-chain never pays for the fallbacks existing.
+//
+// An empty answer is treated as "keep walking", not as success. A keyed backend
+// returning 200-with-nothing is far more often a changed response shape or a
+// soft throttle than a subject the entire web is silent about — and taking it
+// as success meant the chain never degraded, and (once results were cached) the
+// emptiness stuck around. If EVERY backend comes back empty, that is a real
+// silence and it is returned as one.
 async function runChain(
   chain: Backend[],
   query: string,
 ): Promise<{ results: WebResult[]; backend: Backend; failure?: string }> {
   const failures: string[] = [];
+  let emptyFrom: Backend | undefined;
   for (const backend of chain) {
     try {
-      const results = await cached(`web:${backend}:${query}`, () => withRetry(() => runBackend(backend, query)));
+      const results = await cached(`web:${backend}:${query}`, async () => {
+        const r = await withRetry(() => runBackend(backend, query));
+        // Thrown from inside the cache callback deliberately: a suspicious
+        // empty must not be retained, or one bad response would be replayed
+        // as "nothing found" for the rest of the window.
+        if (r.length === 0) throw new EmptyAnswer(backend);
+        return r;
+      });
       return { results, backend, failure: failures[0] };
     } catch (err) {
+      if (err instanceof EmptyAnswer) {
+        emptyFrom = backend;
+        continue;
+      }
       failures.push(err instanceof Error ? err.message : String(err));
     }
   }
+  // Nothing anywhere, but nothing broke either — an honest silence.
+  if (emptyFrom) return { results: [], backend: emptyFrom, failure: failures[0] };
   // Every backend is down. Report them all — the head of the chain holds the
   // actionable cause (an expired token), which a last-backend-wins message
   // would bury under the keyless engine's rate-limit notice.
   throw new Error(failures.join(" / ") || "No search backend configured.");
+}
+
+/** The web sweep as other collectors need it: full chain, cached, retried.
+ *  Anything reaching for search should come through here rather than calling a
+ *  single backend directly — that skips both the fallbacks and the cache. */
+export async function searchWeb(query: string): Promise<WebResult[]> {
+  const served = await runChain(backendChain(), query);
+  return served.results;
 }
 
 // News backends, best first. Unlike the web chain there is no keyless option —
@@ -208,15 +251,26 @@ function newsChain(): Backend[] {
 
 async function runNewsChain(query: string): Promise<WebResult[]> {
   let failure: string | undefined;
+  let sawEmpty = false;
   for (const backend of newsChain()) {
     try {
-      return await cached(`news:${backend}:${query}`, () =>
-        withRetry(() => (backend === "munshot" ? searchMunshotNews(query) : searchSerpApiNews(query))),
-      );
+      return await cached(`news:${backend}:${query}`, async () => {
+        const r = await withRetry(() => (backend === "munshot" ? searchMunshotNews(query) : searchSerpApiNews(query)));
+        // Same reasoning as the web chain: prefer a backend with something to
+        // say, and never retain an empty that a shape change could have caused.
+        if (r.length === 0) throw new EmptyAnswer(backend);
+        return r;
+      });
     } catch (err) {
+      if (err instanceof EmptyAnswer) {
+        sawEmpty = true;
+        continue;
+      }
       failure = err instanceof Error ? err.message : String(err);
     }
   }
+  // No news backend had anything — a quiet subject, not a broken source.
+  if (sawEmpty) return [];
   throw new Error(failure ?? "No news backend configured.");
 }
 

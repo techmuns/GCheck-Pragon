@@ -11,7 +11,28 @@ import type { CollectorResult, SourceProgress } from "./types";
 // Phase 3 will replace `assembleBrief` with OpenAI narrative synthesis over the
 // same collected data.
 
+/** Hard cap on any one source. Every collector already times out its own HTTP
+ *  calls, but a source that retries or redirects can still stack those timeouts
+ *  into minutes. The run must always finish, so a source that overruns is
+ *  recorded as unreachable and the rest of the brief goes ahead without it. */
+const SOURCE_DEADLINE_MS = Number(process.env.SOURCE_DEADLINE_SECONDS ?? 75) * 1000;
+
 export async function runWorkflow(runId: string): Promise<void> {
+  // Everything below runs detached from the request that started it, so an
+  // escaping throw would surface as an unhandled rejection and — worse — leave
+  // the run sitting at "queued" while the UI polls it forever.
+  try {
+    await execute(runId);
+  } catch (err) {
+    console.error("[workflow] run failed:", err);
+    updateRun(runId, {
+      status: "error",
+      error: err instanceof Error ? err.message : "The pre-screen failed to run.",
+    });
+  }
+}
+
+async function execute(runId: string): Promise<void> {
   const config = await getConfig();
   updateRun(runId, { status: "running" });
 
@@ -47,7 +68,7 @@ export async function runWorkflow(runId: string): Promise<void> {
         return r;
       }
       try {
-        const result = await collector(ctx);
+        const result = await withDeadline(collector(ctx), source.name);
         setProgress(runId, source.id, {
           status: result.status,
           hits: result.hits.length,
@@ -71,6 +92,20 @@ export async function runWorkflow(runId: string): Promise<void> {
   } catch (err) {
     updateRun(runId, { status: "error", error: err instanceof Error ? err.message : "Failed to assemble the brief." });
   }
+}
+
+/** Resolve with the collector, or reject once the deadline passes. The
+ *  collector keeps running in the background if it ever does come back; it just
+ *  no longer holds up the brief. */
+function withDeadline<T>(work: Promise<T>, sourceName: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${sourceName} did not respond within ${Math.round(SOURCE_DEADLINE_MS / 1000)}s.`)),
+      SOURCE_DEADLINE_MS,
+    );
+  });
+  return Promise.race([work, deadline]).finally(() => clearTimeout(timer)) as Promise<T>;
 }
 
 function setProgress(runId: string, sourceId: string, patch: Partial<SourceProgress>): void {
