@@ -8,6 +8,7 @@ import type {
   Concern,
   Development,
   Person,
+  PositiveRow,
   PrintBrief,
   SourceQualityRow,
   SourceRef,
@@ -75,6 +76,7 @@ function PrintDoc({ brief }: { brief: PrintBrief }) {
             <KeyPeople people={brief.people} extra={brief.extraPeople} isDirector={brief.isDirector} />
             <Cases cases={brief.cases} extra={brief.extraCases} />
             <RecentDevelopments items={brief.developments} extra={brief.extraDevelopments} />
+            <PositiveSignals items={brief.positives} extra={brief.extraPositives} />
             <SourceQuality rows={brief.sourceQuality} gaps={brief.researchGaps} />
           </div>
         </div>
@@ -253,6 +255,31 @@ function RecentDevelopments({ items, extra }: { items: Development[]; extra: num
             <span className={`pb-dev-status pb-fg-${d.tone}`}>
               {d.status}
               <Ref n={d.sourceRef} />
+            </span>
+          </li>
+        ))}
+      </ul>
+    </Section>
+  );
+}
+
+/**
+ * Good news, kept where good news belongs.
+ *
+ * Returns null when there is none, like every other optional block — a page
+ * that prints an empty "Positive Signals" heading is quietly saying it looked
+ * and found nothing, which is a different claim from not having looked.
+ */
+function PositiveSignals({ items, extra }: { items: PositiveRow[]; extra: number }) {
+  if (items.length === 0) return null;
+  return (
+    <Section title="Positive Signals" meta={extra > 0 ? `+${extra} more` : undefined}>
+      <ul className="pb-devs">
+        {items.map((p, i) => (
+          <li className="pb-dev" key={i}>
+            <span className="pb-dev-head">{p.text}</span>
+            <span className="pb-dev-status pb-fg-green">
+              <Ref n={p.sourceRef} />
             </span>
           </li>
         ))}

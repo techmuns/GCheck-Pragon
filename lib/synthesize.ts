@@ -118,12 +118,13 @@ async function enhanceRedFlagSummary(
     "2. Severity: 'red' = serious governance risk (fraud, wilful default, criminal/CBI/EOW, suit-filed defaulter); 'amber' = review-worthy (litigation, adverse press, keyword hits); 'clear' = verified clean; 'info' = context.",
     "3. Lead with the sharpest risks. One tight sentence per finding — a partner reads this in under a minute.",
     "4. Write in PLAIN ENGLISH a busy, non-lawyer partner understands instantly. No legalese, no jargon, no long clauses. Say what happened and why it matters.",
-    "5. If the evidence shows no genuine red or amber risk, return a single 'clear' finding saying so.",
+    "5. Return ONLY red and amber findings, plus 'info' findings for sources that were unavailable, locked, or name-matched-only. If there is no genuine red or amber risk, return NO findings at all — the brief prints its own honest 'nothing surfaced' line. Never return a 'clear' finding.",
     "6. Also return a one-line headline in plain English summarising the overall picture for this subject.",
     "7. Evidence marked 'NAME MATCH ONLY' concerns someone who shares the subject's name and may not be them. Never write it as something the subject did, and never let it set the severity. Mention it at most once, as 'info', worded as unconfirmed.",
     "8. If SUBJECT IDENTITY says it was not established, say so in the headline — the reader must know the brief could not confirm which person of that name it covers.",
     "9. Where the evidence gives the subject's ROLE in a matter (complainant, petitioner, accused, defendant, respondent), the finding MUST state it. 'X filed a suit alleging Y' and 'X was sued for Y' are opposite facts; never write one for the other. A complainant is not accused of the thing they complained about, and their severity must reflect that. Where the role is given as 'unclear' or 'not_mentioned', say the matter names X without stating their role, and keep it as 'info'.",
     "10. Evidence marked READ IN FULL was opened and read; its wording is what the article actually says. Prefer it over the headline beside it, which is only a title.",
+    "11. This section is printed to the reader under the heading 'Key Concerns'. Awards, funding, recognitions and appointments are NOT concerns and must never appear here — they are reported in their own section. Anything you write here will be read as a reason for caution, so write nothing you do not mean that way.",
   ].join("\n");
 
   const user = [
@@ -152,9 +153,13 @@ async function enhanceRedFlagSummary(
   const parsed = JSON.parse(raw) as { headline: string; findings: ModelFinding[] };
 
   // Validate the model's findings — drop invented refs, coerce severities.
+  // `clear` is dropped outright: rule 5 forbids it, and this is the backstop
+  // for the run where the model writes one anyway. A "clear" finding in this
+  // section is how good news ended up printed as a concern.
   const findings: Finding[] = (parsed.findings ?? [])
     .map((f): Finding | null => {
       const severity = (VALID_SEVERITIES.includes(f.severity as Severity) ? f.severity : "info") as Severity;
+      if (severity === "clear") return null;
       const text = String(f.text ?? "").trim();
       if (!text) return null;
       const sourceRef = typeof f.sourceRef === "number" && validRefs.has(f.sourceRef) ? f.sourceRef : undefined;
@@ -162,19 +167,23 @@ async function enhanceRedFlagSummary(
     })
     .filter((f): f is Finding => f !== null);
 
-  if (findings.length === 0) throw new Error("No valid red-flag findings from model");
+  // No findings is now a legitimate answer — a subject with nothing against
+  // them. Throwing here would drop every clean run back to the deterministic
+  // brief and lose the AI headline with it. Only an empty completion is a
+  // failure, and that is caught above.
+  const sections =
+    findings.length > 0
+      ? det.sections.map((s) => (s.id === "red-flags" ? { ...s, findings, empty: false } : s))
+      : det.sections;
 
-  // Splice the AI summary into the deterministic brief.
-  const sections = det.sections.map((s) =>
-    s.id === "red-flags" ? { ...s, findings, empty: false } : s,
-  );
-
-  // Recompute the verdict from all validated findings.
+  // Recompute the verdict from all validated findings. `clear` is skipped as
+  // well as `info`: a positive finding elsewhere in the brief is not a risk,
+  // and counting it as one blocked the honest downgrade to "info" below.
   let verdict: Severity = "clear";
   let anyRisk = false;
   for (const s of sections) {
     for (const f of s.findings) {
-      if (f.severity === "info") continue;
+      if (f.severity === "info" || f.severity === "clear") continue;
       anyRisk = true;
       if (RANK[f.severity] > RANK[verdict]) verdict = f.severity;
     }

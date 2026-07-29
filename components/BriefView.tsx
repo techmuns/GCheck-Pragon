@@ -71,11 +71,11 @@ export default function BriefView({ run, onReset }: Props) {
   const counts: Record<Severity, number> = { red: 0, amber: 0, clear: 0, info: 0 };
   for (const c of concerns) counts[c.severity] += 1;
   for (const s of brief.sections) {
-    for (const f of s.findings) {
-      // Red / amber in the summary are already counted as concerns above.
-      if (s.id === "red-flags" && f.severity !== "clear") continue;
-      counts[f.severity] += 1;
-    }
+    // The summary section is counted entirely through `concerns` above. It used
+    // to contribute its `clear` findings too, which is where the bar's stray
+    // "1 clear" came from — a placeholder sentence counted as a thing found.
+    if (s.id === "red-flags") continue;
+    for (const f of s.findings) counts[f.severity] += 1;
   }
   const sourcesChecked = run.progress.filter((p) => p.status === "done").length;
   const sourcesLocked = run.progress.filter((p) => p.status === "locked").length;
@@ -172,7 +172,18 @@ export default function BriefView({ run, onReset }: Props) {
             const isSummary = section.id === "red-flags";
             // Key Concerns renders the itemised cards; every other section keeps
             // its plain finding list.
+            //
+            // INVARIANT: the summary card renders concern cards or the honest
+            // empty state, and NEVER the plain list below. That list prints
+            // every finding at every severity, and under a heading reading "Key
+            // Concerns" it turned an XPRIZE win into a governance concern. The
+            // one-pager never had the bug because it consumes Concern[] only;
+            // this is what makes the two surfaces agree.
             const asCards = isSummary && concerns.length > 0;
+            // Context the summary still owes the reader — which sources were
+            // unavailable, whether the identity was pinned — kept as footnotes
+            // rather than findings, so they never read as things that were found.
+            const summaryNotes = isSummary ? section.findings.filter((f) => f.severity === "info") : [];
             const count = asCards
               ? concerns.length
               : section.findings.filter((f) => f.severity !== "info").length;
@@ -195,6 +206,14 @@ export default function BriefView({ run, onReset }: Props) {
                 </div>
                 {asCards ? (
                   <ConcernCards concerns={concerns} citations={brief.citations} />
+                ) : isSummary ? (
+                  <p className="flex items-start gap-2.5 text-[14px] leading-relaxed text-ink-primary">
+                    <span
+                      className="mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full"
+                      style={{ backgroundColor: severityStyle.clear.dot }}
+                    />
+                    <span>No red-flag or review-level concerns surfaced across the sources that completed.</span>
+                  </p>
                 ) : section.empty || section.findings.length === 0 ? (
                   <p className="text-[13px] italic text-[#9AA6B6]">n/a — no source-backed findings</p>
                 ) : (
@@ -217,6 +236,23 @@ export default function BriefView({ run, onReset }: Props) {
                       );
                     })}
                   </ul>
+                )}
+                {summaryNotes.length > 0 && (
+                  <div className="mt-3 border-t border-[rgba(23,43,77,0.08)] pt-2.5">
+                    <ul className="space-y-1">
+                      {summaryNotes.map((f, i) => {
+                        const refs = f.sourceRefs ?? (f.sourceRef !== undefined ? [f.sourceRef] : []);
+                        return (
+                          <li key={i} className="text-[12.5px] leading-relaxed text-ink-secondary">
+                            {f.text}
+                            {refs.map((n) => (
+                              <CitationRef key={n} n={n} url={urlByRef.get(n)} />
+                            ))}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
                 )}
               </div>
             );

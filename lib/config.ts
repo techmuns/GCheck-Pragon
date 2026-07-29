@@ -117,6 +117,9 @@ export const defaultConfig: AppConfig = {
     { id: "defaulters", title: "Loan Defaults", hint: "Loan-default and defaulter records.", enabled: true, order: 5 },
     { id: "filings", title: "Filings & Disclosures", hint: "Exchange filings, annual reports and earnings — listed companies only.", enabled: false, order: 6 },
     { id: "press", title: "Recent News", hint: "Recent coverage worth attention.", enabled: true, order: 7 },
+    // Good news is not a concern. Without somewhere of its own to go it was
+    // being written into Key Concerns, where an award read as a governance risk.
+    { id: "positives", title: "Positive Signals", hint: "Recognitions, funding and a clean registry standing.", enabled: true, order: 8 },
   ],
 
   synthesisPrompt: [

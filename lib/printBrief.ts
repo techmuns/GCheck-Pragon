@@ -26,10 +26,19 @@ export const CAPS = {
   people: 5,
   cases: 4,
   developments: 5,
+  // Deliberately small. Positives are context, and a page that lists as many
+  // good things as concerns has quietly editorialised.
+  positives: 3,
   sources: 8,
 } as const;
 
 export type Tone = "red" | "amber" | "green" | "neutral";
+
+/** One line of genuinely good news, for the one-pager's Positive Signals block. */
+export interface PositiveRow {
+  text: string;
+  sourceRef?: number;
+}
 export type ClaimType = "Verified" | "Reported" | "Alleged" | "Under review";
 
 export interface PrintMetric {
@@ -129,6 +138,8 @@ export interface PrintBrief {
   extraPeople: number;
   cases: CaseRow[];
   extraCases: number;
+  positives: PositiveRow[];
+  extraPositives: number;
   sourceQuality: SourceQualityRow[];
   researchGaps: string[];
   sources: SourceRef[];
@@ -173,6 +184,7 @@ export function buildPrintBrief(run: Run, generatedAt: string): PrintBrief | nul
   const developmentsAll = buildDevelopments(bySource, brief.citations);
   const peopleAll = buildPeople(bySource, run.subject.promoters, isDirector, brief.citations);
   const casesAll = buildCases(bySource, brief.citations);
+  const positivesAll = buildPositives(brief.sections);
 
   const doneSources = run.progress.filter((p) => p.status === "done").length;
   const totalSources = run.progress.length;
@@ -197,6 +209,8 @@ export function buildPrintBrief(run: Run, generatedAt: string): PrintBrief | nul
     extraPeople: Math.max(0, peopleAll.length - CAPS.people),
     cases: casesAll.slice(0, CAPS.cases),
     extraCases: Math.max(0, casesAll.length - CAPS.cases),
+    positives: positivesAll.slice(0, CAPS.positives),
+    extraPositives: Math.max(0, positivesAll.length - CAPS.positives),
     sourceQuality: buildSourceQuality(run),
     researchGaps: buildResearchGaps(run, cin, peopleAll.length),
     sources: sourcesAll.slice(0, CAPS.sources),
@@ -831,6 +845,21 @@ function compactTenure(t?: string): string | undefined {
 }
 
 // ── Court & regulatory cases ──────────────────────────────────────────────────
+
+/**
+ * The Positive Signals section, taken straight from the assembled brief.
+ *
+ * Read from the section rather than re-derived from hits, so the page and the
+ * screen cannot disagree about what counts as good news — the previous split
+ * between the two derivations is exactly how the surfaces drifted apart.
+ */
+function buildPositives(sections: RenderedSection[]): PositiveRow[] {
+  const section = sections.find((s) => s.id === "positives");
+  if (!section || section.empty) return [];
+  return section.findings
+    .filter((f) => f.text.trim().length > 0)
+    .map((f) => ({ text: trimToPhrase(stripQuotes(f.text), 110), sourceRef: f.sourceRef }));
+}
 
 function buildCases(bySource: SourceIndex, citations: Citation[]): CaseRow[] {
   const refByUrl = new Map(citations.filter((c) => c.url).map((c) => [c.url as string, c.ref]));

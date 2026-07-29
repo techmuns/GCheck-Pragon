@@ -143,6 +143,8 @@ function buildSection(id: string, title: string, ctx: Ctx): RenderedSection {
       return filingsSection(id, title, ctx);
     case "press":
       return pressSection(id, title, ctx);
+    case "positives":
+      return positivesSection(id, title, ctx);
     default:
       return { id, title, findings: [], empty: true };
   }
@@ -771,6 +773,77 @@ function pressText(h: RawHit): string {
   if (h.confidence === "unverified") return `${h.title} — name match only, not confirmed as this person`;
   if (h.extra?.namesSubject === false && h.entity) return `${h.title} — coverage of ${h.entity}; the subject is not named`;
   return h.title;
+}
+
+/** Coverage that reads as recognition rather than risk. Deliberately narrow —
+ *  a section that swept in anything non-adverse would fill with noise and stop
+ *  meaning anything. */
+const POSITIVE_PRESS = /\b(wins?|won|awarded|award|prize|raises?|raised|funding|honou?red|recognis|recogniz|appointed|launch(?:es|ed)?|partners? with)\b/i;
+
+/**
+ * Genuinely good news, kept out of the concerns list.
+ *
+ * The brief once printed "recognised for its positive impact on women's safety,
+ * winning a major competition" under the heading Key Concerns. It was not a
+ * rendering slip alone: there was nowhere else for it to go. A pre-screen that
+ * can only express risk will express everything as risk.
+ *
+ * Nothing here can move the verdict — these are `clear`, and `clear` cannot
+ * raise it above clear.
+ */
+function positivesSection(id: string, title: string, ctx: Ctx): RenderedSection {
+  const findings: Finding[] = [];
+
+  // Read articles that the extraction judged positive. The strongest signal,
+  // because something actually read the piece and said so.
+  for (const { hit, source } of insightHits(ctx)) {
+    if (hit.extra?.polarity !== "positive") continue;
+    findings.push({
+      severity: "clear",
+      text: hit.title,
+      sourceRef: ctx.cite(source.sourceName, strField(hit.extra?.sourceTitle) ?? hit.title, hit.url),
+    });
+  }
+
+  // The register's own good standing. Quietly reassuring, and it costs nothing
+  // to say — the alternative is a brief that only ever mentions the register
+  // when something is wrong with it.
+  const identity = identityHit(ctx);
+  const registry = identitySource(ctx);
+  if (identity && registry) {
+    const status = strField(identity.extra?.dinStatus);
+    const since = strField(identity.extra?.approvedOn);
+    if (status && /approved/i.test(status)) {
+      findings.push({
+        severity: "clear",
+        text: `DIN ${ctx.subject.din} is in good standing (${status}${since ? `, registered since ${since}` : ""}).`,
+        sourceRef: ctx.cite(registry.sourceName, `DIN ${ctx.subject.din}`, identity.url),
+      });
+    }
+  }
+
+  // Coverage that was not flagged and reads as recognition.
+  const alreadyRead = new Set(insightHits(ctx).map(({ hit }) => canonicalUrl(hit.url)).filter(Boolean));
+  const seen = new Set<string>();
+  for (const sid of PRESS_IDS) {
+    const c = ctx.byId[sid];
+    if (c?.status !== "done") continue;
+    for (const h of c.hits) {
+      if (findings.length >= 4) break;
+      if (h.extra?.category === "insight") continue;
+      if ((h.matchedKeywords?.length ?? 0) > 0) continue;
+      // A namesake's award is not this person's award.
+      if (h.confidence === "unverified") continue;
+      if (!POSITIVE_PRESS.test(h.title)) continue;
+      const key = canonicalUrl(h.url) ?? h.title.toLowerCase();
+      if (!key || seen.has(key) || alreadyRead.has(key)) continue;
+      seen.add(key);
+      findings.push({ severity: "clear", text: h.title, sourceRef: ctx.cite(c.sourceName, h.title, h.url) });
+    }
+  }
+
+  if (findings.length === 0) return { id, title, findings: [], empty: true };
+  return { id, title, findings };
 }
 
 function buildHeadline(verdict: Severity, ctx: Ctx): string {
