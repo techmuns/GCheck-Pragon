@@ -323,7 +323,7 @@ body {
   }
 }
 
-/* ── One-page A4-landscape pre-meeting brief (print / PDF) ─────────────────────
+/* ── One-page A4-portrait pre-meeting brief (print / PDF) ─────────────────────
    A purpose-built institutional research report — NOT the on-screen dashboard
    printed to PDF. The screen keeps its rich interactive brief; the download is
    this fixed one-page document, rendered by BriefPrint from a derived shape.
@@ -359,16 +359,16 @@ body.pb-preview > .pb-root {
 
 .pb-page {
   box-sizing: border-box;
-  width: 297mm;
-  height: 210mm;
-  padding: 12mm 13mm;
+  width: 210mm;
+  height: 297mm;
+  padding: 13mm 12mm;
   margin: 0 auto;
   background: var(--page);
   color: var(--ink);
   font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11", "tnum" 0;
   font-size: 9pt;
-  line-height: 1.34;
+  line-height: 1.38;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -404,15 +404,20 @@ body.pb-preview > .pb-root {
 }
 
 /* Header ------------------------------------------------------------------- */
+/* Portrait masthead: a thin brand/date rule, with the subject title given the
+   full page width below it (a centred title between two flanks would leave the
+   company name barely 90mm on a 210mm sheet). */
 .pb-header {
-  display: flex;
-  align-items: center;
-  gap: 10pt;
-  padding-bottom: 3pt;
+  padding-bottom: 5pt;
   border-bottom: 1.5pt solid var(--navy);
 }
+.pb-header-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10pt;
+}
 .pb-brand {
-  flex: 1 1 0;
   min-width: 0;
   display: flex;
   align-items: baseline;
@@ -423,15 +428,14 @@ body.pb-preview > .pb-root {
 .pb-brand-sep { color: var(--meta); font-weight: 300; }
 .pb-brand-sub { font-size: 7pt; font-weight: 600; text-transform: uppercase; letter-spacing: 0.12em; color: var(--meta); }
 .pb-title-wrap {
-  flex: 2 1 0;
   min-width: 0;
-  text-align: center;
+  margin-top: 4pt;
 }
 .pb-title {
   margin: 0;
-  font-size: 18pt;
+  font-size: 20pt;
   font-weight: 700;
-  line-height: 1.02;
+  line-height: 1.06;
   letter-spacing: -0.012em;
   color: var(--navy);
   display: -webkit-box;
@@ -439,11 +443,13 @@ body.pb-preview > .pb-root {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.pb-subtitle { font-size: 7pt; color: var(--ink2); margin-top: 0.5pt; }
+.pb-subtitle { font-size: 7.4pt; color: var(--ink2); margin-top: 1.5pt; }
 .pb-gen {
-  flex: 1 1 0;
   min-width: 0;
-  text-align: right;
+  display: flex;
+  align-items: baseline;
+  gap: 5pt;
+  white-space: nowrap;
 }
 .pb-gen-label { font-size: 6.6pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--meta); }
 .pb-gen-val { font-size: 8pt; color: var(--ink2); white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -451,20 +457,20 @@ body.pb-preview > .pb-root {
 /* Verdict row -------------------------------------------------------------- */
 .pb-verdict-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 9pt;
-  margin-top: 4pt;
+  margin-top: 7pt;
 }
 .pb-verdict {
   flex: 1 1 auto;
   min-width: 0;
   margin: 0;
-  font-size: 12pt;
-  line-height: 1.14;
+  font-size: 11.5pt;
+  line-height: 1.24;
   font-weight: 500;
   color: var(--navy);
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -488,13 +494,13 @@ body.pb-preview > .pb-root {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 6pt;
-  margin-top: 5pt;
+  margin-top: 7pt;
 }
 .pb-metric {
   background: var(--panel);
   border: 0.75pt solid var(--line);
   border-radius: 5pt;
-  padding: 3pt 8pt;
+  padding: 4pt 8pt;
 }
 .pb-metric-val {
   display: flex;
@@ -515,20 +521,26 @@ body.pb-preview > .pb-root {
   margin-top: 2pt;
 }
 
+/* Full-width identity strip ------------------------------------------------ */
+/* The snapshot is key–value facts, so it reads better as a band under the
+   metrics than squeezed into a ~75mm portrait column. */
+.pb-band { margin-top: 7pt; }
+
 /* Two-column body ---------------------------------------------------------- */
 .pb-body {
   display: flex;
-  gap: 8mm;
-  margin-top: 5pt;
+  gap: 7mm;
+  margin-top: 7pt;
   /* Content-sized: the two columns flow top-anchored (so section tops align
-     across columns), and the footer follows in natural order. On a sparse brief
-     the unused space falls at the page foot rather than as a void mid-page. */
+     across columns). Portrait leaves real slack under a sparse brief, so the
+     footer is bottom-anchored (margin-top: auto) and the void lands between the
+     body and the footer rule rather than below the page's last line. */
   flex: 0 0 auto;
   min-height: 0;
 }
-.pb-col { display: flex; flex-direction: column; gap: 4pt; min-width: 0; }
-.pb-col-left { flex: 62 1 0; }
-.pb-col-right { flex: 38 1 0; gap: 3pt; }
+.pb-col { display: flex; flex-direction: column; gap: 6pt; min-width: 0; }
+.pb-col-left { flex: 57 1 0; }
+.pb-col-right { flex: 43 1 0; gap: 6pt; }
 
 /* Section shell ------------------------------------------------------------ */
 .pb-section { break-inside: avoid; }
@@ -544,8 +556,8 @@ body.pb-preview > .pb-root {
   justify-content: space-between;
   gap: 6pt;
   border-bottom: 0.75pt solid var(--line);
-  padding-bottom: 1pt;
-  margin-bottom: 2pt;
+  padding-bottom: 2pt;
+  margin-bottom: 3.5pt;
 }
 .pb-head-title {
   font-size: 8.2pt;
@@ -559,23 +571,23 @@ body.pb-preview > .pb-root {
 /* Executive verdict -------------------------------------------------------- */
 .pb-exec {
   margin: 0;
-  font-size: 8.8pt;
-  line-height: 1.34;
+  font-size: 8.9pt;
+  line-height: 1.42;
   color: var(--ink);
   display: -webkit-box;
-  -webkit-line-clamp: 4;
+  -webkit-line-clamp: 5;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
 
 /* Key concerns ------------------------------------------------------------- */
-.pb-concerns { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2pt; }
+.pb-concerns { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3.5pt; }
 .pb-concern {
   background: var(--panel);
   border: 0.75pt solid var(--line);
   border-left-width: 2.5pt;
   border-radius: 4pt;
-  padding: 3pt 6pt;
+  padding: 4pt 7pt;
   break-inside: avoid;
 }
 .pb-edge-red { border-left-color: var(--red); }
@@ -589,10 +601,13 @@ body.pb-preview > .pb-root {
   font-size: 8.8pt;
   font-weight: 700;
   color: var(--navy);
-  line-height: 1.2;
-  white-space: nowrap;
+  line-height: 1.25;
+  /* Narrower portrait column: wrap to a second line rather than ellipsing a
+     title that would still read as clipped mid-word. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 .pb-claim {
   flex: 0 0 auto;
@@ -610,19 +625,19 @@ body.pb-preview > .pb-root {
 .pb-claim-review { background: var(--amber-soft); color: var(--amber); }
 .pb-concern-body {
   font-size: 8.5pt;
-  line-height: 1.22;
+  line-height: 1.32;
   color: var(--ink);
-  margin-top: 1pt;
+  margin-top: 2pt;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
 .pb-concern-why {
-  font-size: 7.3pt;
-  line-height: 1.2;
+  font-size: 7.4pt;
+  line-height: 1.3;
   color: var(--ink2);
-  margin-top: 1pt;
+  margin-top: 2pt;
   display: -webkit-box;
   -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
@@ -652,22 +667,39 @@ body.pb-preview > .pb-root {
 .pb-devs { list-style: none; margin: 0; padding: 0; }
 .pb-dev {
   display: grid;
-  grid-template-columns: 42pt 1fr auto;
+  /* Date column sized to its content — most runs carry no date, and a fixed
+     42pt gutter would steal a line's worth of headline in a portrait column. */
+  grid-template-columns: auto 1fr auto;
   gap: 6pt;
   align-items: baseline;
-  padding: 1.5pt 0;
+  padding: 2.5pt 0;
   border-bottom: 0.6pt dotted var(--line);
 }
 .pb-dev:last-child { border-bottom: 0; }
 .pb-dev-date { font-size: 7.2pt; color: var(--ink2); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.pb-dev-head { font-size: 8.5pt; line-height: 1.2; color: var(--ink); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pb-dev-head {
+  font-size: 8.5pt;
+  line-height: 1.28;
+  color: var(--ink);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .pb-dev-status { font-size: 7pt; font-weight: 600; white-space: nowrap; text-align: right; }
 
-/* Company snapshot --------------------------------------------------------- */
-.pb-snap { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5pt 9pt; margin: 0; }
-.pb-snap-item { display: flex; flex-direction: column; gap: 0; }
+/* Company snapshot (full-width band under the metrics) --------------------- */
+.pb-snap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4pt 16pt;
+  margin: 0;
+}
+/* Content-sized with an equal share of the slack, so a long CIN keeps its line
+   while short facts stay evenly spread across the band. */
+.pb-snap-item { flex: 1 1 auto; min-width: 24mm; display: flex; flex-direction: column; gap: 0; }
 .pb-snap-label { font-size: 6.5pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--meta); }
-.pb-snap-val { font-size: 8.6pt; color: var(--ink); font-weight: 500; line-height: 1.1; word-break: break-word; }
+.pb-snap-val { font-size: 8.6pt; color: var(--ink); font-weight: 500; line-height: 1.2; word-break: break-word; }
 
 /* Compact tables (people, cases) ------------------------------------------- */
 .pb-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
@@ -685,12 +717,12 @@ body.pb-preview > .pb-root {
   border-bottom: 0.75pt solid var(--line);
 }
 .pb-table td {
-  font-size: 8.5pt;
+  font-size: 8.4pt;
   color: var(--ink);
   vertical-align: top;
-  padding: 1pt 5pt 1pt 0;
+  padding: 2.2pt 4pt 2.2pt 0;
   border-bottom: 0.6pt solid var(--line);
-  line-height: 1.1;
+  line-height: 1.2;
 }
 .pb-table tr:last-child td { border-bottom: 0; }
 .pb-table .pb-num { text-align: right; white-space: nowrap; }
@@ -705,19 +737,21 @@ body.pb-preview > .pb-root {
   border-radius: 3pt;
   margin-left: 3pt;
 }
-.pb-date-col { white-space: nowrap; font-variant-numeric: tabular-nums; font-size: 7.6pt; color: var(--ink2); }
+.pb-date-col { white-space: nowrap; font-variant-numeric: tabular-nums; font-size: 7.4pt; color: var(--ink2); }
 .pb-case-name { display: block; }
-.pb-case-auth { display: block; font-size: 6.7pt; color: var(--meta); margin-top: 0; }
-.pb-status { font-size: 7.4pt; font-weight: 600; white-space: nowrap; }
+.pb-case-auth { display: block; font-size: 6.7pt; color: var(--meta); margin-top: 0.5pt; }
+.pb-status { font-size: 7.2pt; font-weight: 600; white-space: nowrap; }
 
 /* Source quality + research gaps ------------------------------------------- */
-.pb-sq { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 1.5pt 9pt; }
-.pb-sq-item { display: flex; align-items: center; gap: 5pt; font-size: 7.8pt; min-width: 0; }
+/* Single column in portrait: the bucket labels ("Low-confidence / unverified")
+   need the full column width, and the taller page can afford the rows. */
+.pb-sq { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr; gap: 2.5pt; }
+.pb-sq-item { display: flex; align-items: center; gap: 5pt; font-size: 7.9pt; min-width: 0; }
 .pb-sq-label { flex: 1 1 auto; min-width: 0; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pb-sq-count { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--navy); }
 .pb-sq-zero { color: var(--meta); font-weight: 500; }
 .pb-gaps {
-  margin-top: 3.5pt;
+  margin-top: 5pt;
   background: var(--panel);
   border: 0.75pt solid var(--line);
   border-left: 2.5pt solid var(--amber);
@@ -732,36 +766,46 @@ body.pb-preview > .pb-root {
   color: var(--amber);
   margin-bottom: 1pt;
 }
-.pb-gaps-list { margin: 0; padding-left: 10pt; font-size: 7.2pt; line-height: 1.2; color: var(--ink2); }
-.pb-gaps-list li { margin-bottom: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pb-gaps-list { margin: 0; padding-left: 10pt; font-size: 7.2pt; line-height: 1.28; color: var(--ink2); }
+.pb-gaps-list li {
+  margin-bottom: 1pt;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 
 /* Footer (sources + disclaimer) -------------------------------------------- */
 .pb-footer {
-  margin-top: 4pt;
-  padding-top: 2.5pt;
+  /* Anchored to the foot of the sheet: on a sparse brief the slack collapses
+     above the rule instead of leaving the sources floating mid-page. */
+  margin-top: auto;
+  padding-top: 4pt;
   border-top: 1.5pt solid var(--navy);
 }
-.pb-sources-head { display: flex; align-items: baseline; justify-content: space-between; gap: 6pt; margin-bottom: 1.5pt; }
+.pb-sources-head { display: flex; align-items: baseline; justify-content: space-between; gap: 6pt; margin-bottom: 3pt; }
 .pb-sources {
   list-style: none;
   margin: 0;
   padding: 0;
-  column-count: 3;
-  column-gap: 8mm;
+  /* Two columns on the narrower portrait sheet — three would leave ~55mm per
+     citation and ellipse most labels. */
+  column-count: 2;
+  column-gap: 7mm;
 }
 .pb-source {
-  font-size: 6.9pt;
-  line-height: 1.2;
+  font-size: 7.1pt;
+  line-height: 1.28;
   color: var(--ink2);
   break-inside: avoid;
-  margin-bottom: 1pt;
+  margin-bottom: 1.5pt;
   text-indent: -8pt;
   padding-left: 8pt;
 }
 .pb-source-link { color: var(--ink2); text-decoration: none; }
 .pb-disclaimer {
-  margin-top: 2pt;
-  padding-top: 1.5pt;
+  margin-top: 4pt;
+  padding-top: 3pt;
   border-top: 0.6pt dotted var(--line);
   font-size: 6.8pt;
   font-style: italic;
@@ -772,7 +816,7 @@ body.pb-preview > .pb-root {
 /* ── Print media: page geometry + hide the app chrome ─────────────────────── */
 @media print {
   @page {
-    size: A4 landscape;
+    size: A4 portrait;
     margin: 0;
   }
   html,

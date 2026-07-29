@@ -14,7 +14,7 @@ function fileName(company: string): string {
 // it back as a direct download (no browser print dialog). Chromium — the same
 // one the collectors run on — loads the print page (/print?id=…) under print
 // media and exports it, so the file is byte-for-byte the on-screen one-page
-// A4-landscape brief (components/BriefPrint), not a second layout.
+// A4-portrait brief (components/BriefPrint), not a second layout.
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   const run = getRun(params.id);
   if (!run) {
@@ -39,7 +39,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     const pdf = await page.pdf({
       printBackground: true,
-      // Honour the document's own `@page { size: A4 landscape; margin: 0 }`.
+      // Honour the document's own `@page { size: A4 portrait; margin: 0 }`.
       preferCSSPageSize: true,
       pageRanges: "1",
     });

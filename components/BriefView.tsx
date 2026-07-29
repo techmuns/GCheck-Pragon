@@ -220,7 +220,7 @@ export default function BriefView({ run, onReset }: Props) {
         </p>
       </div>
 
-      {/* The download / print output — a purpose-built one-page A4-landscape brief.
+      {/* The download / print output — a purpose-built one-page A4-portrait brief.
           Portalled to <body> and print-only, so it never touches the screen view. */}
       {printBrief && <BriefPrint brief={printBrief} />}
     </div>

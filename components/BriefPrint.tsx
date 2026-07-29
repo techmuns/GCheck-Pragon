@@ -13,7 +13,7 @@ import type {
   SourceRef,
 } from "@/lib/printBrief";
 
-// ── One-page A4-landscape pre-meeting brief (print / PDF) ────────────────────
+// ── One-page A4-portrait pre-meeting brief (print / PDF) ─────────────────────
 // A purpose-built institutional report, not a print of the on-screen dashboard.
 // Fixed structure, dynamic content: every section caps its rows, collapses when
 // empty, and the whole thing is engineered to land on exactly one page. All the
@@ -40,6 +40,9 @@ function PrintDoc({ brief }: { brief: PrintBrief }) {
         <Header brief={brief} />
         <VerdictRow brief={brief} />
         <SummaryStrip brief={brief} />
+        {/* Portrait is ~90mm narrower than landscape, so the key–value snapshot
+            runs full width as a band rather than crowding a column. */}
+        <Snapshot fields={brief.snapshot} />
 
         <div className="pb-body">
           <div className="pb-col pb-col-left">
@@ -49,7 +52,6 @@ function PrintDoc({ brief }: { brief: PrintBrief }) {
           </div>
 
           <div className="pb-col pb-col-right">
-            <Snapshot fields={brief.snapshot} />
             <KeyPeople people={brief.people} extra={brief.extraPeople} isDirector={brief.isDirector} />
             <Cases cases={brief.cases} extra={brief.extraCases} />
             <SourceQuality rows={brief.sourceQuality} gaps={brief.researchGaps} />
@@ -67,18 +69,22 @@ function PrintDoc({ brief }: { brief: PrintBrief }) {
 function Header({ brief }: { brief: PrintBrief }) {
   return (
     <header className="pb-header">
-      <div className="pb-brand">
-        <span className="pb-brand-mark">Paragon</span>
-        <span className="pb-brand-sep">|</span>
-        <span className="pb-brand-sub">Pre-Meeting Research</span>
+      {/* Brand and date share the top rule; the subject title takes the full
+          page width beneath it — portrait has none to spare on flanking. */}
+      <div className="pb-header-top">
+        <div className="pb-brand">
+          <span className="pb-brand-mark">Paragon</span>
+          <span className="pb-brand-sep">|</span>
+          <span className="pb-brand-sub">Pre-Meeting Research</span>
+        </div>
+        <div className="pb-gen">
+          <span className="pb-gen-label">Generated</span>
+          <span className="pb-gen-val">{brief.generatedAt}</span>
+        </div>
       </div>
       <div className="pb-title-wrap">
         <h1 className="pb-title">{brief.company}</h1>
         {brief.subtitle && <div className="pb-subtitle">{brief.subtitle}</div>}
-      </div>
-      <div className="pb-gen">
-        <div className="pb-gen-label">Generated</div>
-        <div className="pb-gen-val">{brief.generatedAt}</div>
       </div>
     </header>
   );
@@ -113,9 +119,19 @@ function SummaryStrip({ brief }: { brief: PrintBrief }) {
 
 // ── Section shell ─────────────────────────────────────────────────────────────
 
-function Section({ title, meta, children }: { title: string; meta?: string; children: ReactNode }) {
+function Section({
+  title,
+  meta,
+  className,
+  children,
+}: {
+  title: string;
+  meta?: string;
+  className?: string;
+  children: ReactNode;
+}) {
   return (
-    <section className="pb-section">
+    <section className={className ? `pb-section ${className}` : "pb-section"}>
       <div className="pb-head">
         <span className="pb-head-title">{title}</span>
         {meta && <span className="pb-head-meta">{meta}</span>}
@@ -208,7 +224,7 @@ function RecentDevelopments({ items, extra }: { items: Development[]; extra: num
 function Snapshot({ fields }: { fields: PrintBrief["snapshot"] }) {
   if (fields.length === 0) return null;
   return (
-    <Section title="Company Snapshot">
+    <Section title="Company Snapshot" className="pb-band">
       <dl className="pb-snap">
         {fields.map((f, i) => (
           <div className="pb-snap-item" key={i}>
@@ -228,8 +244,8 @@ function KeyPeople({ people, extra, isDirector }: { people: Person[]; extra: num
       <table className="pb-table">
         <colgroup>
           <col style={{ width: "50%" }} />
-          <col style={{ width: "30%" }} />
-          <col style={{ width: "20%" }} />
+          <col style={{ width: "32%" }} />
+          <col style={{ width: "18%" }} />
         </colgroup>
         <tbody>
           {people.map((p, i) => (
@@ -255,9 +271,9 @@ function Cases({ cases, extra }: { cases: CaseRow[]; extra: number }) {
     <Section title="Court & Regulatory" meta={extra > 0 ? `+${extra} more` : undefined}>
       <table className="pb-table">
         <colgroup>
-          <col style={{ width: "22%" }} />
-          <col style={{ width: "54%" }} />
-          <col style={{ width: "24%" }} />
+          <col style={{ width: "27%" }} />
+          <col style={{ width: "46%" }} />
+          <col style={{ width: "27%" }} />
         </colgroup>
         <tbody>
           {cases.map((c, i) => (
