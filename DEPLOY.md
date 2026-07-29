@@ -85,6 +85,7 @@ All optional — every source degrades honestly if its key/login is absent.
 |-----|---------|
 | `OPENAI_API_KEY` | AI-written brief (rules-based fallback without it) |
 | `OPENAI_MODEL` | model override (default `gpt-4o-mini`) |
+| `MUNSHOT_TOKEN` | Munshot web + news search. **Expires** — see the note below |
 | `SERPAPI_KEY` **or** `GOOGLE_API_KEY` + `GOOGLE_CX` | richer Google results (keyless fallback otherwise) |
 | `INDIANKANOON_API_TOKEN` | official Indian Kanoon API (public search otherwise) |
 | `MUNSHOT_TOKEN` | web search **and** reliable name→record lookup for the free company-registry (director) source |
@@ -98,3 +99,46 @@ All optional — every source degrades honestly if its key/login is absent.
 `data/config.json` (admin edits) lives on the container's local disk and is
 **ephemeral** — it resets on redeploy. For durable config across deploys, mount
 a volume at `/app/data`, or move config to a database (a small future step).
+
+## Note on `MUNSHOT_TOKEN`
+
+The Munshot search APIs (`/tools/web-search`, `/tools/news-search`) authenticate
+with `bearer_jwt` — a **user session token**, not a service key. Munshot issues
+it to dashboards embedded in its host app at runtime; there is no long-lived
+equivalent for a standalone server like this one. A token copied from a browser
+session works only until that session expires, at which point search returns
+`403 Invalid authentication token`.
+
+Because of that, treat `MUNSHOT_TOKEN` as best-effort and always configure a
+durable backend alongside it — `SERPAPI_KEY`, or `GOOGLE_API_KEY` + `GOOGLE_CX`.
+The collector walks every configured backend in order and keeps the first that
+answers, so an expired Munshot token degrades to Google rather than taking web
+search down. News degrades from Munshot to SerpAPI's `google_news` engine; with
+neither credential set, the news pass is skipped and says so in the brief.
+
+### Monitoring the token
+
+`GET /api/health` reports search-credential status without exposing the token:
+
+```json
+{ "ok": true, "status": "degraded",
+  "search": { "primary": "munshot", "hasDurableFallback": true },
+  "munshotToken": { "state": "expiring", "expiresAt": "...", "hoursRemaining": 11.5 } }
+```
+
+It returns **503** only when search is genuinely broken (no valid token *and* no
+Google backend), so an uptime checker can alert on the status code alone. States
+are `valid`, `expiring` (under 48h left), `expired`, `absent`, and `opaque` (a
+token with no readable expiry).
+
+### Search result cache
+
+Search backends are metered (SerpAPI's free tier is 100 calls a **month**, and a
+brief costs roughly three per entity), so identical queries reuse a recent
+result instead of spending quota twice. Re-running the same company is free.
+
+- TTL defaults to 6 hours; override with `SEARCH_CACHE_TTL_SECONDS`.
+- Failures are never cached, so replacing an expired token recovers immediately
+  rather than after the TTL lapses.
+- The cache is in-memory, so a redeploy or a free-instance spin-down clears it.
+- `GET /api/health` reports `search.cache` — `hits` are metered calls not spent.
