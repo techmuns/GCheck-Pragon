@@ -71,13 +71,6 @@ export default function SearchForm({ onSubmit, busy }: Props) {
           label={isDirector ? "Director / Individual" : "Company"}
           autoFocus
         />
-        {/* A placeholder disappears the moment they start typing, so the reason
-            to prefer a DIN is stated under the field, where it stays. */}
-        {isDirector && (
-          <p className="text-[12.5px] leading-relaxed text-ink-secondary">
-            Know their DIN? Type it instead — several directors can share a name, but never a DIN.
-          </p>
-        )}
       </div>
 
       <button
