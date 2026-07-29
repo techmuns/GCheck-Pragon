@@ -1,5 +1,6 @@
 import type { Citation, RawHit, RenderedSection, Run, Severity } from "./types";
-import { compareByHierarchy } from "./hierarchy";
+import { compareByHierarchy, seniorRole } from "./hierarchy";
+import { nameFromTitle, samePerson, uniqueRefs } from "./people";
 
 // ── Print-brief derivation ──────────────────────────────────────────────────
 // Turns a finished Run into the fixed, decision-grade shape the one-page A4
@@ -83,6 +84,9 @@ export interface Person {
   tenure?: string;
   din?: string;
   flag?: string;
+  /** The source(s) the person was read from, as citation numbers — so a board
+   *  row on the page can be followed back to the record it came from. */
+  sourceRefs?: number[];
 }
 
 export interface CaseRow {
@@ -166,7 +170,7 @@ export function buildPrintBrief(run: Run, generatedAt: string): PrintBrief | nul
   const toReview = concernsAll.filter((c) => c.severity === "amber").length;
 
   const developmentsAll = buildDevelopments(bySource, brief.citations);
-  const peopleAll = buildPeople(bySource, run.subject.promoters, isDirector);
+  const peopleAll = buildPeople(bySource, run.subject.promoters, isDirector, brief.citations);
   const casesAll = buildCases(bySource, brief.citations);
 
   const doneSources = run.progress.filter((p) => p.status === "done").length;
@@ -699,14 +703,34 @@ function buildSnapshot(run: Run, cin?: string): SnapshotField[] {
 
 // ── Key people ────────────────────────────────────────────────────────────────
 
-function buildPeople(bySource: SourceIndex, promoters: string[], isDirector: boolean): Person[] {
+function buildPeople(
+  bySource: SourceIndex,
+  promoters: string[],
+  isDirector: boolean,
+  citations: Citation[],
+): Person[] {
+  const refByUrl = new Map(citations.filter((c) => c.url).map((c) => [c.url as string, c.ref]));
   const out: Person[] = [];
-  const seen = new Set<string>();
+
+  // Merge rather than skip: the registry's "Mukesh Dhirubhai Ambani" and
+  // Wikidata's "Mukesh Ambani" are one director, and on a five-row table the
+  // second row would cost a real one its place (lib/people). The first row seen
+  // keeps the line, which is why the registry — the richest source, with the DIN
+  // and the tenure — is read first.
   const add = (p: Person) => {
-    const key = p.name.toLowerCase().trim();
-    if (!key || seen.has(key)) return;
-    seen.add(key);
-    out.push(p);
+    const name = p.name.trim();
+    if (!name) return;
+    const existing = out.find((q) => samePerson(q, p));
+    if (!existing) {
+      out.push({ ...p, name });
+      return;
+    }
+    existing.din ??= p.din;
+    existing.tenure ??= p.tenure;
+    existing.flag ??= p.flag;
+    // One role column, so it names the most senior office anyone gives them.
+    existing.role = seniorRole(existing.role, p.role);
+    existing.sourceRefs = uniqueRefs([...(existing.sourceRefs ?? []), ...(p.sourceRefs ?? [])]);
   };
 
   // Directors of record from the public registry — the primary board list.
@@ -722,6 +746,7 @@ function buildPeople(bySource: SourceIndex, promoters: string[], isDirector: boo
         tenure: compactTenure(tenure),
         din: str(h.extra?.din),
         flag: longTenureFlag(tenure),
+        sourceRefs: uniqueRefs([h.url ? refByUrl.get(h.url) : undefined]),
       });
     }
   }
@@ -732,7 +757,13 @@ function buildPeople(bySource: SourceIndex, promoters: string[], isDirector: boo
     for (const h of wikidata.hits) {
       // Wikidata company hits read "Name — Role".
       const [name, role] = h.title.split(" — ");
-      if (name) add({ name: name.trim(), role: role?.trim() });
+      if (name) {
+        add({
+          name: name.trim(),
+          role: role?.trim(),
+          sourceRefs: uniqueRefs([h.url ? refByUrl.get(h.url) : undefined]),
+        });
+      }
     }
   }
 
@@ -999,10 +1030,6 @@ function dateInText(t: string): string | undefined {
 
 function stripPeriod(s: string): string {
   return s.replace(/[.\s]+$/, "");
-}
-
-function nameFromTitle(title: string): string {
-  return title.split(" — ")[0]?.trim() ?? "";
 }
 
 function stripQuotes(s: string): string {

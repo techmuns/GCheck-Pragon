@@ -76,6 +76,15 @@ export function tenureMonths(tenure?: string): number {
   return Number(y?.[1] ?? 0) * 12 + Number(m?.[1] ?? 0);
 }
 
+/** The more senior of two offices the sources name for one person. A director
+ *  the registry files as a whole-time director and Wikidata knows as the CEO
+ *  holds both; the brief ranks — and names — them by the senior one. */
+export function seniorRole(a?: string, b?: string): string | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  return roleRank(b) < roleRank(a) ? b : a;
+}
+
 /** Anything the ladder can rank: a person row carrying their office and, where
  *  the source gave one, how long they have held it. */
 export interface RankablePerson {

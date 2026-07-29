@@ -72,6 +72,10 @@ export interface Finding {
   text: string;
   /** Index into the run's sources appendix. */
   sourceRef?: number;
+  /** Every source behind the finding, when more than one carries it — a
+   *  director both the registry and Wikidata name, say. `sourceRef` stays the
+   *  first of these, so anything reading a single citation still works. */
+  sourceRefs?: number[];
 }
 
 /** One rendered section of the finished brief. */

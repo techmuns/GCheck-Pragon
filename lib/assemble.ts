@@ -8,7 +8,8 @@ import type {
   Severity,
   Subject,
 } from "./types";
-import { compareByHierarchy, type RankablePerson } from "./hierarchy";
+import { compareByHierarchy, seniorRole, type RankablePerson } from "./hierarchy";
+import { nameFromTitle, samePerson, uniqueRefs } from "./people";
 
 // ── Deterministic brief assembler ──────────────────────────────────────────
 // Turns raw collector output into an honest, source-linked brief. No
@@ -304,19 +305,52 @@ function snapshotSection(id: string, title: string, ctx: Ctx): RenderedSection {
   return { id, title, findings };
 }
 
+/** One person in the Key People list, before they are ranked and cited. */
+interface PersonRow extends RankablePerson {
+  name: string;
+  din?: string;
+  /** The line as it will read on the page. */
+  text: string;
+  /** Offices another source gives them that this line doesn't already state. */
+  also: string[];
+  /** Every source that named this person — one citation each. */
+  cites: Array<{ sourceName: string; label: string; url?: string }>;
+}
+
+/**
+ * Add a person, folding them into a row already on the list when it is the same
+ * person under another spelling. The first row wins the line, which is why the
+ * richest source is gathered first: the registry's line carries the DIN and the
+ * tenure, and Wikidata's "Mukesh Ambani — CEO" has nothing to add to it but the
+ * office and its own citation.
+ */
+function addPerson(rows: PersonRow[], row: PersonRow): void {
+  const existing = rows.find((r) => samePerson(r, row));
+  if (!existing) {
+    rows.push(row);
+    return;
+  }
+  existing.cites.push(...row.cites);
+  existing.din ??= row.din;
+  existing.tenure ??= row.tenure;
+  // An office the kept line doesn't already state is real information from a
+  // real source — say it, and cite it, rather than dropping it with the row.
+  // (A name the user typed carries no source, so it adds no office.)
+  const stated = `${existing.text} ${existing.also.join(" ")}`.toLowerCase();
+  if (row.role && row.cites.length > 0 && !stated.includes(row.role.toLowerCase())) {
+    existing.also.push(row.role);
+  }
+  // Rank on the most senior office anyone attributes to them.
+  existing.role = seniorRole(existing.role, row.role);
+}
+
 function managementSection(id: string, title: string, ctx: Ctx): RenderedSection {
   // Gather everyone first, rank second. The sources hand their people over in
   // their own order — the registry's is filing order, which buries the Managing
   // Director under the independent directors — so the list is re-ordered by
-  // office before it is rendered (lib/hierarchy).
-  const people: Array<RankablePerson & { text: string; url?: string; sourceName?: string }> = [];
-
-  // Promoters the user supplied (the meeting subjects). No source backs a typed
-  // name, so it carries no citation — but it is still a control role, and the
-  // ladder ranks it as one.
-  for (const p of ctx.subject.promoters) {
-    people.push({ text: p, role: "Promoter" });
-  }
+  // office before it is rendered (lib/hierarchy). Gathered richest-source-first,
+  // because that is the row a duplicate merges into (lib/people).
+  const people: PersonRow[] = [];
 
   // Directors from the free public registry record — the board of record,
   // including for unlisted companies. Cited to the aggregator that publishes it.
@@ -327,10 +361,12 @@ function managementSection(id: string, title: string, ctx: Ctx): RenderedSection
   if (registry?.status === "done") {
     const rows = ctx.subject.type === "director" ? registry.hits.filter((h) => h.extra?.category === "identity") : registry.hits;
     for (const d of rows) {
-      people.push({
+      addPerson(people, {
+        name: strField(d.extra?.name) ?? nameFromTitle(d.title),
+        din: strField(d.extra?.din),
         text: d.title,
-        url: d.url,
-        sourceName: registry.sourceName,
+        also: [],
+        cites: [{ sourceName: registry.sourceName, label: d.title, url: d.url }],
         role: strField(d.extra?.designation),
         tenure: strField(d.extra?.tenure),
       });
@@ -345,24 +381,37 @@ function managementSection(id: string, title: string, ctx: Ctx): RenderedSection
   if (wikidata?.status === "done" && ctx.subject.type !== "director") {
     for (const h of wikidata.hits) {
       // Wikidata company hits read "Name — Role"; the ladder needs the role.
-      people.push({
+      addPerson(people, {
+        name: nameFromTitle(h.title),
         text: h.title,
-        url: h.url,
-        sourceName: wikidata.sourceName,
+        also: [],
+        cites: [{ sourceName: wikidata.sourceName, label: h.title, url: h.url }],
         role: strField(h.extra?.role) ?? h.title.split(" — ")[1],
       });
     }
+  }
+
+  // Promoters the user supplied (the meeting subjects). No source backs a typed
+  // name, so it carries no citation — but it is still a control role, and the
+  // ladder ranks it as one. A promoter already on the board merges into their
+  // own board row rather than appearing twice.
+  for (const p of ctx.subject.promoters) {
+    addPerson(people, { name: p, text: p, role: "Promoter", also: [], cites: [] });
   }
 
   // Cite only after ranking, so the citation numbers run down the section in
   // reading order instead of in the order the collectors happened to return.
   const findings: Finding[] = people
     .sort(compareByHierarchy)
-    .map((p) => ({
-      severity: "info" as Severity,
-      text: p.text,
-      sourceRef: p.sourceName ? ctx.cite(p.sourceName, p.text, p.url) : undefined,
-    }));
+    .map((p) => {
+      const refs = uniqueRefs(p.cites.map((c) => ctx.cite(c.sourceName, c.label, c.url)));
+      return {
+        severity: "info" as Severity,
+        text: p.also.length > 0 ? `${p.text} — also ${p.also.join(", ")}` : p.text,
+        sourceRef: refs[0],
+        sourceRefs: refs.length > 1 ? refs : undefined,
+      };
+    });
 
   if (findings.length === 0) {
     // Honest, and points at the two director sources when neither returned data.

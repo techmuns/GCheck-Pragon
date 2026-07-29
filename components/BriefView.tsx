@@ -201,15 +201,17 @@ export default function BriefView({ run, onReset }: Props) {
                   <ul className="space-y-2">
                     {section.findings.map((f, i) => {
                       const s = severityStyle[f.severity];
+                      // A finding two sources carry — a director on both the
+                      // registry and Wikidata — cites both, not just the first.
+                      const refs = f.sourceRefs ?? (f.sourceRef !== undefined ? [f.sourceRef] : []);
                       return (
                         <li key={i} className="flex items-start gap-2.5">
                           <span className="mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: s.dot }} />
                           <span className="text-[14px] leading-relaxed text-ink-primary">
                             {f.text}
-                            <CitationRef
-                              n={f.sourceRef}
-                              url={f.sourceRef !== undefined ? urlByRef.get(f.sourceRef) : undefined}
-                            />
+                            {refs.map((n) => (
+                              <CitationRef key={n} n={n} url={urlByRef.get(n)} />
+                            ))}
                           </span>
                         </li>
                       );

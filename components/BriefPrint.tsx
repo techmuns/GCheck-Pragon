@@ -285,9 +285,13 @@ function KeyPeople({ people, extra, isDirector }: { people: Person[]; extra: num
     <Section title={isDirector ? "Associated People" : "Key People"} meta={extra > 0 ? `+${extra} more` : undefined}>
       <table className="pb-table">
         <colgroup>
-          <col style={{ width: "50%" }} />
-          <col style={{ width: "32%" }} />
-          <col style={{ width: "18%" }} />
+          <col style={{ width: "46%" }} />
+          <col style={{ width: "30%" }} />
+          {/* Tenure and its citation share the right-hand rail: the board rows
+              are read off a source like every other claim in the brief, so each
+              one carries the number that links back to it. Two refs and the
+              longest tenure ("23y 5m") are what this width has to hold. */}
+          <col style={{ width: "24%" }} />
         </colgroup>
         <tbody>
           {people.map((p, i) => (
@@ -296,8 +300,13 @@ function KeyPeople({ people, extra, isDirector }: { people: Person[]; extra: num
                 <span className="pb-person-name">{p.name}</span>
               </td>
               <td className="pb-clip">{p.role ?? "—"}</td>
-              <td className={`pb-num pb-clip ${p.flag ? "pb-fg-amber" : ""}`} title={p.flag}>
-                {p.tenure ?? "—"}
+              <td className="pb-num pb-clip">
+                <span className={p.flag ? "pb-fg-amber" : undefined} title={p.flag}>
+                  {p.tenure ?? "—"}
+                </span>
+                {(p.sourceRefs ?? []).slice(0, 2).map((n) => (
+                  <Ref n={n} key={n} />
+                ))}
               </td>
             </tr>
           ))}
