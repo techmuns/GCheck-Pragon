@@ -116,16 +116,33 @@ function buildSection(id: string, title: string, ctx: Ctx): RenderedSection {
 function redFlagSection(title: string, ctx: Ctx): RenderedSection {
   const findings: Finding[] = [];
 
+  // Who this brief is about. For a company the name settles it; for a person it
+  // does not, so the DIN is stated when we have one — and its absence is stated
+  // just as plainly, because then everything below is only name-matched.
+  if (ctx.subject.type === "director") findings.push(identityFinding(ctx));
+
   // Keyword hits from Google.
   const google = ctx.byId["google"];
   if (google?.status === "done") {
     const flagged = google.hits.filter((h) => (h.matchedKeywords?.length ?? 0) > 0);
-    for (const h of flagged.slice(0, 4)) {
+    // A hit that matched only the subject's NAME may be about a namesake. It is
+    // still worth showing — but it is not charged to this person: only hits
+    // tied to their DIN or one of their companies get a risk severity, and so
+    // only those can move the verdict.
+    const attributable = flagged.filter((h) => h.confidence !== "unverified");
+    const nameOnly = flagged.length - attributable.length;
+    for (const h of attributable.slice(0, 4)) {
       const ref = ctx.cite("Google / News", h.title, h.url);
       findings.push({
         severity: severityForKeywords(h.matchedKeywords ?? []),
         text: `${h.entity ?? "Subject"}: "${h.title}" — matched ${h.matchedKeywords!.join(", ")}.`,
         sourceRef: ref,
+      });
+    }
+    if (nameOnly > 0) {
+      findings.push({
+        severity: "info",
+        text: `${nameOnly} further keyword hit(s) matched the name only — not confirmed as this person, and not counted in the verdict.`,
       });
     }
   }
@@ -136,10 +153,21 @@ function redFlagSection(title: string, ctx: Ctx): RenderedSection {
     findings.push({ severity: "red", text: `CIBIL suit-filed / defaulter records found (${cibil.hits.length}). Review before meeting.` });
   }
 
-  // Litigation presence.
+  // Litigation presence — same split as the keyword hits above. A case naming
+  // some other Rajesh Kumar is not this Rajesh Kumar's case.
   const ik = ctx.byId["indiankanoon"];
   if (ik?.status === "done" && ik.hits.length > 0) {
-    findings.push({ severity: "amber", text: `${ik.hits.length} litigation record(s) surfaced on Indian Kanoon.` });
+    const attributable = ik.hits.filter((h) => h.confidence !== "unverified").length;
+    const nameOnly = ik.hits.length - attributable;
+    if (attributable > 0) {
+      findings.push({ severity: "amber", text: `${attributable} litigation record(s) surfaced on Indian Kanoon.` });
+    }
+    if (nameOnly > 0) {
+      findings.push({
+        severity: "info",
+        text: `${nameOnly} further case(s) matched the name only — not confirmed as this person, and not counted in the verdict.`,
+      });
+    }
   }
 
   // Honest notes for sources that didn't return data.
@@ -161,6 +189,38 @@ function redFlagSection(title: string, ctx: Ctx): RenderedSection {
   return { id: "red-flags", title, findings };
 }
 
+/** The registry record's identity row, if the person resolved to one. */
+function identityHit(ctx: Ctx) {
+  return ctx.byId["registry"]?.hits.find((h) => h.extra?.category === "identity");
+}
+
+/**
+ * The line that says which person this brief covers. This is the one finding a
+ * director brief cannot do without: a name search that could not be pinned to a
+ * DIN may have swept up a namesake, and the reader has to be told that in the
+ * same breath as the findings — not left to assume otherwise.
+ */
+function identityFinding(ctx: Ctx): Finding {
+  const registry = ctx.byId["registry"];
+  const identity = identityHit(ctx);
+  if (!ctx.subject.din || !identity || !registry) {
+    return {
+      severity: "info",
+      text: "Could not confirm a unique registry record for this name — the findings below are name-matched and may include other people with the same name.",
+    };
+  }
+  // Counted from the record's own directorship rows, not from subject.anchors —
+  // those may be the company the user typed in to disambiguate, and reporting a
+  // typed hint back as a registry finding would be claiming more than we read.
+  const linked = registry.hits.filter((h) => h.extra?.category === "directorship").length;
+  const name = typeof identity.extra?.name === "string" ? identity.extra.name : ctx.subject.company;
+  return {
+    severity: "info",
+    text: `Identified as ${name}, DIN ${ctx.subject.din}${linked > 0 ? ` — ${linked} company record(s) linked` : ""}.`,
+    sourceRef: ctx.cite(registry.sourceName, `DIN ${ctx.subject.din}`, identity.url),
+  };
+}
+
 // Company snapshot — identity of the subject as it appears on the public
 // registry record: the CIN and a link to the record itself. Directors surface
 // under Key People, so they are deliberately not repeated here. Honest states
@@ -168,6 +228,24 @@ function redFlagSection(title: string, ctx: Ctx): RenderedSection {
 function snapshotSection(id: string, title: string, ctx: Ctx): RenderedSection {
   const c = ctx.byId["registry"];
   if (!c) return { id, title, findings: [], empty: true };
+  // Director mode: the "snapshot" is the person's own registry identity — the
+  // name as the register spells it, and the DIN that makes it unambiguous.
+  if (ctx.subject.type === "director") {
+    const identity = identityHit(ctx);
+    if (!identity) {
+      return { id, title, findings: [{ severity: "info", text: c.note ?? "No registry record found." }], empty: true };
+    }
+    const name = typeof identity.extra?.name === "string" ? identity.extra.name : ctx.subject.company;
+    const din = typeof identity.extra?.din === "string" ? identity.extra.din : undefined;
+    return {
+      id,
+      title,
+      findings: [
+        { severity: "info", text: name, sourceRef: ctx.cite(c.sourceName, name, identity.url) },
+        ...(din ? [{ severity: "info" as Severity, text: `DIN ${din}`, sourceRef: ctx.cite(c.sourceName, `DIN ${din}`, identity.url) }] : []),
+      ],
+    };
+  }
   if (c.status === "skipped") return { id, title, findings: [{ severity: "info", text: c.note ?? "Registry not run." }], empty: true };
   if (c.status === "error") return { id, title, findings: [{ severity: "info", text: `Registry unavailable — ${c.note ?? "unknown error"}` }], empty: true };
 
@@ -198,9 +276,13 @@ function managementSection(id: string, title: string, ctx: Ctx): RenderedSection
 
   // Directors from the free public registry record — the board of record,
   // including for unlisted companies. Cited to the aggregator that publishes it.
+  // In director mode the same collector returns the subject themselves plus the
+  // companies they sit on; the companies are directorships, not people, so only
+  // the identity row belongs here.
   const registry = ctx.byId["registry"];
   if (registry?.status === "done") {
-    for (const d of registry.hits) {
+    const rows = ctx.subject.type === "director" ? registry.hits.filter((h) => h.extra?.category === "identity") : registry.hits;
+    for (const d of rows) {
       findings.push({ severity: "info", text: d.title, sourceRef: ctx.cite(registry.sourceName, d.title, d.url) });
     }
   }
@@ -244,8 +326,11 @@ function sourceSection(id: string, title: string, sourceId: string, ctx: Ctx, hi
     id,
     title,
     findings: c.hits.slice(0, 6).map((h) => ({
-      severity: hitSeverity,
-      text: h.title,
+      // Shown, but demoted and labelled: a record that only matched the
+      // subject's name is evidence about *a* person of that name, not proof it
+      // is this one. Info severity keeps it out of the verdict.
+      severity: h.confidence === "unverified" ? ("info" as Severity) : hitSeverity,
+      text: h.confidence === "unverified" ? `${h.title} — name match only, not confirmed as this person` : h.title,
       sourceRef: ctx.cite(c.sourceName, h.title, h.url),
     })),
   };
@@ -257,6 +342,17 @@ function sourceSection(id: string, title: string, sourceId: string, ctx: Ctx, hi
 // probe on PrivateCircle. Both are cited; honest states when neither returns.
 function directorshipsSection(id: string, title: string, ctx: Ctx): RenderedSection {
   const findings: Finding[] = [];
+
+  // The registry record's own company list. In director mode this is the
+  // strongest directorship signal available, because it is keyed to the
+  // person's DIN rather than to the spelling of their name — Wikidata below
+  // covers well-known figures, this covers the unlisted ones.
+  const registry = ctx.byId["registry"];
+  if (registry?.status === "done" && ctx.subject.type === "director") {
+    for (const h of registry.hits.filter((r) => r.extra?.category === "directorship").slice(0, 12)) {
+      findings.push({ severity: "info", text: h.title, sourceRef: ctx.cite(registry.sourceName, h.title, h.url) });
+    }
+  }
 
   // Wikidata's leadership hits only belong here in DIRECTOR mode — there they
   // are the companies the person leads. In company mode the same hits are the
@@ -344,8 +440,13 @@ function pressSection(id: string, title: string, ctx: Ctx): RenderedSection {
     id,
     title,
     findings: hits.map((h) => ({
-      severity: (h.matchedKeywords?.length ?? 0) > 0 ? severityForKeywords(h.matchedKeywords ?? []) : ("info" as Severity),
-      text: h.title,
+      severity:
+        h.confidence === "unverified"
+          ? ("info" as Severity)
+          : (h.matchedKeywords?.length ?? 0) > 0
+            ? severityForKeywords(h.matchedKeywords ?? [])
+            : ("info" as Severity),
+      text: h.confidence === "unverified" ? `${h.title} — name match only, not confirmed as this person` : h.title,
       sourceRef: ctx.cite(c.sourceName, h.title, h.url),
     })),
   };

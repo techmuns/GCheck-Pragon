@@ -1,7 +1,8 @@
 import { getConfig, updateRun, getRun } from "./store";
 import { collectors, type CollectorContext } from "./collectors";
+import { resolveIdentity } from "./collectors/directors";
 import { synthesizeBrief } from "./synthesize";
-import type { CollectorResult, SourceProgress } from "./types";
+import type { CollectorResult, SourceProgress, Subject } from "./types";
 
 // ── Research workflow (Phase 2) ────────────────────────────────────────────
 // Real multi-source retrieval. For the run's subject + enabled keywords it runs
@@ -16,6 +17,11 @@ import type { CollectorResult, SourceProgress } from "./types";
  *  into minutes. The run must always finish, so a source that overruns is
  *  recorded as unreachable and the rest of the brief goes ahead without it. */
 const SOURCE_DEADLINE_MS = Number(process.env.SOURCE_DEADLINE_SECONDS ?? 75) * 1000;
+
+/** The director identity lookup runs BEFORE the sources, so every second it
+ *  takes is a second the whole run waits. Kept short deliberately: anchors are
+ *  worth waiting a little for, never worth stalling the brief over. */
+const IDENTIFY_DEADLINE_MS = 25000;
 
 export async function runWorkflow(runId: string): Promise<void> {
   // Everything below runs detached from the request that started it, so an
@@ -42,7 +48,14 @@ async function execute(runId: string): Promise<void> {
   const run = getRun(runId);
   if (!run) return;
 
-  const ctx: CollectorContext = { subject: run.subject, keywords: enabledKeywords };
+  // Settle WHO a director subject is before any source runs. The collectors fan
+  // out concurrently below, so a DIN discovered inside one of them arrives too
+  // late to be of use to the others — the identity has to be on the subject
+  // before the fan-out, or every sweep is still searching a bare name.
+  const subject = run.subject.type === "director" ? await identify(run.subject) : run.subject;
+  if (subject !== run.subject) updateRun(runId, { subject });
+
+  const ctx: CollectorContext = { subject, keywords: enabledKeywords };
 
   // Run each collector concurrently, updating its progress line as it resolves.
   const results = await Promise.all(
@@ -94,15 +107,45 @@ async function execute(runId: string): Promise<void> {
   }
 }
 
+/**
+ * Resolve a director to their registry identity — a DIN, and the companies they
+ * actually sit on — and hang it on the subject for every collector to use.
+ *
+ * Deliberately non-fatal. A slow or unreachable registry costs the run its
+ * anchors, not the run itself: the sweeps fall back to searching the name, and
+ * the registry collector reports the miss so the brief never implies more
+ * certainty about *which* person it covers than we have.
+ */
+async function identify(subject: Subject): Promise<Subject> {
+  try {
+    const identity = await withDeadline(
+      resolveIdentity({ name: subject.company, din: subject.din, anchorCompany: subject.anchors?.[0] }),
+      "Director identity lookup",
+      IDENTIFY_DEADLINE_MS,
+    );
+    if (!identity) return subject;
+    return {
+      ...subject,
+      // The registry's spelling wins — and a DIN-only search had no name at all
+      // until this point, so this is where it gets one.
+      company: identity.chosen.name || subject.company,
+      din: identity.chosen.din,
+      anchors: identity.chosen.companies.length > 0 ? identity.chosen.companies : subject.anchors,
+    };
+  } catch {
+    return subject;
+  }
+}
+
 /** Resolve with the collector, or reject once the deadline passes. The
  *  collector keeps running in the background if it ever does come back; it just
  *  no longer holds up the brief. */
-function withDeadline<T>(work: Promise<T>, sourceName: string): Promise<T> {
+function withDeadline<T>(work: Promise<T>, sourceName: string, ms: number = SOURCE_DEADLINE_MS): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimeout(
-      () => reject(new Error(`${sourceName} did not respond within ${Math.round(SOURCE_DEADLINE_MS / 1000)}s.`)),
-      SOURCE_DEADLINE_MS,
+      () => reject(new Error(`${sourceName} did not respond within ${Math.round(ms / 1000)}s.`)),
+      ms,
     );
   });
   return Promise.race([work, deadline]).finally(() => clearTimeout(timer)) as Promise<T>;

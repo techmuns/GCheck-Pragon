@@ -103,6 +103,13 @@ export interface Subject {
   promoters: string[];
   /** Optional stock ticker (e.g. "RELIANCE") — enables exchange-filings lookup. */
   ticker?: string;
+  /** Director mode: the person's 8-digit DIN, once resolved. Unique to one
+   *  registered director, so it is the only identifier here that cannot be
+   *  confused between namesakes. */
+  din?: string;
+  /** Companies the subject is tied to. Used to anchor queries and to tell a
+   *  result about *this* person from one about someone with the same name. */
+  anchors?: string[];
 }
 
 // ── Retrieval (Phase 2) ────────────────────────────────────────────────────
@@ -129,6 +136,12 @@ export interface RawHit {
   matchedKeywords?: string[];
   /** Free-form date/period string as the source reported it. */
   date?: string;
+  /** How sure we are this hit is about the subject rather than a namesake.
+   *  "confirmed" — the text carries the subject's DIN or one of its anchor
+   *  companies alongside the name. "unverified" — the name matched and nothing
+   *  else did. Absent for sources that identify the subject by key rather than
+   *  by name search (a registry record is not a guess). */
+  confidence?: "confirmed" | "unverified";
   /** Source-specific extra fields, kept for the record. */
   extra?: Record<string, unknown>;
 }

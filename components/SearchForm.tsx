@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import AutocompleteField from "./AutocompleteField";
 import { getRecentSearches, removeRecentSearch, type RecentSearch } from "@/lib/history";
+import { displayName } from "@/lib/directorId";
 
 type Mode = "company" | "director";
 
@@ -101,7 +102,9 @@ export default function SearchForm({ onSubmit, busy }: Props) {
                       >
                         {r.type === "director" ? "Director" : "Company"}
                       </span>
-                      <span className="truncate">{r.company}</span>
+                      {/* Stored with its DIN so re-running keeps the same
+                          person; shown as just the person. */}
+                      <span className="truncate">{r.type === "director" ? displayName(r.company) : r.company}</span>
                     </span>
                     {r.promoters.length > 0 && (
                       <span className="mt-0.5 block truncate text-[12px] text-ink-secondary">{r.promoters.join(", ")}</span>

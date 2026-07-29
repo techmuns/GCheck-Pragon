@@ -1,5 +1,13 @@
-import type { CollectorResult, RawHit } from "../types";
-import { entitiesOf, matchKeywords, entityMentioned } from "../queries";
+import type { CollectorResult, RawHit, Subject } from "../types";
+import {
+  anchorsOf,
+  entitiesOf,
+  entityMentioned,
+  gradesIdentity,
+  matchKeywords,
+  subjectConfidence,
+  type Entity,
+} from "../queries";
 import { env } from "./env";
 import { fetchWithTimeout, stripHtml, type Collector } from "./types";
 import { cached } from "../searchCache";
@@ -76,10 +84,16 @@ export const googleCollector: Collector = async ({ subject, keywords }) => {
   // findings aren't misattributed. Counted for an honest note.
   let offTarget = 0;
 
-  for (let i = 0; i < entities.length; i++) {
-    const e = entities[i];
-    const orClause = kw.length > 0 ? ` (${kw.join(" OR ")})` : "";
-    const query = `"${e.name}"${orClause}`;
+  // Once a director subject has been resolved to an identity, hits are graded
+  // rather than merely name-filtered — see `subjectConfidence`.
+  const graded = gradesIdentity(subject);
+  // Keyed by URL so the same article arriving from two different queries is one
+  // hit, not two — and so a later, better-identified sighting can upgrade it.
+  const byKey = new Map<string, RawHit>();
+
+  const plan = queryPlan(entities, subject, kw);
+  for (let i = 0; i < plan.length; i++) {
+    const { entity: e, query } = plan[i];
     ranQueries.push(query);
     // Space requests to avoid the keyless engine's burst rate-limiting.
     if (i > 0) await sleep(500);
@@ -96,30 +110,37 @@ export const googleCollector: Collector = async ({ subject, keywords }) => {
       }
       for (const r of results.slice(0, MAX_PER_ENTITY)) {
         const haystack = `${r.title} ${r.snippet ?? ""}`;
-        // Only keep a hit that genuinely names this entity — guards against
-        // brand-family bleed (Reliance Power ≠ Reliance Digital).
-        if (!entityMentioned(haystack, e.name)) {
+        const confidence = graded ? subjectConfidence(haystack, subject) : undefined;
+        // Keep a hit that genuinely names this entity — that guards against
+        // brand-family bleed (Reliance Power ≠ Reliance Digital). A hit carrying
+        // the subject's own DIN or one of their companies is kept even without
+        // the name: filings and orders often identify a person by id alone.
+        if (!entityMentioned(haystack, e.name) && confidence !== "confirmed") {
           offTarget += 1;
           continue;
         }
-        hits.push({
+        collect(byKey, {
           title: r.title,
           url: r.url,
           snippet: r.snippet,
           entity: e.name,
           matchedKeywords: matchKeywords(haystack, kw),
+          confidence,
         });
       }
     } catch (err) {
       anyError = err instanceof Error ? err.message : String(err);
     }
   }
-
   // News pass — recent press per entity, for the client's "search for news on
   // the company + promoter, highlight negative press". Munshot serves this
   // best; SerpAPI's google_news engine covers it when Munshot's token is gone.
+  //
+  // Deliberately left on the plain name even for an anchored director: a news
+  // engine given a long anchored query returns nothing at all. Recall comes
+  // from here, precision from the grading below — narrowing both would lose
+  // the coverage this pass exists for.
   if (newsChain().length > 0) {
-    const seen = new Set(hits.map((h) => h.url).filter(Boolean) as string[]);
     for (let i = 0; i < entities.length; i++) {
       const e = entities[i];
       ranQueries.push(`news: ${e.name}`);
@@ -127,14 +148,20 @@ export const googleCollector: Collector = async ({ subject, keywords }) => {
       try {
         const news = await runNewsChain(e.name);
         for (const r of news.slice(0, MAX_PER_ENTITY)) {
-          if (r.url && seen.has(r.url)) continue;
           const haystack = `${r.title} ${r.snippet ?? ""}`;
-          if (!entityMentioned(haystack, e.name)) {
+          const confidence = graded ? subjectConfidence(haystack, subject) : undefined;
+          if (!entityMentioned(haystack, e.name) && confidence !== "confirmed") {
             offTarget += 1;
             continue;
           }
-          if (r.url) seen.add(r.url);
-          hits.push({ title: r.title, url: r.url, snippet: r.snippet, entity: e.name, matchedKeywords: matchKeywords(haystack, kw) });
+          collect(byKey, {
+            title: r.title,
+            url: r.url,
+            snippet: r.snippet,
+            entity: e.name,
+            matchedKeywords: matchKeywords(haystack, kw),
+            confidence,
+          });
         }
       } catch (err) {
         // Kept apart from the web pass's error: a news failure used to be
@@ -145,6 +172,8 @@ export const googleCollector: Collector = async ({ subject, keywords }) => {
     }
   }
 
+  hits.push(...byKey.values());
+
   if (hits.length === 0 && (anyError || newsError)) {
     return { ...base, status: "error", note: `Search failed: ${anyError ?? newsError}`, hits: [], queries: ranQueries };
   }
@@ -153,8 +182,15 @@ export const googleCollector: Collector = async ({ subject, keywords }) => {
     offTarget > 0
       ? `Filtered ${offTarget} result(s) that named a different entity (e.g. a sibling brand).`
       : undefined;
+  // Say plainly how much of the sweep could be tied to *this* person. Without
+  // it, a name-only hit and a DIN-confirmed one read identically in the brief.
+  const unverified = hits.filter((h) => h.confidence === "unverified").length;
+  const gradeNote =
+    graded && unverified > 0
+      ? `${hits.length - unverified} of ${hits.length} result(s) confirmed against the subject's DIN or companies; ${unverified} matched the name only.`
+      : undefined;
   const newsNote = newsError ? `News search unavailable: ${newsError}` : undefined;
-  const note = [BACKEND_NOTE[backend], degraded, newsNote, filterNote].filter(Boolean).join(" ") || undefined;
+  const note = [BACKEND_NOTE[backend], degraded, newsNote, filterNote, gradeNote].filter(Boolean).join(" ") || undefined;
 
   return {
     ...base,
@@ -167,6 +203,52 @@ export const googleCollector: Collector = async ({ subject, keywords }) => {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * The searches this sweep will run, in order.
+ *
+ * Every entity gets the keyword sweep it always got. A director subject that
+ * has been resolved to an identity gets two sharper ones on top:
+ *   • anchored — the name AND one of the companies they actually sit on, which
+ *     a namesake will not satisfy;
+ *   • the DIN itself — disqualification lists, MCA notices and court orders
+ *     print it verbatim, and it can belong to nobody else.
+ * The plain-name query stays for recall; what it brings back is graded rather
+ * than trusted, so narrowing the sweep never costs coverage.
+ */
+function queryPlan(entities: Entity[], subject: Subject, kw: string[]): Array<{ entity: Entity; query: string }> {
+  const orClause = kw.length > 0 ? ` (${kw.join(" OR ")})` : "";
+  const anchors = anchorsOf(subject);
+  const plan: Array<{ entity: Entity; query: string }> = [];
+  for (const entity of entities) {
+    plan.push({ entity, query: `"${entity.name}"${orClause}` });
+    // The extra queries identify the *subject*. A company-mode promoter has no
+    // resolved identity of their own to anchor with, so they get the sweep only.
+    if (subject.type !== "director" || entity.name !== subject.company) continue;
+    if (anchors.length > 0) {
+      plan.push({ entity, query: `"${entity.name}" (${anchors.map((a) => `"${a}"`).join(" OR ")})${orClause}` });
+    }
+    // No keyword clause here: any mention of the DIN is worth seeing, and
+    // pairing the two would filter out the records this query exists to find.
+    if (subject.din) plan.push({ entity, query: `"DIN ${subject.din}"` });
+  }
+  return plan;
+}
+
+/** Add a hit, folding duplicates of the same URL together. A second sighting
+ *  can only improve what we know — it upgrades an unverified hit to confirmed
+ *  and unions the keyword matches — never the other way round. */
+function collect(byKey: Map<string, RawHit>, hit: RawHit): void {
+  const key = hit.url ?? `title:${hit.title}`;
+  const existing = byKey.get(key);
+  if (!existing) {
+    byKey.set(key, hit);
+    return;
+  }
+  if (existing.confidence === "unverified" && hit.confidence === "confirmed") existing.confidence = "confirmed";
+  existing.matchedKeywords = [...new Set([...(existing.matchedKeywords ?? []), ...(hit.matchedKeywords ?? [])])];
+  if (!existing.snippet && hit.snippet) existing.snippet = hit.snippet;
 }
 
 // One retry with backoff — smooths over transient aborts / rate-limit blips.

@@ -9,6 +9,7 @@ import ResearchProgress from "@/components/ResearchProgress";
 import BriefView from "@/components/BriefView";
 import { apiUrl } from "@/lib/api";
 import { addRecentSearch } from "@/lib/history";
+import { displayName } from "@/lib/directorId";
 import type { Run } from "@/lib/types";
 
 type Phase = "idle" | "running" | "done" | "error";
@@ -54,8 +55,13 @@ export default function Home() {
       setError(null);
       setWalked(false);
       setCountdownDone(false);
-      setPending({ type, company, promoters });
+      // The director box can carry a DIN and a company alongside the name — an
+      // autocomplete pick, or a DIN typed straight in. The request needs all of
+      // it; the screen only ever shows the person.
+      setPending({ type, company: type === "director" ? displayName(company) : company, promoters });
       setPhase("running");
+      // Stored raw, so "Run again" re-runs the same person rather than falling
+      // back to their name and picking up whoever else shares it.
       addRecentSearch({ type, company, promoters });
       try {
         const res = await fetch(apiUrl("/api/research"), {

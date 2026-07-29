@@ -1,5 +1,5 @@
-import type { CollectorResult, RawHit } from "../types";
-import { entitiesOf, entityMentioned } from "../queries";
+import type { CollectorResult, RawHit, Subject } from "../types";
+import { anchorsOf, entitiesOf, entityMentioned, gradesIdentity, subjectConfidence } from "../queries";
 import { env } from "./env";
 import { fetchWithTimeout, stripHtml, type Collector } from "./types";
 import { cached } from "../searchCache";
@@ -34,27 +34,41 @@ export const indianKanoonCollector: Collector = async ({ subject }) => {
   let anyError: string | undefined;
   let offTarget = 0;
 
+  // A director subject resolved to an identity gets its litigation graded, so a
+  // namesake's case can be shown without being charged to this person.
+  const graded = gradesIdentity(subject);
+  const seen = new Set<string>();
+
   for (const e of entities) {
-    ranQueries.push(e.name);
-    try {
-      // Cached like the web sweep: the munshot mode spends the same metered
-      // search endpoint, and a case list is the slowest-moving thing we fetch —
-      // a judgment handed down mid-window is not a thing that happens.
-      const cases = await cached(`kanoon:${mode}:${e.name}`, () =>
-        mode === "munshot" ? searchViaMunshot(e.name) : mode === "api" ? searchApi(e.name) : searchPublic(e.name),
-      );
-      // Only keep cases whose title actually names this party — a relevance
-      // search returns neighbouring parties (sibling brands) too.
-      const relevant = cases.filter((c) => {
-        if (entityMentioned(c.title, e.name)) return true;
-        offTarget += 1;
-        return false;
-      });
-      for (const c of relevant.slice(0, MAX_CASES)) {
-        hits.push({ title: c.title, url: c.url, entity: e.name, extra: { court: c.court } });
+    for (const term of searchTerms(e.name, subject)) {
+      ranQueries.push(term);
+      try {
+        // Cached like the web sweep: the munshot mode spends the same metered
+        // search endpoint, and a case list is the slowest-moving thing we fetch —
+        // a judgment handed down mid-window is not a thing that happens.
+        const cases = await cached(`kanoon:${mode}:${term}`, () =>
+          mode === "munshot" ? searchViaMunshot(term) : mode === "api" ? searchApi(term) : searchPublic(term),
+        );
+        let kept = 0;
+        for (const c of cases) {
+          if (kept >= MAX_CASES) break;
+          const confidence = graded ? subjectConfidence(c.title, subject) : undefined;
+          // Only keep cases whose title actually names this party — a relevance
+          // search returns neighbouring parties (sibling brands) too. A case
+          // carrying the subject's DIN or company identifies them without it.
+          if (!entityMentioned(c.title, e.name) && confidence !== "confirmed") {
+            offTarget += 1;
+            continue;
+          }
+          const key = c.url ?? c.title;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          kept += 1;
+          hits.push({ title: c.title, url: c.url, entity: e.name, confidence, extra: { court: c.court } });
+        }
+      } catch (err) {
+        anyError = err instanceof Error ? err.message : String(err);
       }
-    } catch (err) {
-      anyError = err instanceof Error ? err.message : String(err);
     }
   }
 
@@ -69,15 +83,35 @@ export const indianKanoonCollector: Collector = async ({ subject }) => {
         ? "Public search (add INDIANKANOON_API_TOKEN or MUNSHOT_TOKEN for reliable results)."
         : undefined;
   const filterNote = offTarget > 0 ? `Filtered ${offTarget} case(s) naming a different party.` : undefined;
+  const unverified = hits.filter((h) => h.confidence === "unverified").length;
+  const gradeNote =
+    graded && unverified > 0
+      ? `${unverified} case(s) matched the name only and are not confirmed as this director.`
+      : undefined;
 
   return {
     ...base,
     status: "done",
-    note: [modeNote, filterNote].filter(Boolean).join(" ") || undefined,
+    note: [modeNote, filterNote, gradeNote].filter(Boolean).join(" ") || undefined,
     hits,
     queries: ranQueries,
   };
 };
+
+/**
+ * The terms to search this party under. The name alone for a company or a
+ * promoter; for a resolved director, also the DIN — which appears verbatim in
+ * disqualification orders and company-petition cause titles and cannot belong
+ * to a namesake — and the name paired with a company they sit on.
+ */
+function searchTerms(name: string, subject: Subject): string[] {
+  const terms = [name];
+  if (subject.type !== "director" || name !== subject.company) return terms;
+  if (subject.din) terms.push(`DIN ${subject.din}`);
+  const anchor = anchorsOf(subject)[0];
+  if (anchor) terms.push(`${name} ${anchor}`);
+  return terms;
+}
 
 interface CaseHit {
   title: string;

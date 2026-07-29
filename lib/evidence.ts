@@ -15,6 +15,10 @@ export interface EvidenceItem {
   snippet?: string;
   entity?: string;
   matchedKeywords?: string[];
+  /** Whether this item could be tied to the subject's own identity (DIN or one
+   *  of their companies) or merely matched their name. Carried through to the
+   *  model, which must not charge a name-only item to the subject. */
+  confidence?: RawHit["confidence"];
   extra?: Record<string, unknown>;
 }
 
@@ -79,6 +83,7 @@ export function buildEvidence(subject: Subject, collected: CollectorResult[]): E
         snippet: hit.snippet ? normaliseTitle(hit.snippet) : undefined,
         entity: hit.entity,
         matchedKeywords: hit.matchedKeywords?.length ? hit.matchedKeywords : undefined,
+        confidence: hit.confidence,
         extra: hit.extra,
       });
     }
@@ -97,6 +102,16 @@ export function buildEvidence(subject: Subject, collected: CollectorResult[]): E
 export function evidenceForPrompt(ev: Evidence, sectionTitles: string[]): string {
   const lines: string[] = [];
   lines.push(`SUBJECT: company="${ev.subject.company}", promoters=[${ev.subject.promoters.join(", ") || "none provided"}]`);
+  // A director subject's identity, spelled out for the model: which person this
+  // is, and — when we could not establish that — that the evidence below is
+  // only name-matched, which changes what may honestly be concluded from it.
+  if (ev.subject.type === "director") {
+    lines.push(
+      ev.subject.din
+        ? `SUBJECT IDENTITY: DIN ${ev.subject.din}; linked companies=[${(ev.subject.anchors ?? []).join(", ") || "none read"}]`
+        : "SUBJECT IDENTITY: NOT ESTABLISHED — no unique registry record matched this name. Every item below is a name match and may concern a different person of the same name.",
+    );
+  }
   lines.push("");
   lines.push("SOURCE STATUS:");
   for (const s of ev.sourceStatuses) {
@@ -111,8 +126,9 @@ export function evidenceForPrompt(ev: Evidence, sectionTitles: string[]): string
     for (const it of ev.items) {
       const kw = it.matchedKeywords ? ` matched:{${it.matchedKeywords.join(",")}}` : "";
       const extra = it.extra?.category ? ` category:{${String(it.extra.category)}}` : "";
+      const conf = it.confidence ? ` identity:{${it.confidence}}` : "";
       const snip = it.snippet ? ` — ${it.snippet.slice(0, 240)}` : "";
-      lines.push(`  [${it.ref}] (${it.sourceName}${it.entity ? `, ${it.entity}` : ""}${kw}${extra}) ${it.title}${snip}`);
+      lines.push(`  [${it.ref}] (${it.sourceName}${it.entity ? `, ${it.entity}` : ""}${kw}${extra}${conf}) ${it.title}${snip}`);
     }
   }
   lines.push("");

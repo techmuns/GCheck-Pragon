@@ -36,6 +36,9 @@ export default function AutocompleteField({
       return;
     }
     let cancelled = false;
+    // Director suggestions are a live registry lookup against a metered search
+    // backend, not a local filter — so the pause before firing is longer than a
+    // pure-UI debounce would need. Same feel to type against; far fewer calls.
     const t = setTimeout(async () => {
       try {
         const res = await fetch(apiUrl(`/api/autocomplete?kind=${kind}&q=${encodeURIComponent(q)}`));
@@ -47,7 +50,7 @@ export default function AutocompleteField({
       } catch {
         if (!cancelled) setSuggestions([]);
       }
-    }, 140);
+    }, 350);
     return () => {
       cancelled = true;
       clearTimeout(t);

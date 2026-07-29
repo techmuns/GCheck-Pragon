@@ -1,6 +1,8 @@
-import type { CollectorResult, RawHit } from "../types";
+import type { CollectorResult, RawHit, Subject } from "../types";
 import { fetchWithTimeout, type Collector } from "./types";
 import { searchWeb } from "./google";
+import { searchBingForHost } from "./bing";
+import { resolveIdentity } from "./directors";
 
 // ── Company registry collector (free director data) ─────────────────────────
 // Directors of UNLISTED Indian companies are the core gap in pre-meeting DD:
@@ -30,9 +32,11 @@ export const registryCollector: Collector = async ({ subject }) => {
     kind: "api",
   };
 
-  // Only meaningful for a company subject — a person has no board of their own.
+  // A person has no board of their own, but they do have a registry record —
+  // keyed by DIN, listing the companies they sit on. That record is what makes
+  // a director search about a person rather than about a spelling.
   if (subject.type === "director") {
-    return { ...base, status: "skipped", note: "Director search — no company board to look up.", hits: [] };
+    return directorRecord(subject, base);
   }
 
   const company = subject.company.trim();
@@ -93,6 +97,84 @@ export const registryCollector: Collector = async ({ subject }) => {
   }
 };
 
+// ── Director mode: the person's own registry record ─────────────────────────
+
+/**
+ * The registry record for an individual: their DIN and the companies they are
+ * on the board of. By the time this runs the workflow has usually resolved the
+ * identity already, so the lookup is a cache hit — but it is repeated here
+ * rather than passed in, so the collector still works standalone.
+ *
+ * When nothing resolves we say so in the words that matter to the reader: the
+ * rest of the brief was gathered on the name alone, and a name is shared.
+ */
+async function directorRecord(
+  subject: Subject,
+  base: Omit<CollectorResult, "status" | "hits">,
+): Promise<CollectorResult> {
+  const name = subject.company.trim();
+  if (!name && !subject.din) {
+    return { ...base, status: "skipped", note: "No director to look up.", hits: [] };
+  }
+
+  try {
+    const identity = await resolveIdentity({
+      name,
+      din: subject.din,
+      anchorCompany: subject.anchors?.[0],
+    });
+
+    if (!identity) {
+      return {
+        ...base,
+        status: "done",
+        note: `No registry record matched "${name}". The rest of this brief was gathered on the name alone, so it may include other people with the same name.`,
+        hits: [],
+      };
+    }
+
+    const { chosen, candidates, ambiguous } = identity;
+    // The identity itself, so the brief can state who this person is by id
+    // rather than by spelling.
+    const hits: RawHit[] = [
+      {
+        title: `${chosen.name} — DIN ${chosen.din}`,
+        url: chosen.url,
+        entity: chosen.name,
+        extra: { category: "identity", name: chosen.name, din: chosen.din },
+      },
+      ...chosen.companies.map((company) => ({
+        title: company,
+        url: chosen.url,
+        entity: chosen.name,
+        extra: { category: "directorship", name: chosen.name, din: chosen.din, company },
+      })),
+    ];
+
+    // Never silently pick between namesakes. Say how many there were and how to
+    // settle it — the DIN is right there in the note to paste back into search.
+    const ambiguityNote = ambiguous
+      ? ` ${candidates.length} directors share this name — this brief follows DIN ${chosen.din}. Search a DIN directly to pick another: ${candidates
+          .slice(0, 4)
+          .map((c) => c.din)
+          .join(", ")}.`
+      : "";
+    const companyNote =
+      chosen.companies.length > 0
+        ? `${chosen.companies.length} company record(s) linked to DIN ${chosen.din}.`
+        : `Matched DIN ${chosen.din}, but no company list could be read from the record.`;
+
+    return { ...base, status: "done", note: `${companyNote}${ambiguityNote}`, hits };
+  } catch (err) {
+    return {
+      ...base,
+      status: "error",
+      note: `Director lookup failed: ${err instanceof Error ? err.message : String(err)}`,
+      hits: [],
+    };
+  }
+}
+
 // ── Step 1: name → company page URL ─────────────────────────────────────────
 
 function siteQuery(company: string): string {
@@ -125,7 +207,7 @@ async function resolveCompanyUrl(company: string): Promise<PageRef | null> {
   }
 
   try {
-    return pickCompanyUrl(await searchBing(query));
+    return pickCompanyUrl((await searchBingForHost(query, HOST)).map((url) => ({ url })));
   } catch {
     return null;
   }
@@ -141,18 +223,6 @@ function pickCompanyUrl(results: Array<{ url?: string }>): PageRef | null {
     }
   }
   return null;
-}
-
-// Minimal keyless Bing HTML scrape — only used to recover a company URL when the
-// primary backend is unavailable, so a rate-limit doesn't lose the lookup.
-async function searchBing(query: string): Promise<Array<{ url?: string }>> {
-  const res = await fetchWithTimeout(`https://www.bing.com/search?q=${encodeURIComponent(query)}`, {
-    timeoutMs: 15000,
-    headers: { accept: "text/html" },
-  });
-  if (!res.ok) throw new Error(`Bing ${res.status}`);
-  const html = await res.text();
-  return [...html.matchAll(/href="(https?:\/\/[^"]*tofler\.in\/[^"]+)"/gi)].map((m) => ({ url: m[1] }));
 }
 
 async function fetchPage(url: string): Promise<string> {

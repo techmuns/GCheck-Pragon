@@ -16,6 +16,21 @@ import { assembleBrief } from "./assemble";
 const VALID_SEVERITIES: Severity[] = ["red", "amber", "clear", "info"];
 const RANK: Record<Severity, number> = { red: 3, amber: 2, clear: 1, info: 0 };
 
+/** Who the brief is about, for a director subject. A person's name is not an
+ *  identity, so the model is told the DIN when there is one — and told just as
+ *  plainly when there isn't, because that changes what may honestly be
+ *  concluded from everything below it. */
+function identityLines(subject: Subject): string[] {
+  if (subject.type !== "director") return [];
+  if (!subject.din) {
+    return [
+      "SUBJECT IDENTITY: NOT ESTABLISHED — no unique registry record matched this name. Every item below is a name match and may concern a different person of the same name.",
+    ];
+  }
+  const companies = (subject.anchors ?? []).slice(0, 5).join(", ");
+  return [`SUBJECT IDENTITY: DIN ${subject.din}${companies ? ` — companies on record: ${companies}` : ""}`];
+}
+
 export async function synthesizeBrief(
   subject: Subject,
   collected: CollectorResult[],
@@ -29,7 +44,7 @@ export async function synthesizeBrief(
   }
 
   try {
-    const enhanced = await enhanceRedFlagSummary(det, subject);
+    const enhanced = await enhanceRedFlagSummary(det, subject, collected);
     return { ...enhanced, synthesizedBy: "ai" };
   } catch (err) {
     console.error("[synthesize] OpenAI enhancement failed, using deterministic brief:", err);
@@ -42,6 +57,7 @@ export async function synthesizeBrief(
 async function enhanceRedFlagSummary(
   det: NonNullable<Run["brief"]>,
   subject: Subject,
+  collected: CollectorResult[],
 ): Promise<NonNullable<Run["brief"]>> {
   // The SDK defaults to a 10-minute timeout and two retries — half an hour in
   // the worst case, during which the run sits at "running" and the user watches
@@ -50,8 +66,21 @@ async function enhanceRedFlagSummary(
   const client = new OpenAI({ apiKey: env.openaiApiKey, timeout: 40_000, maxRetries: 1 });
   const validRefs = new Set(det.citations.map((c) => c.ref));
 
+  // Evidence that matched the subject's NAME but could not be tied to their
+  // identity (their DIN, or a company they sit on). The deterministic sections
+  // already demote these; the distinction has to survive into the prompt too,
+  // or the model writes a namesake's fraud case up as the subject's.
+  const nameOnly = new Set(
+    collected.flatMap((c) => c.hits.filter((h) => h.confidence === "unverified").map((h) => h.url ?? h.title)),
+  );
+
   // The evidence the model may cite — exactly the brief's real citations.
-  const evidenceLines = det.citations.map((c) => `[${c.ref}] (${c.sourceName}) ${c.label}`).join("\n");
+  const evidenceLines = det.citations
+    .map((c) => {
+      const caveat = nameOnly.has(c.url ?? c.label) ? "  ⚠ NAME MATCH ONLY — not confirmed as the subject" : "";
+      return `[${c.ref}] (${c.sourceName}) ${c.label}${caveat}`;
+    })
+    .join("\n");
 
   const system = [
     "You are a governance due-diligence analyst writing the RED-FLAG SUMMARY that leads a one-page pre-meeting brief for investment partners.",
@@ -63,10 +92,13 @@ async function enhanceRedFlagSummary(
     "4. Write in PLAIN ENGLISH a busy, non-lawyer partner understands instantly. No legalese, no jargon, no long clauses. Say what happened and why it matters.",
     "5. If the evidence shows no genuine red or amber risk, return a single 'clear' finding saying so.",
     "6. Also return a one-line headline in plain English summarising the overall picture for this subject.",
+    "7. Evidence marked 'NAME MATCH ONLY' concerns someone who shares the subject's name and may not be them. Never write it as something the subject did, and never let it set the severity. Mention it at most once, as 'info', worded as unconfirmed.",
+    "8. If SUBJECT IDENTITY says it was not established, say so in the headline — the reader must know the brief could not confirm which person of that name it covers.",
   ].join("\n");
 
   const user = [
     `SUBJECT: ${subject.company}${subject.promoters.length ? ` (promoters: ${subject.promoters.join(", ")})` : ""}`,
+    ...identityLines(subject),
     "",
     "EVIDENCE (cite by [ref]):",
     evidenceLines || "(no evidence gathered)",

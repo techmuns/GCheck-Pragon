@@ -1,4 +1,4 @@
-import type { GeneratedQuery, Subject } from "./types";
+import type { GeneratedQuery, RawHit, Subject } from "./types";
 
 // ── Query generation ───────────────────────────────────────────────────────
 // Expands the subject (company + promoters) across the enabled keyword set into
@@ -114,4 +114,55 @@ export function entityMentioned(text: string, entityName: string): boolean {
     if (all) return true;
   }
   return false;
+}
+
+// ── Identity confidence ────────────────────────────────────────────────────
+// `entityMentioned` answers "does this text name the subject?". For a company
+// that is close enough to identity — names are distinctive and a phrase match
+// is a strong signal. For a PERSON it is not: three registered directors can
+// share "Rajesh Kumar", and all three satisfy the phrase test equally.
+//
+// So a person's hits are graded rather than merely filtered. A hit that also
+// carries the subject's DIN, or one of the companies they actually sit on, is
+// about *this* person. A hit that only matched the name might be about anyone
+// with that name — it is still shown, but it is marked, and it never raises
+// the brief's verdict.
+
+/** How many anchor companies to carry into queries. Enough to identify the
+ *  person; few enough that the query stays inside engine length limits. */
+const MAX_ANCHORS = 3;
+
+/** The companies available to anchor this subject's searches. */
+export function anchorsOf(subject: Subject): string[] {
+  return (subject.anchors ?? []).map((a) => a.trim()).filter(Boolean).slice(0, MAX_ANCHORS);
+}
+
+/** Does the text carry this DIN? The padded 8-digit form counts on its own; the
+ *  unpadded form only counts when "DIN" introduces it, so a bare "1695" in a
+ *  sentence never passes for one. */
+function dinMentioned(text: string, din: string): boolean {
+  if (text.includes(din)) return true;
+  const bare = din.replace(/^0+/, "");
+  return bare.length > 0 && new RegExp(`\\bdin\\b[\\s:.#-]*0*${bare}\\b`, "i").test(text);
+}
+
+/**
+ * Grade a hit against the subject's identity. Only meaningful once the subject
+ * has something to check against — with no DIN and no anchors there is nothing
+ * to confirm with, so everything is honestly "unverified" rather than being
+ * dressed up as confirmed.
+ */
+export function subjectConfidence(text: string, subject: Subject): NonNullable<RawHit["confidence"]> {
+  if (subject.din && dinMentioned(text, subject.din)) return "confirmed";
+  for (const anchor of anchorsOf(subject)) {
+    if (entityMentioned(text, anchor)) return "confirmed";
+  }
+  return "unverified";
+}
+
+/** Whether identity grading applies at all. A company subject is identified
+ *  well enough by its own name; grading it would mark ordinary press coverage
+ *  as doubtful for no reason. */
+export function gradesIdentity(subject: Subject): boolean {
+  return subject.type === "director" && (Boolean(subject.din) || anchorsOf(subject).length > 0);
 }
