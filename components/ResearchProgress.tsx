@@ -38,6 +38,7 @@ function statusDot(status: SourceProgress["status"]): string {
 // so the narration matches the row being highlighted; falls back to the source's
 // own name for any source added later.
 const VISITING: Record<string, string> = {
+  indiafilings: "Settling who this is on the MCA register",
   google: "Reading news and search results",
   indiankanoon: "Going through court records",
   registry: "Pulling the registry record and its board",

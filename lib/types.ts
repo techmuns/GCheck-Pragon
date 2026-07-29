@@ -129,6 +129,27 @@ export interface GeneratedQuery {
   query: string;
 }
 
+// ── Live activity log ──────────────────────────────────────────────────────
+// A run used to report only six coarse statuses, which said nothing about what
+// it was actually doing for the minutes in between. These events are the record
+// of the work itself — one line per query issued, page opened, cache reuse and
+// skip — so the screen can show the run rather than an animation of one.
+
+/** What kind of step an activity-log line describes. */
+export type RunEventLevel = "step" | "query" | "fetch" | "cache" | "skip" | "warn";
+
+/** One line of the live activity log: what the system did, and when. */
+export interface RunEvent {
+  /** ISO timestamp. */
+  at: string;
+  /** The source that did it, where one owns the step. */
+  sourceId?: string;
+  level: RunEventLevel;
+  text: string;
+  /** The page or endpoint involved, when the step had one. */
+  url?: string;
+}
+
 /** A single raw result from a source, before normalisation/synthesis. */
 export interface RawHit {
   title: string;
@@ -170,6 +191,9 @@ export interface Run {
   status: RunStatus;
   createdAt: string;
   progress: SourceProgress[];
+  /** Everything the run has done so far, oldest first. Rides the same poll as
+   *  `progress`, so the client needs no new transport to show it. */
+  events?: RunEvent[];
   /** Raw collector output (Phase 2). Synthesis (Phase 3) reads from here. */
   collected?: CollectorResult[];
   /** Populated once synthesis (Phase 3) completes. */

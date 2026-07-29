@@ -181,6 +181,10 @@ function redFlagSection(title: string, ctx: Ctx): RenderedSection {
     }
   }
 
+  // Registry standing. These are facts on the public record rather than press,
+  // so they are never "name-matched" — the register keyed them to this DIN.
+  findings.push(...governanceFindings(ctx));
+
   // Defaulter presence from CIBIL.
   const cibil = ctx.byId["cibil"];
   if (cibil?.status === "done" && cibil.hits.length > 0) {
@@ -228,9 +232,57 @@ function redFlagSection(title: string, ctx: Ctx): RenderedSection {
   return { id: "red-flags", title, findings };
 }
 
+/**
+ * Findings drawn from the register's own view of standing.
+ *
+ * A director whose companies are struck off, or who carries the register's
+ * non-compliance flag, is a governance question in the plainest sense — and it
+ * is one the old pipeline never asked, because nothing read the register past
+ * the list of names. These sit above press hits deliberately: they are filings,
+ * not coverage.
+ */
+function governanceFindings(ctx: Ctx): Finding[] {
+  const out: Finding[] = [];
+  for (const registry of registryResults(ctx)) {
+    if (registry.status !== "done") continue;
+    for (const h of registry.hits.filter((r) => r.extra?.category === "governance")) {
+      const flag = strField(h.extra?.flag);
+      // A struck-off company in someone's history is worth a look, not an
+      // accusation; a DIN that is not in good standing is a harder problem.
+      const severity: Severity = flag === "din-status" ? "red" : "amber";
+      out.push({ severity, text: h.title, sourceRef: ctx.cite(registry.sourceName, h.title, h.url) });
+    }
+  }
+  return out;
+}
+
+/**
+ * The registry sources, best-first.
+ *
+ * The MCA record is keyed to the DIN and carries the entity statuses, so it
+ * leads; the aggregator still contributes designation and tenure, which the MCA
+ * page does not publish. Callers take the first that actually answered rather
+ * than naming one source, so neither being down empties a section.
+ */
+const REGISTRY_IDS = ["indiafilings", "registry"] as const;
+
+function registryResults(ctx: Ctx): CollectorResult[] {
+  return REGISTRY_IDS.map((id) => ctx.byId[id]).filter((c): c is CollectorResult => c != null);
+}
+
 /** The registry record's identity row, if the person resolved to one. */
 function identityHit(ctx: Ctx) {
-  return ctx.byId["registry"]?.hits.find((h) => h.extra?.category === "identity");
+  for (const c of registryResults(ctx)) {
+    const hit = c.hits.find((h) => h.extra?.category === "identity");
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+/** The registry result that carried the identity row, so citations name the
+ *  source the fact actually came from. */
+function identitySource(ctx: Ctx): CollectorResult | undefined {
+  return registryResults(ctx).find((c) => c.hits.some((h) => h.extra?.category === "identity"));
 }
 
 /**
@@ -240,7 +292,7 @@ function identityHit(ctx: Ctx) {
  * same breath as the findings — not left to assume otherwise.
  */
 function identityFinding(ctx: Ctx): Finding {
-  const registry = ctx.byId["registry"];
+  const registry = identitySource(ctx);
   const identity = identityHit(ctx);
   if (!ctx.subject.din || !identity || !registry) {
     return {
@@ -265,7 +317,7 @@ function identityFinding(ctx: Ctx): Finding {
 // under Key People, so they are deliberately not repeated here. Honest states
 // when the registry record could not be found.
 function snapshotSection(id: string, title: string, ctx: Ctx): RenderedSection {
-  const c = ctx.byId["registry"];
+  const c = identitySource(ctx) ?? registryResults(ctx)[0];
   if (!c) return { id, title, findings: [], empty: true };
   // Director mode: the "snapshot" is the person's own registry identity — the
   // name as the register spells it, and the DIN that makes it unambiguous.
@@ -357,9 +409,15 @@ function managementSection(id: string, title: string, ctx: Ctx): RenderedSection
   // In director mode the same collector returns the subject themselves plus the
   // companies they sit on; the companies are directorships, not people, so only
   // the identity row belongs here.
-  const registry = ctx.byId["registry"];
-  if (registry?.status === "done") {
-    const rows = ctx.subject.type === "director" ? registry.hits.filter((h) => h.extra?.category === "identity") : registry.hits;
+  for (const registry of registryResults(ctx)) {
+    if (registry.status !== "done") continue;
+    // Both registries emit more than people — directorships, entity statuses —
+    // so the board is taken from the rows that actually describe a person.
+    const rows = registry.hits.filter((h) =>
+      ctx.subject.type === "director"
+        ? h.extra?.category === "identity" || h.extra?.category === "director"
+        : h.extra?.category !== "directorship" && h.extra?.category !== "governance",
+    );
     for (const d of rows) {
       addPerson(people, {
         name: strField(d.extra?.name) ?? nameFromTitle(d.title),
@@ -462,9 +520,15 @@ function directorshipsSection(id: string, title: string, ctx: Ctx): RenderedSect
   // strongest directorship signal available, because it is keyed to the
   // person's DIN rather than to the spelling of their name — Wikidata below
   // covers well-known figures, this covers the unlisted ones.
-  const registry = ctx.byId["registry"];
-  if (registry?.status === "done" && ctx.subject.type === "director") {
+  // Both registries can list the same board seat; the MCA record leads, so a
+  // company already named by it is not repeated from the aggregator.
+  const namedCompanies = new Set<string>();
+  for (const registry of registryResults(ctx)) {
+    if (registry.status !== "done" || ctx.subject.type !== "director") continue;
     for (const h of registry.hits.filter((r) => r.extra?.category === "directorship").slice(0, 12)) {
+      const company = (strField(h.extra?.company) ?? h.title).toLowerCase();
+      if (namedCompanies.has(company)) continue;
+      namedCompanies.add(company);
       findings.push({ severity: "info", text: h.title, sourceRef: ctx.cite(registry.sourceName, h.title, h.url) });
     }
   }

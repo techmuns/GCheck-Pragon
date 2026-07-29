@@ -128,13 +128,39 @@ export function entityMentioned(text: string, entityName: string): boolean {
 // with that name — it is still shown, but it is marked, and it never raises
 // the brief's verdict.
 
-/** How many anchor companies to carry into queries. Enough to identify the
- *  person; few enough that the query stays inside engine length limits. */
-const MAX_ANCHORS = 3;
+/** How many anchor companies to carry into QUERIES. Enough to identify the
+ *  person; few enough that the query stays inside engine length limits. This is
+ *  a limit on query length, and deliberately not a limit on what may confirm a
+ *  hit — see `allAnchorsOf`. */
+const MAX_QUERY_ANCHORS = 3;
 
-/** The companies available to anchor this subject's searches. */
+/** The companies carried into this subject's search queries. Callers rely on
+ *  the subject's own ordering, so the most useful anchors must come first. */
 export function anchorsOf(subject: Subject): string[] {
-  return (subject.anchors ?? []).map((a) => a.trim()).filter(Boolean).slice(0, MAX_ANCHORS);
+  return allAnchorsOf(subject).slice(0, MAX_QUERY_ANCHORS);
+}
+
+/**
+ * Every company that can vouch for this subject's identity.
+ *
+ * Grading is not query building, and conflating the two silently lost findings:
+ * a person on six boards had only three of them able to confirm a hit, so an
+ * article naming their fourth company was filed as "might be a namesake" and
+ * could never raise the verdict. Queries stay short; confirmation uses the lot.
+ */
+export function allAnchorsOf(subject: Subject): string[] {
+  return (subject.anchors ?? []).map((a) => a.trim()).filter(Boolean);
+}
+
+/**
+ * Is this anchor distinctive enough to prove identity on its own?
+ *
+ * A one-word company ("Saarthi", "Leaf") is a word before it is a company, and
+ * accepting it would confirm any article that happened to use it. Two
+ * significant words is the threshold at which a name stops being a coincidence.
+ */
+function usableAnchor(anchor: string): boolean {
+  return significantTokens(anchor).length >= 2;
 }
 
 /** Does the text carry this DIN? The padded 8-digit form counts on its own; the
@@ -154,8 +180,8 @@ function dinMentioned(text: string, din: string): boolean {
  */
 export function subjectConfidence(text: string, subject: Subject): NonNullable<RawHit["confidence"]> {
   if (subject.din && dinMentioned(text, subject.din)) return "confirmed";
-  for (const anchor of anchorsOf(subject)) {
-    if (entityMentioned(text, anchor)) return "confirmed";
+  for (const anchor of allAnchorsOf(subject)) {
+    if (usableAnchor(anchor) && entityMentioned(text, anchor)) return "confirmed";
   }
   return "unverified";
 }

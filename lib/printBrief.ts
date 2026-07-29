@@ -895,6 +895,7 @@ function caseStatus(title: string): string {
 // Which coverage bucket each configured source belongs to.
 const SOURCE_BUCKET: Record<string, string> = {
   filings: "Official / regulatory",
+  indiafilings: "Company registry",
   registry: "Company registry",
   wikidata: "Company registry",
   indiankanoon: "Court records",

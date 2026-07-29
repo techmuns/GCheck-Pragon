@@ -5,6 +5,7 @@ import { privateCircleCollector } from "./privatecircle";
 import { cibilCollector } from "./cibil";
 import { wikidataCollector } from "./wikidata";
 import { registryCollector } from "./registry";
+import { indiafilingsCollector } from "./indiafilings";
 import { filingsCollector } from "./filings";
 
 // Registry — maps a source id (from config) to its collector implementation.
@@ -12,6 +13,7 @@ export const collectors: Record<string, Collector> = {
   google: googleCollector,
   indiankanoon: indianKanoonCollector,
   wikidata: wikidataCollector,
+  indiafilings: indiafilingsCollector,
   registry: registryCollector,
   filings: filingsCollector,
   privatecircle: privateCircleCollector,

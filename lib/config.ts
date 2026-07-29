@@ -7,6 +7,17 @@ import type { AppConfig } from "./types";
 export const defaultConfig: AppConfig = {
   sources: [
     {
+      // Listed first because it answers "who is this?" — and until that is
+      // settled, every other source is searching a name rather than a person.
+      id: "indiafilings",
+      name: "MCA Registry (IndiaFilings)",
+      kind: "api",
+      description:
+        "The MCA register: who a DIN belongs to, every company and LLP linked to it, and whether those entities are in good standing. Free and keyless.",
+      enabled: true,
+      url: "https://www.indiafilings.com",
+    },
+    {
       id: "google",
       name: "Google & News",
       kind: "api",

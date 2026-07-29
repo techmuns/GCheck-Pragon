@@ -177,22 +177,12 @@ export default function AdminPage() {
           </div>
         </Card>
 
-        {/* Advanced — writing style (tucked away so it never confuses a first-time user) */}
-        <details className="card-surface p-5">
-          <summary className="cursor-pointer list-none font-display text-[16px] text-navy-deep">
-            Advanced ▸
-          </summary>
-          <p className="mt-1 text-[12px] text-ink-secondary">
-            How the report is written. Only change this if absolutely necessary.
-          </p>
-          <textarea
-            value={config.synthesisPrompt}
-            onChange={(e) => patch({ synthesisPrompt: e.target.value })}
-            rows={8}
-            className="mt-3 w-full rounded-lg border border-[rgba(23,43,77,0.14)] bg-white/90 px-3 py-2.5 text-[12.5px] leading-relaxed text-ink-primary outline-none focus:border-navy-primary/40"
-            spellCheck={false}
-          />
-        </details>
+        {/* The writing rules used to be editable here. They are not any more:
+            the narrative prompt lives in lib/synthesize.ts, where it is version
+            controlled and reviewed alongside the guardrails that validate the
+            model's output. A free-text box in the admin panel could only ever
+            drift out of step with those — and this one already had, editing a
+            value the AI path never read. */}
       </div>
 
       {/* Sticky action bar */}

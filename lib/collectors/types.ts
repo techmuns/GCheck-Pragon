@@ -1,4 +1,4 @@
-import type { CollectorResult, Subject } from "../types";
+import type { CollectorResult, RunEventLevel, Subject } from "../types";
 
 // ── Collector contract ─────────────────────────────────────────────────────
 // Every source implements a Collector: given the subject + enabled keywords, it
@@ -9,6 +9,14 @@ export interface CollectorContext {
   subject: Subject;
   /** Enabled red-flag keywords. */
   keywords: string[];
+  /**
+   * Narrate a step to the run's activity log, as it happens.
+   *
+   * Optional so a collector can ignore it and still satisfy the contract, and
+   * deliberately fire-and-forget: a collector's job is to collect, and a
+   * failure to describe itself must never be able to fail the collection.
+   */
+  emit?: (text: string, meta?: { url?: string; level?: RunEventLevel }) => void;
 }
 
 export type Collector = (ctx: CollectorContext) => Promise<CollectorResult>;
