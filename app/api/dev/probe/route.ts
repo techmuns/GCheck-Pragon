@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
-import { directorByDin, companyByUrl, cinUrl, resolveDirector } from "@/lib/collectors/indiafilings";
+import { anchorNames, directorByDin, companyByUrl, cinUrl, resolveDirector } from "@/lib/collectors/indiafilings";
+import { queryLadder } from "@/lib/collectors/news";
+import { getConfig } from "@/lib/store";
 
 // ── Development probe ───────────────────────────────────────────────────────
 // The repo has no test runner, and the parsers here read third-party HTML that
@@ -34,8 +36,36 @@ export async function GET(req: Request): Promise<NextResponse> {
     const name = params.get("name");
     if (name) return ok(await resolveDirector({ name, anchorCompany: params.get("company") ?? undefined }), started);
 
+    // The news plan a DIN would produce, WITHOUT issuing any of it — so the
+    // ladder can be reviewed without spending metered searches on every edit.
+    const ladderFor = params.get("ladder");
+    if (ladderFor) {
+      const record = await directorByDin(ladderFor);
+      if (!record) return ok(null, started);
+      const config = await getConfig();
+      const keywords = config.keywords.filter((k) => k.enabled).map((k) => k.term);
+      const plan = queryLadder(
+        {
+          type: "director",
+          company: record.name,
+          promoters: [],
+          din: record.din,
+          anchors: anchorNames(record),
+        },
+        keywords,
+      );
+      return ok({ subject: record.name, din: record.din, queries: plan.length, plan }, started);
+    }
+
     return NextResponse.json(
-      { usage: ["?din=07013291", "?cin=U72900DL2019PTC358371", "?name=Manik+Mehta&company=Saarthi+Techpro"] },
+      {
+        usage: [
+          "?din=07013291",
+          "?cin=U72900DL2019PTC358371",
+          "?name=Manik+Mehta&company=Saarthi+Techpro",
+          "?ladder=07013291",
+        ],
+      },
       { status: 400 },
     );
   } catch (err) {

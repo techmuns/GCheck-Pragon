@@ -1,7 +1,7 @@
 import { getConfig, updateRun, getRun } from "./store";
 import { collectors, type CollectorContext } from "./collectors";
 import { resolveIdentity } from "./collectors/directors";
-import { resolveDirector } from "./collectors/indiafilings";
+import { anchorNames, resolveDirector } from "./collectors/indiafilings";
 import { synthesizeBrief } from "./synthesize";
 import type { CollectorResult, RunEvent, SourceProgress, Subject } from "./types";
 
@@ -152,15 +152,12 @@ async function identify(runId: string, subject: Subject): Promise<Subject> {
         text: `Identified ${record.name} (DIN ${record.din}) — ${record.entities.length} entities on record`,
         url: record.url,
       });
-      // Live entities first. Only the first few anchors reach the search
-      // queries, and a struck-off shell from 2007 makes a far worse query than
-      // the company the person actually runs today.
-      const ordered = [...record.entities].sort((a, b) => rankStanding(a.status) - rankStanding(b.status));
+      const anchors = anchorNames(record);
       return {
         ...subject,
         company: record.name || subject.company,
         din: record.din,
-        anchors: ordered.length > 0 ? ordered.map((e) => e.name) : subject.anchors,
+        anchors: anchors.length > 0 ? anchors : subject.anchors,
       };
     }
     appendEvent(runId, { level: "skip", text: "No MCA record matched — trying the aggregator" });
@@ -193,14 +190,6 @@ async function identify(runId: string, subject: Subject): Promise<Subject> {
   } catch {
     return subject;
   }
-}
-
-/** Sort key for an entity's registry standing: active first, dead last. */
-function rankStanding(status?: string): number {
-  if (!status) return 1;
-  if (/active/i.test(status)) return 0;
-  if (/strike|liquidat|dissolv|defunct|amalgamat/i.test(status)) return 2;
-  return 1;
 }
 
 /** Resolve with the collector, or reject once the deadline passes. The

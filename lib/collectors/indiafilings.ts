@@ -272,6 +272,25 @@ export function parseCompanyPage(html: string, url: string): CompanyRecord | nul
   };
 }
 
+/**
+ * The record's entities as search anchors, live ones first.
+ *
+ * Only the first few anchors reach the search queries — there is a length
+ * budget — so the order decides which companies actually get searched. A shell
+ * struck off in 2007 makes a far worse query than the company the person runs
+ * today, and letting filing order decide meant that was left to chance.
+ */
+export function anchorNames(record: DirectorRecord): string[] {
+  return [...record.entities].sort((a, b) => standing(a.status) - standing(b.status)).map((e) => e.name);
+}
+
+function standing(status?: string): number {
+  if (!status) return 1;
+  if (/active/i.test(status)) return 0;
+  if (ADVERSE_STATUS.test(status)) return 2;
+  return 1;
+}
+
 // ── Fetching ────────────────────────────────────────────────────────────────
 
 async function fetchHtml(url: string): Promise<string> {

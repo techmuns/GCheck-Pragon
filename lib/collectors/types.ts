@@ -47,6 +47,32 @@ export async function fetchWithTimeout(
   }
 }
 
+/**
+ * A stable key for "the same article".
+ *
+ * Tracking parameters, a fragment or a trailing slash are enough to make one
+ * story look like several — and it arrives from several places, because a
+ * news engine and a web engine both index the publisher. Deduping on the raw
+ * URL counted those separately, which inflated the coverage and could send the
+ * same page to the reader twice.
+ */
+export function canonicalUrl(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    const u = new URL(url);
+    u.hash = "";
+    for (const key of [...u.searchParams.keys()]) {
+      if (/^(utm_|fbclid|gclid|mc_|ref$|source$)/i.test(key)) u.searchParams.delete(key);
+    }
+    u.hostname = u.hostname.toLowerCase().replace(/^www\./, "");
+    u.protocol = "https:";
+    const path = u.pathname.replace(/\/+$/, "");
+    return `${u.hostname}${path}${u.search}`;
+  } catch {
+    return url.trim().toLowerCase() || undefined;
+  }
+}
+
 /** Strip HTML tags and collapse whitespace from a snippet. */
 export function stripHtml(html: string): string {
   return html

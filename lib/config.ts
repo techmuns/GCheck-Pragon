@@ -26,6 +26,15 @@ export const defaultConfig: AppConfig = {
       url: "https://www.google.com",
     },
     {
+      id: "news",
+      name: "News Deep Dive",
+      kind: "api",
+      description:
+        "Searches the news for the person, for each company the register links to them, and for both against the red-flag terms — then reads the articles that matter.",
+      enabled: true,
+      url: "https://fastapi.muns.io",
+    },
+    {
       id: "indiankanoon",
       name: "Court Cases",
       kind: "api",

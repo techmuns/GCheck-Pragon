@@ -3,11 +3,13 @@ import type {
   Citation,
   CollectorResult,
   Finding,
+  RawHit,
   RenderedSection,
   Run,
   Severity,
   Subject,
 } from "./types";
+import { canonicalUrl } from "./collectors/types";
 import { compareByHierarchy, seniorRole, type RankablePerson } from "./hierarchy";
 import { nameFromTitle, samePerson, uniqueRefs } from "./people";
 
@@ -155,22 +157,37 @@ function redFlagSection(title: string, ctx: Ctx): RenderedSection {
   // just as plainly, because then everything below is only name-matched.
   if (ctx.subject.type === "director") findings.push(identityFinding(ctx));
 
-  // Keyword hits from Google.
-  const google = ctx.byId["google"];
-  if (google?.status === "done") {
-    const flagged = google.hits.filter((h) => (h.matchedKeywords?.length ?? 0) > 0);
+  // Keyword hits from the coverage sweeps. Both are read, deduped on the
+  // canonical URL, so a story indexed by the news engine and the web engine
+  // alike is one finding rather than two.
+  const flagged = new Map<string, { hit: RawHit; source: CollectorResult }>();
+  for (const c of PRESS_IDS.map((sid) => ctx.byId[sid])) {
+    if (c?.status !== "done") continue;
+    for (const h of c.hits) {
+      if ((h.matchedKeywords?.length ?? 0) === 0) continue;
+      const key = canonicalUrl(h.url) ?? `title:${h.title.toLowerCase()}`;
+      const existing = flagged.get(key);
+      if (!existing || rankHit(h) > rankHit(existing.hit)) flagged.set(key, { hit: h, source: c });
+    }
+  }
+  if (flagged.size > 0) {
     // A hit that matched only the subject's NAME may be about a namesake. It is
     // still worth showing — but it is not charged to this person: only hits
     // tied to their DIN or one of their companies get a risk severity, and so
     // only those can move the verdict.
-    const attributable = flagged.filter((h) => h.confidence !== "unverified");
-    const nameOnly = flagged.length - attributable.length;
-    for (const h of attributable.slice(0, 4)) {
-      const ref = ctx.cite("Google / News", h.title, h.url);
+    const all = [...flagged.values()];
+    const attributable = all.filter(({ hit }) => hit.confidence !== "unverified");
+    const nameOnly = all.length - attributable.length;
+    for (const { hit: h, source } of attributable.slice(0, 4)) {
+      // A story about the company that never names the person is a fact about
+      // the company. Saying "Subject: <headline>" of it would be an accusation
+      // the source does not make.
+      const subjectNamed = h.extra?.namesSubject !== false;
+      const who = subjectNamed ? (h.entity ?? "Subject") : `${h.entity ?? "The company"} (subject not named)`;
       findings.push({
         severity: severityForKeywords(h.matchedKeywords ?? []),
-        text: `${h.entity ?? "Subject"}: "${h.title}" — matched ${h.matchedKeywords!.join(", ")}.`,
-        sourceRef: ref,
+        text: `${who}: "${h.title}" — matched ${h.matchedKeywords!.join(", ")}.`,
+        sourceRef: ctx.cite(source.sourceName, h.title, h.url),
       });
     }
     if (nameOnly > 0) {
@@ -607,28 +624,75 @@ function filingsSection(id: string, title: string, ctx: Ctx): RenderedSection {
   };
 }
 
+/** Coverage comes from two sources now — the dedicated news sweep and whatever
+ *  the web sweep turned up. They index the same publishers, so the same story
+ *  arrives twice and is folded on its canonical URL. */
+const PRESS_IDS = ["news", "google"] as const;
+
 function pressSection(id: string, title: string, ctx: Ctx): RenderedSection {
-  const c = ctx.byId["google"];
-  if (!c) return { id, title, findings: [], empty: true };
-  if (c.status === "locked") return { id, title, findings: [{ severity: "info", text: `🔒 Upgrade to enable — ${c.note ?? "paid source"}` }], empty: true };
-  if (c.status === "skipped") return { id, title, findings: [{ severity: "info", text: c.note ?? "Not run." }], empty: true };
-  if (c.status === "error") return { id, title, findings: [{ severity: "info", text: `Source unavailable — ${c.note ?? "unknown error"}` }], empty: true };
-  const hits = c.hits.slice(0, 6);
+  const sources = PRESS_IDS.map((sid) => ctx.byId[sid]).filter((c): c is CollectorResult => c != null);
+  if (sources.length === 0) return { id, title, findings: [], empty: true };
+
+  const completed = sources.filter((c) => c.status === "done");
+  if (completed.length === 0) {
+    // Report the sharpest reason, not merely the first: "unavailable" tells the
+    // reader to fix something, "not run" tells them to configure something.
+    const errored = sources.find((c) => c.status === "error");
+    const locked = sources.find((c) => c.status === "locked");
+    const skipped = sources.find((c) => c.status === "skipped");
+    const text = errored
+      ? `Source unavailable — ${errored.note ?? "unknown error"}`
+      : locked
+        ? `🔒 Upgrade to enable — ${locked.note ?? "paid source"}`
+        : (skipped?.note ?? "Not run.");
+    return { id, title, findings: [{ severity: "info", text }], empty: true };
+  }
+
+  // Best copy of each story wins: a hit confirmed against the subject, or one
+  // carrying keyword matches, beats a bare duplicate of the same URL.
+  const byKey = new Map<string, { hit: RawHit; source: CollectorResult }>();
+  for (const c of completed) {
+    for (const h of c.hits) {
+      const key = canonicalUrl(h.url) ?? `title:${h.title.toLowerCase()}`;
+      const existing = byKey.get(key);
+      if (!existing || rankHit(h) > rankHit(existing.hit)) byKey.set(key, { hit: h, source: c });
+    }
+  }
+
+  const hits = [...byKey.values()].slice(0, 6);
   if (hits.length === 0) return { id, title, findings: [{ severity: "clear", text: "No notable coverage found." }], empty: true };
+
   return {
     id,
     title,
-    findings: hits.map((h) => ({
+    findings: hits.map(({ hit: h, source }) => ({
       severity:
         h.confidence === "unverified"
           ? ("info" as Severity)
           : (h.matchedKeywords?.length ?? 0) > 0
             ? severityForKeywords(h.matchedKeywords ?? [])
             : ("info" as Severity),
-      text: h.confidence === "unverified" ? `${h.title} — name match only, not confirmed as this person` : h.title,
-      sourceRef: ctx.cite(c.sourceName, h.title, h.url),
+      text: pressText(h),
+      sourceRef: ctx.cite(source.sourceName, h.title, h.url),
     })),
   };
+}
+
+function rankHit(h: RawHit): number {
+  return (h.confidence === "confirmed" ? 2 : 0) + ((h.matchedKeywords?.length ?? 0) > 0 ? 1 : 0) + (h.date ? 1 : 0);
+}
+
+/**
+ * How a piece of coverage is worded.
+ *
+ * Three states, and conflating them is how a brief ends up asserting something
+ * it cannot support: a story naming the subject, a story about one of their
+ * companies that never names them, and a story that merely matched the name.
+ */
+function pressText(h: RawHit): string {
+  if (h.confidence === "unverified") return `${h.title} — name match only, not confirmed as this person`;
+  if (h.extra?.namesSubject === false && h.entity) return `${h.title} — coverage of ${h.entity}; the subject is not named`;
+  return h.title;
 }
 
 function buildHeadline(verdict: Severity, ctx: Ctx): string {

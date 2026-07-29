@@ -78,7 +78,6 @@ export const googleCollector: Collector = async ({ subject, keywords }) => {
   const hits: RawHit[] = [];
   const ranQueries: string[] = [];
   let anyError: string | undefined;
-  let newsError: string | undefined;
   // Results the engine returned that don't actually name the searched entity
   // (e.g. sibling brands like Reliance Digital vs Reliance Power) — dropped so
   // findings aren't misattributed. Counted for an honest note.
@@ -132,50 +131,16 @@ export const googleCollector: Collector = async ({ subject, keywords }) => {
       anyError = err instanceof Error ? err.message : String(err);
     }
   }
-  // News pass — recent press per entity, for the client's "search for news on
-  // the company + promoter, highlight negative press". Munshot serves this
-  // best; SerpAPI's google_news engine covers it when Munshot's token is gone.
-  //
-  // Deliberately left on the plain name even for an anchored director: a news
-  // engine given a long anchored query returns nothing at all. Recall comes
-  // from here, precision from the grading below — narrowing both would lose
-  // the coverage this pass exists for.
-  if (newsChain().length > 0) {
-    for (let i = 0; i < entities.length; i++) {
-      const e = entities[i];
-      ranQueries.push(`news: ${e.name}`);
-      if (i > 0) await sleep(300);
-      try {
-        const news = await runNewsChain(e.name);
-        for (const r of news.slice(0, MAX_PER_ENTITY)) {
-          const haystack = `${r.title} ${r.snippet ?? ""}`;
-          const confidence = graded ? subjectConfidence(haystack, subject) : undefined;
-          if (!entityMentioned(haystack, e.name) && confidence !== "confirmed") {
-            offTarget += 1;
-            continue;
-          }
-          collect(byKey, {
-            title: r.title,
-            url: r.url,
-            snippet: r.snippet,
-            entity: e.name,
-            matchedKeywords: matchKeywords(haystack, kw),
-            confidence,
-          });
-        }
-      } catch (err) {
-        // Kept apart from the web pass's error: a news failure used to be
-        // swallowed whenever the web pass had hits, so an expired token looked
-        // like "no news existed" rather than "the news source was down".
-        newsError = err instanceof Error ? err.message : String(err);
-      }
-    }
-  }
+  // The news pass used to live here, sharing this collector's status and note.
+  // It is now its own source (lib/collectors/news.ts) so that it gets its own
+  // progress row, its own deadline and — the reason that matters — its own
+  // error state: a dead news backend reported as part of a healthy web sweep
+  // read to the user as "there is no news about this person".
 
   hits.push(...byKey.values());
 
-  if (hits.length === 0 && (anyError || newsError)) {
-    return { ...base, status: "error", note: `Search failed: ${anyError ?? newsError}`, hits: [], queries: ranQueries };
+  if (hits.length === 0 && anyError) {
+    return { ...base, status: "error", note: `Search failed: ${anyError}`, hits: [], queries: ranQueries };
   }
 
   const filterNote =
@@ -189,8 +154,7 @@ export const googleCollector: Collector = async ({ subject, keywords }) => {
     graded && unverified > 0
       ? `${hits.length - unverified} of ${hits.length} result(s) confirmed against the subject's DIN or companies; ${unverified} matched the name only.`
       : undefined;
-  const newsNote = newsError ? `News search unavailable: ${newsError}` : undefined;
-  const note = [BACKEND_NOTE[backend], degraded, newsNote, filterNote, gradeNote].filter(Boolean).join(" ") || undefined;
+  const note = [BACKEND_NOTE[backend], degraded, filterNote, gradeNote].filter(Boolean).join(" ") || undefined;
 
   return {
     ...base,
@@ -201,7 +165,7 @@ export const googleCollector: Collector = async ({ subject, keywords }) => {
   };
 };
 
-function sleep(ms: number): Promise<void> {
+export function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
@@ -252,7 +216,7 @@ function collect(byKey: Map<string, RawHit>, hit: RawHit): void {
 }
 
 // One retry with backoff — smooths over transient aborts / rate-limit blips.
-async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
+export async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } catch {
@@ -265,7 +229,7 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
 // some subjects genuinely have no coverage — but not an answer worth stopping
 // the chain on either, so it is thrown to fall through to the next backend and
 // caught again at the bottom.
-class EmptyAnswer extends Error {
+export class EmptyAnswer extends Error {
   constructor(readonly backend: Backend) {
     super("no results");
   }
@@ -322,40 +286,6 @@ export async function searchWeb(query: string): Promise<WebResult[]> {
   return served.results;
 }
 
-// News backends, best first. Unlike the web chain there is no keyless option —
-// if neither credential is present the news pass simply does not run.
-function newsChain(): Backend[] {
-  const chain: Backend[] = [];
-  if (env.munshotToken) chain.push("munshot");
-  if (env.serpApiKey) chain.push("serpapi");
-  return chain;
-}
-
-async function runNewsChain(query: string): Promise<WebResult[]> {
-  let failure: string | undefined;
-  let sawEmpty = false;
-  for (const backend of newsChain()) {
-    try {
-      return await cached(`news:${backend}:${query}`, async () => {
-        const r = await withRetry(() => (backend === "munshot" ? searchMunshotNews(query) : searchSerpApiNews(query)));
-        // Same reasoning as the web chain: prefer a backend with something to
-        // say, and never retain an empty that a shape change could have caused.
-        if (r.length === 0) throw new EmptyAnswer(backend);
-        return r;
-      });
-    } catch (err) {
-      if (err instanceof EmptyAnswer) {
-        sawEmpty = true;
-        continue;
-      }
-      failure = err instanceof Error ? err.message : String(err);
-    }
-  }
-  // No news backend had anything — a quiet subject, not a broken source.
-  if (sawEmpty) return [];
-  throw new Error(failure ?? "No news backend configured.");
-}
-
 export async function runBackend(backend: Backend, query: string): Promise<WebResult[]> {
   switch (backend) {
     case "munshot":
@@ -387,27 +317,11 @@ async function searchMunshot(query: string): Promise<WebResult[]> {
   return parseMunshot(data);
 }
 
-// Munshot news-search (recent articles). Same auth + body shape as web-search.
-async function searchMunshotNews(query: string): Promise<WebResult[]> {
-  const res = await fetchWithTimeout(env.munshotNewsUrl, {
-    method: "POST",
-    timeoutMs: 15000,
-    headers: {
-      "Content-Type": "application/json",
-      accept: "application/json",
-      Authorization: `Bearer ${env.munshotToken}`,
-    },
-    body: JSON.stringify({ query, country: env.munshotCountry }),
-  });
-  if (!res.ok) throw new Error(`Munshot news ${await describe(res)}`);
-  return parseMunshot(await res.json());
-}
-
 // Turn a failed response into something a non-engineer can act on. The Munshot
 // APIs answer 403 both for "no token sent" and "token rejected", and the body
 // is the only thing that tells them apart — so it goes in the message rather
 // than being thrown away.
-async function describe(res: Response): Promise<string> {
+export async function describe(res: Response): Promise<string> {
   const detail = await res
     .text()
     .then((t) => {
@@ -445,7 +359,7 @@ function parseMunshot(data: unknown): WebResult[] {
     .filter((r) => r.title.length > 0 || r.url);
 }
 
-function extractRows(data: unknown): unknown[] {
+export function extractRows(data: unknown): unknown[] {
   if (Array.isArray(data)) return data;
   if (data && typeof data === "object") {
     const o = data as Record<string, unknown>;
@@ -470,29 +384,6 @@ async function searchSerpApi(query: string): Promise<WebResult[]> {
     url: o.link ? String(o.link) : undefined,
     snippet: o.snippet ? String(o.snippet) : undefined,
   }));
-}
-
-// SerpAPI's Google News engine — the news equivalent of searchSerpApi, so the
-// news pass survives a dead Munshot token.
-async function searchSerpApiNews(query: string): Promise<WebResult[]> {
-  const url = `https://serpapi.com/search.json?engine=google_news&q=${encodeURIComponent(query)}&gl=in&hl=en&api_key=${env.serpApiKey}`;
-  const res = await fetchWithTimeout(url, { timeoutMs: 15000 });
-  if (!res.ok) throw new Error(`SerpAPI news ${await describe(res)}`);
-  const data = await res.json();
-  const items = Array.isArray(data.news_results) ? data.news_results : [];
-  // google_news groups related coverage under `stories`; flatten one level.
-  const flat = items.flatMap((o: Record<string, unknown>) =>
-    Array.isArray(o.stories) ? (o.stories as Record<string, unknown>[]) : [o],
-  );
-  return flat
-    .map((o: Record<string, unknown>) => ({
-      title: String(o.title ?? ""),
-      url: o.link ? String(o.link) : undefined,
-      snippet: o.snippet ? String(o.snippet) : typeof o.source === "object" && o.source
-        ? String((o.source as Record<string, unknown>).name ?? "")
-        : undefined,
-    }))
-    .filter((r: WebResult) => r.title.length > 0 || r.url);
 }
 
 async function searchProgrammable(query: string): Promise<WebResult[]> {

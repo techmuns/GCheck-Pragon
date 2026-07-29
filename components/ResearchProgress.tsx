@@ -40,6 +40,7 @@ function statusDot(status: SourceProgress["status"]): string {
 const VISITING: Record<string, string> = {
   indiafilings: "Settling who this is on the MCA register",
   google: "Reading news and search results",
+  news: "Searching the news for the person and each of their companies",
   indiankanoon: "Going through court records",
   registry: "Pulling the registry record and its board",
   wikidata: "Cross-checking the people involved",

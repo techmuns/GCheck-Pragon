@@ -103,14 +103,20 @@ export const indianKanoonCollector: Collector = async ({ subject }) => {
  * promoter; for a resolved director, also the DIN — which appears verbatim in
  * disqualification orders and company-petition cause titles and cannot belong
  * to a namesake — and the name paired with a company they sit on.
+ *
+ * The companies are also searched on their own. A cause title names the parties
+ * to the suit, and when a company litigates it is the company that is named:
+ * a petition filed by a director's company appears under the company, and a
+ * search for the person alone will never return it.
  */
 function searchTerms(name: string, subject: Subject): string[] {
   const terms = [name];
   if (subject.type !== "director" || name !== subject.company) return terms;
   if (subject.din) terms.push(`DIN ${subject.din}`);
-  const anchor = anchorsOf(subject)[0];
-  if (anchor) terms.push(`${name} ${anchor}`);
-  return terms;
+  const anchors = anchorsOf(subject);
+  if (anchors[0]) terms.push(`${name} ${anchors[0]}`);
+  terms.push(...anchors);
+  return [...new Set(terms)];
 }
 
 interface CaseHit {

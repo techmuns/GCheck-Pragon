@@ -1,4 +1,5 @@
 import type { Citation, RawHit, RenderedSection, Run, Severity } from "./types";
+import { canonicalUrl } from "./collectors/types";
 import { compareByHierarchy, seniorRole } from "./hierarchy";
 import { nameFromTitle, samePerson, uniqueRefs } from "./people";
 
@@ -463,7 +464,7 @@ function classifyConcern(
   if (sourceId === "filings") {
     return { category: "Exchange disclosure", stage: "flag", claim: "Verified" };
   }
-  if (sourceId === "google" || /news|media|report(ed)?|article/.test(t)) {
+  if (sourceId === "google" || sourceId === "news" || /news|media|report(ed)?|article/.test(t)) {
     return {
       category: "Adverse media",
       stage: probing ? "investigation" : "allegation",
@@ -690,11 +691,14 @@ function buildDevelopments(bySource: SourceIndex, citations: Citation[]): Develo
     }
   }
 
-  // Then press / news coverage.
-  const google = bySource["google"];
-  if (google?.status === "done") {
-    for (const h of google.hits) {
-      const key = h.url ?? h.title;
+  // Then press / news coverage. The dedicated news sweep leads — it carries
+  // publication dates the web sweep does not — and the shared `seen` set keeps
+  // a story indexed by both from appearing twice.
+  for (const sourceId of ["news", "google"] as const) {
+    const press = bySource[sourceId];
+    if (press?.status !== "done") continue;
+    for (const h of press.hits) {
+      const key = canonicalUrl(h.url) ?? h.title;
       if (seen.has(key)) continue;
       seen.add(key);
       const kws = h.matchedKeywords ?? [];
@@ -900,6 +904,7 @@ const SOURCE_BUCKET: Record<string, string> = {
   wikidata: "Company registry",
   indiankanoon: "Court records",
   google: "Established news",
+  news: "Established news",
   cibil: "Official / regulatory",
   privatecircle: "Company registry",
 };
@@ -1027,7 +1032,9 @@ function guessSourceId(sourceName: string | undefined, text: string): string | u
   const s = `${sourceName ?? ""} ${text}`.toLowerCase();
   if (s.includes("kanoon")) return "indiankanoon";
   if (s.includes("cibil") || s.includes("defaulter")) return "cibil";
+  if (s.includes("news deep dive")) return "news";
   if (s.includes("google") || s.includes("news")) return "google";
+  if (s.includes("indiafilings") || s.includes("mca registry")) return "indiafilings";
   if (s.includes("tofler") || s.includes("registry")) return "registry";
   if (s.includes("filing")) return "filings";
   return undefined;
