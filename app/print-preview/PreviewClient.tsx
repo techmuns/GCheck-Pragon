@@ -5,7 +5,7 @@ import BriefPrint from "@/components/BriefPrint";
 import { buildPrintBrief, formatGenerated } from "@/lib/printBrief";
 import { mockRun, type Size } from "./mocks";
 
-const SIZES: Size[] = ["short", "average", "max", "director"];
+const SIZES: Size[] = ["short", "average", "max", "director", "read"];
 
 export default function PreviewClient() {
   const [size, setSize] = useState<Size>("average");

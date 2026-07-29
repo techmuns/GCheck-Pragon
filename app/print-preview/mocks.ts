@@ -7,7 +7,7 @@ import type { Citation, CollectorResult, RenderedSection, Run, SourceProgress } 
 //   max     — high risk, every section over its cap (drives "+N more" everywhere)
 // These never ship to users; the /print-preview route 404s outside development.
 
-export type Size = "short" | "average" | "max" | "director";
+export type Size = "short" | "average" | "max" | "director" | "read";
 
 const CREATED = "2026-07-27T14:32:00.000Z";
 
@@ -19,9 +19,192 @@ export function mockRun(size: Size): Run {
       return maxRun();
     case "director":
       return directorRun();
+    case "read":
+      return readRun();
     default:
       return averageRun();
   }
+}
+
+// ── read: the run this whole pipeline was rebuilt for ─────────────────────────
+// A faithful reproduction of DIN 07013291, which the old pipeline returned as
+// "CLEAR, 0 red flags, identity not established" with an XPRIZE win filed under
+// Key Concerns. It is the regression fixture for the three things that were
+// wrong, and it renders with no network at all:
+//
+//   • a matter where the subject is the COMPLAINANT, worded as such
+//   • a struck-off company surfaced from the register, not from press
+//   • a genuine win in Positive Signals rather than among the concerns
+
+function readRun(): Run {
+  const progress: SourceProgress[] = [
+    { sourceId: "indiafilings", name: "MCA Registry (IndiaFilings)", kind: "api", status: "done", hits: 8 },
+    { sourceId: "google", name: "Google & News", kind: "api", status: "done", hits: 4 },
+    { sourceId: "news", name: "News Deep Dive", kind: "api", status: "done", hits: 9 },
+    { sourceId: "indiankanoon", name: "Court Cases", kind: "api", status: "done", hits: 0 },
+    { sourceId: "registry", name: "Company Registry (Tofler)", kind: "api", status: "done", hits: 0 },
+    { sourceId: "wikidata", name: "Wikidata (Directors)", kind: "api", status: "done", hits: 0 },
+    { sourceId: "cibil", name: "Loan Defaults", kind: "browser", status: "locked", note: "Available on the upgraded plan." },
+  ];
+
+  const collected: CollectorResult[] = [
+    {
+      sourceId: "indiafilings",
+      sourceName: "MCA Registry (IndiaFilings)",
+      kind: "api",
+      status: "done",
+      note: "6 entity record(s) linked to DIN 07013291; 1 not in good standing. DIN status: Approved.",
+      hits: [
+        {
+          title: "CHIRAAG KAPIL — DIN 07013291",
+          url: "https://www.indiafilings.com/search/director-din-07013291",
+          entity: "CHIRAAG KAPIL",
+          extra: { category: "identity", name: "CHIRAAG KAPIL", din: "07013291", dinStatus: "Approved", approvedOn: "2014-11-07" },
+        },
+        {
+          title: "SAARTHI TECHPRO PRIVATE LIMITED — Active",
+          url: "https://www.indiafilings.com/search/company-cin-U72900DL2019PTC358371",
+          entity: "CHIRAAG KAPIL",
+          extra: { category: "directorship", company: "SAARTHI TECHPRO PRIVATE LIMITED", cin: "U72900DL2019PTC358371", status: "Active" },
+        },
+        {
+          title: "CHIRAAG ENTERTAINMENT PRIVATE LIMITED is recorded as \"Strike Off\" on the MCA register",
+          url: "https://www.indiafilings.com/search/company-cin-U92190DL2007PTC166777",
+          entity: "CHIRAAG ENTERTAINMENT PRIVATE LIMITED",
+          extra: { category: "governance", flag: "entity-status", company: "CHIRAAG ENTERTAINMENT PRIVATE LIMITED", status: "Strike Off" },
+        },
+      ],
+    },
+    {
+      sourceId: "news",
+      sourceName: "News Deep Dive",
+      kind: "api",
+      status: "done",
+      note: "18 searches across the subject and their companies; 9 distinct article(s), 3 matching a red-flag keyword. Opened 5 of 5 article(s) and extracted 2 finding(s).",
+      hits: [
+        {
+          title: "Saarthi's co-founder and investors have filed suit against Classplus alleging cheating, extortion and criminal breach of trust",
+          url: "https://india.entrepreneur.com/news-and-trends/saarthi-raises-serious-allegations-against-edtech-unicorn/457153",
+          snippet: "Saarthi's co-founder and investors have alleged cheating, extortion, criminal breach of trust and misappropriation of funds.",
+          entity: "SAARTHI TECHPRO PRIVATE LIMITED",
+          date: "2023-08-24",
+          confidence: "confirmed",
+          matchedKeywords: ["court", "criminal", "police"],
+          extra: {
+            category: "insight",
+            subjectRole: "complainant",
+            roleEvidence: "Saarthi's co-founder Chiraag Kapil filed the suit in the Delhi High Court.",
+            about: "both",
+            severity: "amber",
+            polarity: "adverse",
+            authority: "Delhi High Court, plus three police complaints",
+            status: "Hearing listed for September 2023",
+            sourceTitle: "Saarthi Raises Serious Allegations Against Edtech Unicorn Classplus",
+          },
+        },
+        {
+          title: "Leaf Wearables won the $1M Women's Safety XPRIZE at the United Nations for its Safer device",
+          url: "https://www.geekwire.com/2018/indian-startup-leaf-wearables-takes-first-place-1m-womens-safety-xprize-competition/",
+          entity: "CHIRAAG KAPIL",
+          confidence: "confirmed",
+          extra: {
+            category: "insight",
+            subjectRole: "bystander",
+            about: "both",
+            severity: "info",
+            polarity: "positive",
+            sourceTitle: "Indian startup Leaf Wearables takes first place in $1M Women's Safety XPRIZE",
+          },
+        },
+      ],
+    },
+  ];
+
+  const citations: Citation[] = [
+    {
+      ref: 1,
+      sourceName: "News Deep Dive",
+      label: "Saarthi Raises Serious Allegations Against Edtech Unicorn Classplus",
+      url: "https://india.entrepreneur.com/news-and-trends/saarthi-raises-serious-allegations-against-edtech-unicorn/457153",
+    },
+    {
+      ref: 2,
+      sourceName: "MCA Registry (IndiaFilings)",
+      label: "CHIRAAG ENTERTAINMENT PRIVATE LIMITED — Strike Off",
+      url: "https://www.indiafilings.com/search/company-cin-U92190DL2007PTC166777",
+    },
+    {
+      ref: 3,
+      sourceName: "MCA Registry (IndiaFilings)",
+      label: "DIN 07013291",
+      url: "https://www.indiafilings.com/search/director-din-07013291",
+    },
+    {
+      ref: 4,
+      sourceName: "News Deep Dive",
+      label: "Indian startup Leaf Wearables takes first place in $1M Women's Safety XPRIZE",
+      url: "https://www.geekwire.com/2018/indian-startup-leaf-wearables-takes-first-place-1m-womens-safety-xprize-competition/",
+    },
+  ];
+
+  const sections: RenderedSection[] = [
+    {
+      id: "red-flags",
+      title: "Key Concerns",
+      findings: [
+        {
+          severity: "amber",
+          // The wording that the whole reading pass exists to make possible.
+          text: "CHIRAAG KAPIL is the complainant in this matter: Saarthi's co-founder and investors have filed suit against Classplus alleging cheating, extortion and criminal breach of trust. Delhi High Court, plus three police complaints. Status: hearing listed for September 2023.",
+          sourceRef: 1,
+        },
+        {
+          severity: "amber",
+          text: "CHIRAAG ENTERTAINMENT PRIVATE LIMITED is recorded as \"Strike Off\" on the MCA register",
+          sourceRef: 2,
+        },
+        { severity: "info", text: "Identified as CHIRAAG KAPIL, DIN 07013291 — 6 company record(s) linked.", sourceRef: 3 },
+      ],
+    },
+    {
+      id: "positives",
+      title: "Positive Signals",
+      findings: [
+        { severity: "clear", text: "Leaf Wearables won the $1M Women's Safety XPRIZE at the United Nations for its Safer device", sourceRef: 4 },
+        { severity: "clear", text: "DIN 07013291 is in good standing (Approved, registered since 2014-11-07).", sourceRef: 3 },
+      ],
+    },
+  ];
+
+  return {
+    id: "mock_read",
+    subject: {
+      type: "director",
+      company: "CHIRAAG KAPIL",
+      promoters: [],
+      din: "07013291",
+      anchors: [
+        "LEAF STUDIOS PRIVATE LIMITED",
+        "MUNSHOT TECHNOLOGIES PRIVATE LIMITED",
+        "SAARTHI TECHPRO PRIVATE LIMITED",
+        "NIHO BUILDWELL LIMITED",
+        "ANCHI VENTURES LLP",
+        "CHIRAAG ENTERTAINMENT PRIVATE LIMITED",
+      ],
+    },
+    status: "complete",
+    createdAt: CREATED,
+    progress,
+    collected,
+    brief: {
+      verdict: "amber",
+      headline:
+        "CHIRAAG KAPIL is in live litigation he brought himself against Classplus, and one company in his history is struck off — worth raising, neither a red flag against him.",
+      sections,
+      citations,
+      synthesizedBy: "ai",
+    },
+  };
 }
 
 // ── director mode: a person, not a company ────────────────────────────────────

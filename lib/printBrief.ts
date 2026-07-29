@@ -131,6 +131,9 @@ export interface PrintBrief {
   metrics: PrintMetric[];
   concerns: Concern[];
   extraConcerns: number;
+  /** Honest wording for an empty concerns block, where "empty" needs explaining
+   *  rather than reassuring. Set by the assembler; absent means it is clean. */
+  concernsEmptyText?: string;
   developments: Development[];
   extraDevelopments: number;
   snapshot: SnapshotField[];
@@ -202,6 +205,7 @@ export function buildPrintBrief(run: Run, generatedAt: string): PrintBrief | nul
     metrics: buildMetrics(brief.verdict, redFlags, toReview, doneSources, totalSources),
     concerns,
     extraConcerns: Math.max(0, concernsAll.length - concerns.length),
+    concernsEmptyText: brief.sections.find((s) => s.id === "red-flags")?.emptyText,
     developments: developmentsAll.slice(0, CAPS.developments),
     extraDevelopments: Math.max(0, developmentsAll.length - CAPS.developments),
     snapshot: buildSnapshot(run, cin),

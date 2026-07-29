@@ -1,0 +1,44 @@
+name: Checks
+
+# Types, lint, and a live check of the registry parser.
+#
+# The registry check hits indiafilings.com for real. That is the point: the
+# collector reads third-party HTML, and a fixture could only ever prove we still
+# parse the markup as it was on the day the fixture was taken. It needs no
+# credential, so it is the one part of this pipeline that can be verified in CI
+# at all — everything else is gated behind a Munshot session token.
+#
+# Scheduled weekly as well as on push, because the failure mode being guarded
+# against is the site changing while nobody is touching this repository.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+
+  registry-parser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # No install step — the check is dependency-free on purpose, so a broken
+      # lockfile can never be the reason nobody noticed the parser had rotted.
+      - run: node scripts/check-indiafilings.mjs

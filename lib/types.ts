@@ -85,6 +85,11 @@ export interface RenderedSection {
   findings: Finding[];
   /** Honest empty state — never faked. */
   empty?: boolean;
+  /** What to print when the section has nothing to itemise. The assembler sets
+   *  it where the honest wording depends on WHY it is empty — "nothing was
+   *  found" and "things were found but could not be tied to this person" are
+   *  different answers and must not share a sentence. */
+  emptyText?: string;
 }
 
 /** A source citation for the appendix. */

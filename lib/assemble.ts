@@ -248,19 +248,24 @@ function redFlagSection(title: string, ctx: Ctx): RenderedSection {
 
   const hasRisk = findings.some((f) => f.severity === "red" || f.severity === "amber");
   const anyCompleted = Object.values(ctx.byId).some((c) => c?.status === "done");
+
+  // What the section says when it has nothing to itemise. The wording turns on
+  // WHY it is empty, and getting that wrong is the single most dangerous thing
+  // this brief can do: "no concerns surfaced" printed over an unresolved name
+  // reads as a clean bill of health for a person nobody managed to check.
+  let emptyText: string | undefined;
   if (!hasRisk) {
-    findings.unshift(
-      unidentified(ctx.subject) && ctx.unattributed
-        ? {
-            severity: "info",
-            text: "Material worth reviewing was found under this name, but none of it could be tied to a specific registered director — so none of it is charged to this person. Search a DIN, or add a company, to resolve who this is.",
-          }
-        : anyCompleted
-          ? { severity: "clear", text: "No red flags surfaced across the sources that completed." }
-          : { severity: "info", text: "No sources completed — results below are incomplete. Configure credentials/keys and re-run." },
-    );
+    if (unidentified(ctx.subject) && ctx.unattributed) {
+      emptyText =
+        "Material worth reviewing was found under this name, but none of it could be tied to a specific registered director — so none of it is charged to this person, and none of it is cleared either. Search a DIN, or add a company, to resolve who this is.";
+      findings.unshift({ severity: "info", text: emptyText });
+    } else if (!anyCompleted) {
+      emptyText = "No sources completed — results below are incomplete. Configure credentials/keys and re-run.";
+      findings.unshift({ severity: "info", text: emptyText });
+    }
+    // Otherwise the default reassurance is earned, and the surfaces supply it.
   }
-  return { id: "red-flags", title, findings };
+  return { id: "red-flags", title, findings, emptyText };
 }
 
 /** Insight hits: the structured facts read out of a full article. */

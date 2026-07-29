@@ -8,7 +8,9 @@
     "build": "next build",
     "build:static": "node scripts/build-static.mjs",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "check:registry": "node scripts/check-indiafilings.mjs"
   },
   "dependencies": {
     "next": "14.2.5",

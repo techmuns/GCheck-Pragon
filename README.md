@@ -10,15 +10,34 @@ An **input → output** experience — not a dashboard.
 
 ```
 User input (+ autocomplete)
-   → generate queries (input × configurable keywords)
-   → multi-source retrieval  ── Google · Indian Kanoon      (API)
-                              └─ PrivateCircle · CIBIL       (Playwright)
+   → settle IDENTITY first  ──  MCA register (IndiaFilings, keyless)
+        a DIN → the person's name and every company and LLP linked to it
+   → generate queries (identity × configurable keywords)
+   → multi-source retrieval  ── MCA registry · Google · News · Indian Kanoon (API)
+                              └─ PrivateCircle · CIBIL                       (Playwright)
+   → open and READ the articles that matter (Muns web-reader → Firecrawl)
+        each reduced to: what happened · authority · status · the subject's ROLE
    → extract · normalise · dedupe
    → OpenAI synthesis
    → one-page partner brief (configurable sections, red flags on top)
 ```
 
-Sources, keywords, prompts, and brief sections are all editable in an admin panel.
+**Identity comes first, and it is not a detail.** Until a name is pinned to a
+DIN, every hit is a name match — and `subjectConfidence` will not let a name
+match move the verdict, correctly, because three registered directors can share
+a name. A run that fails to resolve identity cannot find anything, whatever it
+reads. Resolving it first is also what makes the searches worth running: knowing
+the person's companies is the difference between searching a name and searching
+`"<person>" "<their company>"`, which is where governance stories actually live.
+
+**Headlines are not read as facts.** A title says a matter exists; only the body
+says whether the subject brought the complaint or answered it. Articles that
+score high enough are opened and reduced to structured findings, and a role the
+model cannot support with a verbatim quote from the article is dropped.
+
+Sources, keywords and brief sections are editable in an admin panel. The
+narrative prompt is not — it lives in `lib/synthesize.ts` alongside the
+guardrails that validate what the model returns.
 
 ## Build phases
 
@@ -32,9 +51,41 @@ Sources, keywords, prompts, and brief sections are all editable in an admin pane
 ## Credentials
 
 Copy `.env.example` to `.env.local`. **Everything is optional** — a source that
-lacks its key/login skips honestly and says so in the run. Out of the box,
-Google/News and Indian Kanoon work keyless; PrivateCircle and CIBIL light up
-once their logins are set.
+lacks its key/login skips honestly and says so in the run. Out of the box, the
+MCA registry, Google/News and Indian Kanoon work keyless; the news deep dive and
+the article reader need `MUNSHOT_TOKEN` (or `SERPAPI_KEY` / `FIRECRAWL_API_KEY`),
+and PrivateCircle and CIBIL light up once their logins are set.
+
+Two dials govern what a deep run costs: `MAX_NEWS_QUERIES` (default 24) and
+`MAX_ARTICLE_READS` (default 8, each one a reader call plus an OpenAI call).
+
+## Checks
+
+```bash
+npm run typecheck
+npm run lint
+npm run check:registry   # parses the LIVE registry pages — no credentials needed
+```
+
+`check:registry` is the one part of this pipeline that can be verified without a
+credential, so it runs in CI on every push and weekly on a schedule. It asserts
+the real parse of a known DIN: the name, the DIN status, the six linked
+entities, the struck-off one among them, and a co-director read off a company
+page. A fixture would only prove we can still parse the markup as it was the day
+the fixture was taken.
+
+For everything else there is `/api/dev/probe` (development only, 404s in
+production), which exercises each piece on its own:
+
+```
+/api/dev/probe?din=07013291                     # the parsed director record
+/api/dev/probe?cin=U72900DL2019PTC358371        # the parsed company record
+/api/dev/probe?ladder=07013291                  # the news plan, WITHOUT running it
+/api/dev/probe?read=<article-url>               # reader + insight extraction
+```
+
+`/print-preview` renders the one-pager against synthetic runs, including a
+`read` fixture that reproduces the case this pipeline was rebuilt for.
 
 ## Design system
 

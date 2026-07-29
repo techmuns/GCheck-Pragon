@@ -102,7 +102,8 @@ a volume at `/app/data`, or move config to a database (a small future step).
 
 ## Note on `MUNSHOT_TOKEN`
 
-The Munshot search APIs (`/tools/web-search`, `/tools/news-search`) authenticate
+The Munshot APIs (`/tools/web-search`, `/tools/news-search`, `/tools/web-reader`)
+authenticate
 with `bearer_jwt` — a **user session token**, not a service key. Munshot issues
 it to dashboards embedded in its host app at runtime; there is no long-lived
 equivalent for a standalone server like this one. A token copied from a browser
@@ -114,7 +115,19 @@ durable backend alongside it — `SERPAPI_KEY`, or `GOOGLE_API_KEY` + `GOOGLE_CX
 The collector walks every configured backend in order and keeps the first that
 answers, so an expired Munshot token degrades to Google rather than taking web
 search down. News degrades from Munshot to SerpAPI's `google_news` engine; with
-neither credential set, the news pass is skipped and says so in the brief.
+neither credential set, the news source is skipped and says so in the brief.
+
+The token now also gates the **article reader**, so its expiry costs more than
+it used to: without it, no article is opened, and the brief is written from
+headlines alone. That is a real loss of quality — a headline cannot say whether
+the subject brought a complaint or answered it — so set `FIRECRAWL_API_KEY` as
+the durable fallback if you want reading to survive an expired session. With
+neither, the run still completes and states plainly that nothing was opened.
+
+Identity resolution does **not** depend on the token: the MCA registry source is
+keyless, and with a DIN it needs a single plain GET. A run with no credentials at
+all still resolves who the subject is and reports the register's view of their
+standing.
 
 ### Monitoring the token
 

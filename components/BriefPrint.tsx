@@ -69,7 +69,7 @@ function PrintDoc({ brief }: { brief: PrintBrief }) {
               to keep the two columns near the same depth. */}
           <div className="pb-col pb-col-left">
             <ExecutiveVerdict text={brief.executive} />
-            <KeyConcerns concerns={brief.concerns} extra={brief.extraConcerns} />
+            <KeyConcerns concerns={brief.concerns} extra={brief.extraConcerns} emptyText={brief.concernsEmptyText} />
           </div>
 
           <div className="pb-col pb-col-right">
@@ -188,13 +188,15 @@ function claimClass(claim: string): string {
   }
 }
 
-function KeyConcerns({ concerns, extra }: { concerns: Concern[]; extra: number }) {
+function KeyConcerns({ concerns, extra, emptyText }: { concerns: Concern[]; extra: number; emptyText?: string }) {
   if (concerns.length === 0) {
+    // Green says "checked, and clean". Where the run could not settle who the
+    // subject is, it has not earned that, and the assembler says so instead.
     return (
       <Section title="Key Concerns">
         <div className="pb-clear">
-          <span className="pb-dot pb-bg-green" />
-          No red-flag or review-level concerns surfaced across the sources that completed.
+          <span className={`pb-dot ${emptyText ? "pb-bg-neutral" : "pb-bg-green"}`} />
+          {emptyText ?? "No red-flag or review-level concerns surfaced across the sources that completed."}
         </div>
       </Section>
     );

@@ -183,7 +183,9 @@ export default function BriefView({ run, onReset }: Props) {
             // Context the summary still owes the reader — which sources were
             // unavailable, whether the identity was pinned — kept as footnotes
             // rather than findings, so they never read as things that were found.
-            const summaryNotes = isSummary ? section.findings.filter((f) => f.severity === "info") : [];
+            const summaryNotes = isSummary
+      ? section.findings.filter((f) => f.severity === "info" && f.text !== section.emptyText)
+      : [];
             const count = asCards
               ? concerns.length
               : section.findings.filter((f) => f.severity !== "info").length;
@@ -207,12 +209,18 @@ export default function BriefView({ run, onReset }: Props) {
                 {asCards ? (
                   <ConcernCards concerns={concerns} citations={brief.citations} />
                 ) : isSummary ? (
+                  // Green only where the reassurance is earned. Where the run
+                  // could not settle who this is, the assembler supplies its own
+                  // wording and this is not a clean bill of health.
                   <p className="flex items-start gap-2.5 text-[14px] leading-relaxed text-ink-primary">
                     <span
                       className="mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full"
-                      style={{ backgroundColor: severityStyle.clear.dot }}
+                      style={{ backgroundColor: section.emptyText ? severityStyle.info.dot : severityStyle.clear.dot }}
                     />
-                    <span>No red-flag or review-level concerns surfaced across the sources that completed.</span>
+                    <span>
+                      {section.emptyText ??
+                        "No red-flag or review-level concerns surfaced across the sources that completed."}
+                    </span>
                   </p>
                 ) : section.empty || section.findings.length === 0 ? (
                   <p className="text-[13px] italic text-[#9AA6B6]">n/a — no source-backed findings</p>
