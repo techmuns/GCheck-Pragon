@@ -160,9 +160,20 @@ export function subjectConfidence(text: string, subject: Subject): NonNullable<R
   return "unverified";
 }
 
-/** Whether identity grading applies at all. A company subject is identified
- *  well enough by its own name; grading it would mark ordinary press coverage
- *  as doubtful for no reason. */
+/**
+ * Whether identity grading applies at all.
+ *
+ * Every director subject, including one we failed to resolve. That case is the
+ * whole point: with no DIN and no companies to check against, NOTHING can be
+ * confirmed, so every hit is honestly "unverified" — and a brief on an
+ * unresolved "Rajesh Kumar" must not charge one man's CBI case, another's graft
+ * FIR and a third man's appeal to whichever Rajesh Kumar the partner is meeting.
+ * Gating this on a successful resolution switched the protection off in exactly
+ * the case that needs it.
+ *
+ * A company subject is identified well enough by its own name; grading it would
+ * mark ordinary press coverage as doubtful for no reason.
+ */
 export function gradesIdentity(subject: Subject): boolean {
-  return subject.type === "director" && (Boolean(subject.din) || anchorsOf(subject).length > 0);
+  return subject.type === "director";
 }

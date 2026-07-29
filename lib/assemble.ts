@@ -34,6 +34,24 @@ interface Ctx {
   byId: Record<string, CollectorResult | undefined>;
   citations: Citation[];
   cite: (sourceName: string, label: string, url?: string) => number;
+  /** Concerning material was found under the subject's name but could not be
+   *  tied to them — the state an unresolved director search lands in. */
+  unattributed: boolean;
+}
+
+/** Is this a director we never managed to pin to a registry record? */
+function unidentified(subject: Subject): boolean {
+  return subject.type === "director" && !subject.din;
+}
+
+/** Litigation, or a red-flag keyword hit, that matched the subject's name and
+ *  nothing else. Neither chargeable to them nor safe to ignore. */
+function hasUnattributedConcern(collected: CollectorResult[]): boolean {
+  return collected.some((c) =>
+    c.hits.some(
+      (h) => h.confidence === "unverified" && (c.sourceId === "indiankanoon" || (h.matchedKeywords?.length ?? 0) > 0),
+    ),
+  );
 }
 
 export function assembleBrief(
@@ -56,7 +74,7 @@ export function assembleBrief(
     return ref;
   };
 
-  const ctx: Ctx = { subject, byId, citations, cite };
+  const ctx: Ctx = { subject, byId, citations, cite, unattributed: hasUnattributedConcern(collected) };
 
   const sections: RenderedSection[] = config.sections
     .filter((s) => s.enabled)
@@ -83,6 +101,13 @@ export function assembleBrief(
   }
   const anyCompleted = collected.some((c) => c.status === "done");
   if (!anyFinding) verdict = anyCompleted ? "clear" : "info";
+
+  // A director we could not pin to a registry record is never "clear" merely
+  // because nothing could be attributed to them. Concerning material WAS found
+  // under this name; we just cannot say whose it is. "No red flags surfaced for
+  // Rajesh Kumar" would be the most dangerous sentence in the brief — it reads
+  // as a clean bill of health for a person nobody checked.
+  if (unidentified(subject) && ctx.unattributed && verdict === "clear") verdict = "info";
 
   const headline = buildHeadline(verdict, ctx);
 
@@ -181,9 +206,14 @@ function redFlagSection(title: string, ctx: Ctx): RenderedSection {
   const anyCompleted = Object.values(ctx.byId).some((c) => c?.status === "done");
   if (!hasRisk) {
     findings.unshift(
-      anyCompleted
-        ? { severity: "clear", text: "No red flags surfaced across the sources that completed." }
-        : { severity: "info", text: "No sources completed — results below are incomplete. Configure credentials/keys and re-run." },
+      unidentified(ctx.subject) && ctx.unattributed
+        ? {
+            severity: "info",
+            text: "Material worth reviewing was found under this name, but none of it could be tied to a specific registered director — so none of it is charged to this person. Search a DIN, or add a company, to resolve who this is.",
+          }
+        : anyCompleted
+          ? { severity: "clear", text: "No red flags surfaced across the sources that completed." }
+          : { severity: "info", text: "No sources completed — results below are incomplete. Configure credentials/keys and re-run." },
     );
   }
   return { id: "red-flags", title, findings };
@@ -456,6 +486,13 @@ function buildHeadline(verdict: Severity, ctx: Ctx): string {
   const name = ctx.subject.company;
   const skipped = Object.values(ctx.byId).filter((c) => c?.status === "skipped").length;
   const tail = skipped > 0 ? ` ${skipped} source(s) not configured.` : "";
+  // The headline a partner reads first has to carry the doubt, not bury it.
+  if (unidentified(ctx.subject) && ctx.unattributed) {
+    return `Could not confirm which ${name} this is — concerning material exists under the name but none of it is tied to a registered director. Search a DIN, or add a company, before relying on this.${tail}`;
+  }
+  if (unidentified(ctx.subject)) {
+    return `No red flags surfaced under the name ${name}, but no unique registry record matched it — this is not confirmed to be one specific person.${tail}`;
+  }
   switch (verdict) {
     case "red":
       return `Red flags found for ${name} — review the highlighted items before the meeting.${tail}`;
