@@ -1,4 +1,5 @@
 import type { Citation, RawHit, RenderedSection, Run, Severity } from "./types";
+import { compareByHierarchy } from "./hierarchy";
 
 // ── Print-brief derivation ──────────────────────────────────────────────────
 // Turns a finished Run into the fixed, decision-grade shape the one-page A4
@@ -738,7 +739,10 @@ function buildPeople(bySource: SourceIndex, promoters: string[], isDirector: boo
   // Promoters the user named, if not already captured by a source.
   for (const p of promoters) if (p.trim()) add({ name: p.trim(), role: "Promoter (named)" });
 
-  return out;
+  // Ordered by office, not by which collector answered first — and because the
+  // page has room for five rows, this is also what decides who makes the page:
+  // the Managing Director, not the fifth independent director. (lib/hierarchy)
+  return out.sort(compareByHierarchy);
 }
 
 function longTenureFlag(tenure?: string): string | undefined {

@@ -3,6 +3,7 @@
 import type { Citation } from "@/lib/types";
 import type { Concern } from "@/lib/printBrief";
 import { severityStyle } from "./severity";
+import CitationRef, { sourceUrls } from "./CitationRef";
 
 // ── Key Concerns, on screen ───────────────────────────────────────────────────
 // The same specific summary the downloadable one-pager carries — the matter
@@ -21,7 +22,7 @@ export default function ConcernCards({
   concerns: Concern[];
   citations: Citation[];
 }) {
-  const urlByRef = new Map(citations.filter((c) => c.url).map((c) => [c.ref, c.url as string]));
+  const urlByRef = sourceUrls(citations);
   return (
     <ul className="space-y-2.5">
       {concerns.map((c, i) => (
@@ -57,7 +58,7 @@ function ConcernCard({ c, url }: { c: Concern; url?: string }) {
         <p className="mt-2 text-[12.5px] leading-relaxed text-ink-secondary">
           &ldquo;{c.evidence}&rdquo;
           {c.evidenceSource && <span className="italic text-ink-secondary/80"> — {c.evidenceSource}</span>}
-          <Ref n={c.sourceRef} url={url} />
+          <CitationRef n={c.sourceRef} url={url} />
         </p>
       )}
 
@@ -65,19 +66,5 @@ function ConcernCard({ c, url }: { c: Concern; url?: string }) {
         <span className="eyebrow !text-[9.5px]">So what</span> {c.whyItMatters}
       </p>
     </li>
-  );
-}
-
-/** Citation number — a live link to the source wherever one exists, matching
- *  the exported PDF, so neither surface makes a reader hunt the appendix. */
-function Ref({ n, url }: { n?: number; url?: string }) {
-  if (n === undefined) return null;
-  if (!url) return <sup className="ml-0.5 text-[11px] font-semibold text-navy-primary/70">[{n}]</sup>;
-  return (
-    <sup className="ml-0.5 text-[11px] font-semibold">
-      <a href={url} target="_blank" rel="noreferrer" className="text-royal underline-offset-2 hover:underline">
-        [{n}]
-      </a>
-    </sup>
   );
 }

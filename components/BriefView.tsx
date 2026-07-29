@@ -7,6 +7,7 @@ import { severityStyle } from "./severity";
 import { RiskMeter, SeverityBar, StatTile, SourceCoverage, VERDICT_META } from "./BriefViz";
 import BriefPrint from "./BriefPrint";
 import ConcernCards from "./ConcernCards";
+import CitationRef, { sourceUrls } from "./CitationRef";
 import { buildPrintBrief, formatGenerated, listConcerns } from "@/lib/printBrief";
 
 interface Props {
@@ -78,6 +79,10 @@ export default function BriefView({ run, onReset }: Props) {
   }
   const sourcesChecked = run.progress.filter((p) => p.status === "done").length;
   const sourcesLocked = run.progress.filter((p) => p.status === "locked").length;
+
+  // Every [n] the page prints resolves through this, so a citation number is a
+  // link straight to the record rather than a pointer at the appendix.
+  const urlByRef = sourceUrls(brief.citations);
 
   return (
     <div className="fade-in mx-auto w-full max-w-6xl">
@@ -201,9 +206,10 @@ export default function BriefView({ run, onReset }: Props) {
                           <span className="mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: s.dot }} />
                           <span className="text-[14px] leading-relaxed text-ink-primary">
                             {f.text}
-                            {f.sourceRef !== undefined && (
-                              <sup className="ml-0.5 text-[11px] font-semibold text-navy-primary/70">[{f.sourceRef}]</sup>
-                            )}
+                            <CitationRef
+                              n={f.sourceRef}
+                              url={f.sourceRef !== undefined ? urlByRef.get(f.sourceRef) : undefined}
+                            />
                           </span>
                         </li>
                       );
@@ -223,16 +229,33 @@ export default function BriefView({ run, onReset }: Props) {
           >
             <div className="eyebrow mb-2">Sources</div>
             <ol className="space-y-1">
-              {brief.citations.map((c) => (
-                <li key={c.ref} className="text-[12.5px] text-ink-secondary">
-                  <span className="tabular font-semibold text-navy-primary/70">[{c.ref}]</span> {c.sourceName} — {c.label}
-                  {c.url && (
-                    <a href={c.url} target="_blank" rel="noreferrer" className="no-print ml-1 text-royal underline-offset-2 hover:underline">
-                      link
-                    </a>
-                  )}
-                </li>
-              ))}
+              {brief.citations.map((c) => {
+                // The whole entry — its number included — is the link, the same
+                // way the exported PDF lists its sources. No separate "link"
+                // word to aim at, and the number itself is what a reader clicks.
+                const entry = (
+                  <>
+                    <span className="tabular font-semibold text-navy-primary/70">[{c.ref}]</span> {c.sourceName} — {c.label}
+                  </>
+                );
+                return (
+                  <li key={c.ref} className="text-[12.5px] text-ink-secondary">
+                    {c.url ? (
+                      <a
+                        href={c.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={c.url}
+                        className="underline-offset-2 hover:text-royal hover:underline"
+                      >
+                        {entry}
+                      </a>
+                    ) : (
+                      entry
+                    )}
+                  </li>
+                );
+              })}
             </ol>
           </div>
         )}

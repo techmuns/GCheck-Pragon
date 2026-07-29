@@ -8,6 +8,7 @@ import type {
   Severity,
   Subject,
 } from "./types";
+import { compareByHierarchy, type RankablePerson } from "./hierarchy";
 
 // ── Deterministic brief assembler ──────────────────────────────────────────
 // Turns raw collector output into an honest, source-linked brief. No
@@ -27,6 +28,13 @@ function severityForKeywords(matched: string[]): Severity {
 const RANK: Record<Severity, number> = { red: 3, amber: 2, clear: 1, info: 0 };
 function worst(a: Severity, b: Severity): Severity {
   return RANK[a] >= RANK[b] ? a : b;
+}
+
+/** A collector's free-form `extra` field as a non-empty string, or nothing. */
+function strField(v: unknown): string | undefined {
+  if (v == null) return undefined;
+  const s = String(v).trim();
+  return s.length > 0 ? s : undefined;
 }
 
 interface Ctx {
@@ -297,11 +305,17 @@ function snapshotSection(id: string, title: string, ctx: Ctx): RenderedSection {
 }
 
 function managementSection(id: string, title: string, ctx: Ctx): RenderedSection {
-  const findings: Finding[] = [];
+  // Gather everyone first, rank second. The sources hand their people over in
+  // their own order — the registry's is filing order, which buries the Managing
+  // Director under the independent directors — so the list is re-ordered by
+  // office before it is rendered (lib/hierarchy).
+  const people: Array<RankablePerson & { text: string; url?: string; sourceName?: string }> = [];
 
-  // Promoters the user supplied (the meeting subjects).
+  // Promoters the user supplied (the meeting subjects). No source backs a typed
+  // name, so it carries no citation — but it is still a control role, and the
+  // ladder ranks it as one.
   for (const p of ctx.subject.promoters) {
-    findings.push({ severity: "info", text: p });
+    people.push({ text: p, role: "Promoter" });
   }
 
   // Directors from the free public registry record — the board of record,
@@ -313,7 +327,13 @@ function managementSection(id: string, title: string, ctx: Ctx): RenderedSection
   if (registry?.status === "done") {
     const rows = ctx.subject.type === "director" ? registry.hits.filter((h) => h.extra?.category === "identity") : registry.hits;
     for (const d of rows) {
-      findings.push({ severity: "info", text: d.title, sourceRef: ctx.cite(registry.sourceName, d.title, d.url) });
+      people.push({
+        text: d.title,
+        url: d.url,
+        sourceName: registry.sourceName,
+        role: strField(d.extra?.designation),
+        tenure: strField(d.extra?.tenure),
+      });
     }
   }
 
@@ -324,9 +344,25 @@ function managementSection(id: string, title: string, ctx: Ctx): RenderedSection
   const wikidata = ctx.byId["wikidata"];
   if (wikidata?.status === "done" && ctx.subject.type !== "director") {
     for (const h of wikidata.hits) {
-      findings.push({ severity: "info", text: h.title, sourceRef: ctx.cite(wikidata.sourceName, h.title, h.url) });
+      // Wikidata company hits read "Name — Role"; the ladder needs the role.
+      people.push({
+        text: h.title,
+        url: h.url,
+        sourceName: wikidata.sourceName,
+        role: strField(h.extra?.role) ?? h.title.split(" — ")[1],
+      });
     }
   }
+
+  // Cite only after ranking, so the citation numbers run down the section in
+  // reading order instead of in the order the collectors happened to return.
+  const findings: Finding[] = people
+    .sort(compareByHierarchy)
+    .map((p) => ({
+      severity: "info" as Severity,
+      text: p.text,
+      sourceRef: p.sourceName ? ctx.cite(p.sourceName, p.text, p.url) : undefined,
+    }));
 
   if (findings.length === 0) {
     // Honest, and points at the two director sources when neither returned data.
