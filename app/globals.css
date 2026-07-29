@@ -1,9 +1,11 @@
+/* ── Fonts ─────────────────────────────────────────────────────────────── */
+/* First, and self-hosted: a remote @import placed after the Tailwind layers is
+   ignored by the CSS parser, which is what left the app on a fallback face. */
+@import "./fonts.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-/* ── Fonts ─────────────────────────────────────────────────────────────── */
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Cormorant+Garamond:wght@400;500;600&display=swap");
 
 /* ── Base ──────────────────────────────────────────────────────────────── */
 :root {
@@ -379,6 +381,26 @@ body.pb-preview > .pb-root {
   box-sizing: border-box;
 }
 
+/* The brief is set in the dashboard's own type system, not a print-only stack.
+   Same three roles, same faces: Fraunces for the wordmark, subject title and
+   section heads (the dashboard's `font-display`), Cormorant Garamond for the
+   verdict line (`font-editorial`), Inter for body, tables and figures. The cvXX
+   tags on .pb-page are Inter features and map to wrong glyphs in the two serif
+   faces, so they are reset wherever those are used. */
+.pb-brand-mark,
+.pb-title,
+.pb-head-title,
+.pb-sources-head .pb-head-title {
+  font-family: "Fraunces", Georgia, ui-serif, serif;
+  font-feature-settings: normal;
+  font-optical-sizing: auto;
+}
+.pb-verdict {
+  font-family: "Cormorant Garamond", Georgia, ui-serif, serif;
+  font-feature-settings: normal;
+  font-optical-sizing: auto;
+}
+
 /* Tone helpers ------------------------------------------------------------- */
 .pb-fg-red { color: var(--red); }
 .pb-fg-amber { color: var(--amber); }
@@ -473,8 +495,10 @@ body.pb-preview > .pb-root {
   flex: 1 1 auto;
   min-width: 0;
   margin: 0;
-  font-size: 11.5pt;
-  line-height: 1.24;
+  /* Cormorant runs small for its point size — set a size up from the Inter
+     equivalent so the verdict keeps the visual weight it had. */
+  font-size: 13.5pt;
+  line-height: 1.2;
   font-weight: 500;
   color: var(--navy);
   display: -webkit-box;

@@ -36,6 +36,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     await page.goto(target, { waitUntil: "networkidle", timeout: 30_000 });
     // The brief is client-fetched then portalled to <body>; wait for it to land.
     await page.waitForSelector(".pb-page", { state: "attached", timeout: 20_000 });
+    // …and for the self-hosted brand faces, so the export can't snapshot the
+    // page mid-load and hand back a PDF set in a fallback font.
+    await page.evaluate(() => document.fonts.ready.then(() => undefined));
 
     const pdf = await page.pdf({
       printBackground: true,
