@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
 import type {
@@ -33,8 +33,26 @@ export default function BriefPrint({ brief }: { brief: PrintBrief }) {
   return createPortal(<PrintDoc brief={brief} />, host);
 }
 
+// Every inline [n] resolves against this map, so a citation number is a live
+// link to the source itself — no scrolling to the appendix to follow a claim.
+const SourceUrls = createContext<Record<number, string>>({});
+
+/** A citation number. Renders as a link wherever the source has a URL. */
+function Ref({ n }: { n?: number }) {
+  const urls = useContext(SourceUrls);
+  if (n === undefined) return null;
+  const url = urls[n];
+  if (!url) return <span className="pb-ref">[{n}]</span>;
+  return (
+    <a className="pb-ref pb-ref-link" href={url} target="_blank" rel="noreferrer" title={url}>
+      [{n}]
+    </a>
+  );
+}
+
 function PrintDoc({ brief }: { brief: PrintBrief }) {
   return (
+    <SourceUrls.Provider value={brief.sourceUrls}>
     <div className="pb-root">
       <div className="pb-page">
         <Header brief={brief} />
@@ -45,15 +63,18 @@ function PrintDoc({ brief }: { brief: PrintBrief }) {
         <Snapshot fields={brief.snapshot} />
 
         <div className="pb-body">
+          {/* Left: the analysis. Right: the record it rests on. The itemised
+              concerns carry their own facts now, so the timeline moves across
+              to keep the two columns near the same depth. */}
           <div className="pb-col pb-col-left">
             <ExecutiveVerdict text={brief.executive} />
             <KeyConcerns concerns={brief.concerns} extra={brief.extraConcerns} />
-            <RecentDevelopments items={brief.developments} extra={brief.extraDevelopments} />
           </div>
 
           <div className="pb-col pb-col-right">
             <KeyPeople people={brief.people} extra={brief.extraPeople} isDirector={brief.isDirector} />
             <Cases cases={brief.cases} extra={brief.extraCases} />
+            <RecentDevelopments items={brief.developments} extra={brief.extraDevelopments} />
             <SourceQuality rows={brief.sourceQuality} gaps={brief.researchGaps} />
           </div>
         </div>
@@ -61,6 +82,7 @@ function PrintDoc({ brief }: { brief: PrintBrief }) {
         <Footer brief={brief} />
       </div>
     </div>
+    </SourceUrls.Provider>
   );
 }
 
@@ -186,17 +208,34 @@ function KeyConcerns({ concerns, extra }: { concerns: Concern[]; extra: number }
   );
 }
 
+// The card leads with the matter itself, then the hard facts (who it names,
+// which authority, how much, as of when), then the source's own words, then the
+// consequence — so a reader knows exactly what the issue is without opening the
+// citation. The category is demoted to a chip; it is the least useful line.
 function ConcernCard({ c }: { c: Concern }) {
   return (
     <li className={`pb-concern pb-edge-${c.tone}`}>
       <div className="pb-concern-top">
         <span className="pb-concern-title">{c.title}</span>
         <span className={`pb-claim ${claimClass(c.claim)}`}>{c.claim}</span>
-        {c.sourceRef !== undefined && <span className="pb-ref">[{c.sourceRef}]</span>}
+        <Ref n={c.sourceRef} />
       </div>
-      <div className="pb-concern-body">{c.explanation}</div>
+      <div className="pb-concern-facts">
+        <span className={`pb-cat pb-cat-${c.tone}`}>{c.category}</span>
+        {c.facts.map((f, i) => (
+          <span className="pb-fact" key={i}>
+            <span className="pb-fact-label">{f.label}</span> {f.value}
+          </span>
+        ))}
+      </div>
+      {c.evidence && (
+        <div className="pb-concern-evidence">
+          &ldquo;{c.evidence}&rdquo;
+          {c.evidenceSource && <span className="pb-evidence-src"> — {c.evidenceSource}</span>}
+        </div>
+      )}
       <div className="pb-concern-why">
-        <span className="pb-why-label">Why it matters</span> {c.whyItMatters}
+        <span className="pb-why-label">So what</span> {c.whyItMatters}
       </div>
     </li>
   );
@@ -211,7 +250,10 @@ function RecentDevelopments({ items, extra }: { items: Development[]; extra: num
           <li className="pb-dev" key={i}>
             <span className="pb-dev-date">{d.date ?? "—"}</span>
             <span className="pb-dev-head">{d.headline}</span>
-            <span className={`pb-dev-status pb-fg-${d.tone}`}>{d.status}</span>
+            <span className={`pb-dev-status pb-fg-${d.tone}`}>
+              {d.status}
+              <Ref n={d.sourceRef} />
+            </span>
           </li>
         ))}
       </ul>
@@ -285,7 +327,7 @@ function Cases({ cases, extra }: { cases: CaseRow[]; extra: number }) {
               </td>
               <td className="pb-clip">
                 <span className={`pb-status pb-fg-${c.tone}`}>{c.status}</span>
-                {c.sourceRef !== undefined && <span className="pb-ref">[{c.sourceRef}]</span>}
+                <Ref n={c.sourceRef} />
               </td>
             </tr>
           ))}

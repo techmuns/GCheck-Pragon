@@ -6,7 +6,7 @@ import type { Subject } from "./types";
 // partner re-run a recent subject in one click. Last few, most-recent first.
 
 const KEY = "paragon.recentSearches";
-const MAX = 3;
+const MAX = 5;
 
 export interface RecentSearch extends Subject {
   /** ISO timestamp of when the search was last run. */

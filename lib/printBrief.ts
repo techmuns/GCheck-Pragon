@@ -35,11 +35,29 @@ export interface PrintMetric {
   tone: Tone;
 }
 
+/** One hard fact pulled out of the underlying record — who / which authority /
+ *  how much / when. Only source-backed values are emitted. */
+export interface ConcernFact {
+  label: string;
+  value: string;
+}
+
 export interface Concern {
   severity: Severity;
   tone: Tone;
+  /** Short bucket label ("Regulatory action", "Loan default") — a chip, not the
+   *  headline. The headline is the specific matter itself. */
+  category: string;
+  /** What the issue actually is, in one specific line. */
   title: string;
-  explanation: string;
+  /** Who it names, which authority, how much, when — the specifics a reader
+   *  needs to act on the concern without opening the source. */
+  facts: ConcernFact[];
+  /** The source's own words backing the title, so the claim is checkable. */
+  evidence?: string;
+  evidenceSource?: string;
+  /** The consequence, written from this matter's stage and quantum — never a
+   *  per-category platitude. */
   whyItMatters: string;
   claim: ClaimType;
   sourceRef?: number;
@@ -109,6 +127,10 @@ export interface PrintBrief {
   researchGaps: string[];
   sources: SourceRef[];
   extraSources: number;
+  /** ref → URL for EVERY citation, not just the ones the footer lists. Lets an
+   *  inline [n] be a live link straight to the source, so a reader never has to
+   *  scroll to the appendix to follow a claim. */
+  sourceUrls: Record<number, string>;
   disclaimer: string;
 }
 
@@ -137,7 +159,7 @@ export function buildPrintBrief(run: Run, generatedAt: string): PrintBrief | nul
   const isDirector = run.subject.type === "director";
   const cin = findCin(collected);
 
-  const concernsAll = buildConcerns(brief.sections, brief.citations, hitByUrl);
+  const concernsAll = buildConcerns(brief.sections, brief.citations, hitByUrl, run.subject);
   const concerns = concernsAll.slice(0, CAPS.concerns);
   const redFlags = concernsAll.filter((c) => c.severity === "red").length;
   const toReview = concernsAll.filter((c) => c.severity === "amber").length;
@@ -173,6 +195,9 @@ export function buildPrintBrief(run: Run, generatedAt: string): PrintBrief | nul
     researchGaps: buildResearchGaps(run, cin, peopleAll.length),
     sources: sourcesAll.slice(0, CAPS.sources),
     extraSources: Math.max(0, sourcesAll.length - CAPS.sources),
+    sourceUrls: Object.fromEntries(
+      brief.citations.filter((c) => c.url).map((c) => [c.ref, c.url as string]),
+    ),
     disclaimer: DISCLAIMER,
   };
 }
@@ -246,7 +271,10 @@ function buildExecutive(
   if (verdict === "red" || verdict === "amber") {
     const top = concerns[0];
     if (top) {
-      parts.push(`The sharpest signal is ${lowerFirst(top.title)} (${top.claim.toLowerCase()}).`);
+      // Lead with the matter itself, not its bucket — the reader should learn
+      // what the issue is from the first clause. Left capitalised: the titles
+      // start with names and acronyms that must not be de-capitalised.
+      parts.push(`Sharpest signal — ${stripPeriod(top.title)} (${top.claim.toLowerCase()}).`);
     }
     const n = concerns.length;
     if (n > 1) parts.push(`${n} itemised concern${n === 1 ? "" : "s"} rank above the review threshold.`);
@@ -278,10 +306,16 @@ function buildMetrics(
 
 // ── Key concerns ─────────────────────────────────────────────────────────────
 
+// A concern has to answer, on its own: what happened, to whom, under which
+// authority, how much, when, and what it means. A bucket label ("Regulatory /
+// investigative matter") answers none of those, so the bucket is demoted to a
+// chip and everything else is read out of the record itself.
+
 function buildConcerns(
   sections: RenderedSection[],
   citations: Citation[],
   hitByUrl: Map<string, HitRef>,
+  subject: Run["subject"],
 ): Concern[] {
   const summary = sections.find((s) => s.id === "red-flags");
   if (!summary) return [];
@@ -289,22 +323,35 @@ function buildConcerns(
   const citationByRef = new Map(citations.map((c) => [c.ref, c]));
 
   const concerns: Concern[] = [];
+  const seen = new Set<string>();
+
   for (const f of summary.findings) {
     if (f.severity !== "red" && f.severity !== "amber") continue;
 
     const citation = f.sourceRef !== undefined ? citationByRef.get(f.sourceRef) : undefined;
     const hitRef = citation?.url ? hitByUrl.get(citation.url) : undefined;
+    const hit = hitRef?.hit;
     const sourceId = hitRef?.sourceId ?? guessSourceId(citation?.sourceName, f.text);
 
-    const meta = classifyConcern(f.severity, sourceId, f.text, hitRef?.hit);
-    const explanation = cleanExplanation(hitRef?.hit?.title ?? f.text, hitRef?.hit?.snippet);
+    const meta = classifyConcern(f.severity, sourceId, f.text, hit);
+    const { title, evidence, countFact } = statementAndEvidence(f.text, hit);
+    const facts = extractFacts(f.text, hit, subject, countFact);
+
+    // Two findings can describe the same underlying matter (a news hit and the
+    // court record of it). Keep the first — it ranks higher.
+    const key = dedupeKey(title);
+    if (seen.has(key)) continue;
+    seen.add(key);
 
     concerns.push({
       severity: f.severity,
       tone: SEVERITY_TONE[f.severity],
-      title: meta.title,
-      explanation,
-      whyItMatters: meta.why,
+      category: meta.category,
+      title,
+      facts,
+      evidence,
+      evidenceSource: evidence ? publisherOf(hitRef?.sourceName ?? citation?.sourceName ?? "") : undefined,
+      whyItMatters: composeWhy(meta.stage, facts),
       claim: meta.claim,
       sourceRef: f.sourceRef,
     });
@@ -314,9 +361,13 @@ function buildConcerns(
   return concerns.sort((a, b) => RANK[b.severity] - RANK[a.severity]);
 }
 
+/** How far the matter has travelled — an open probe, a passed order and a
+ *  confirmed default carry very different consequences. */
+type Stage = "investigation" | "order" | "default" | "case" | "allegation" | "flag";
+
 interface ConcernMeta {
-  title: string;
-  why: string;
+  category: string;
+  stage: Stage;
   claim: ClaimType;
 }
 
@@ -336,53 +387,232 @@ function classifyConcern(
   const regulatory = /\b(sfio|sebi|enforcement directorate|\bed\b|roc|registrar of companies|serious fraud|investigation|probe|raid|show cause|penalt|insolvency|nclt|ibc)\b/.test(t);
   const court = sourceId === "indiankanoon" || /\blitigation\b|court case|indian kanoon|\bcase(s)? (on|surfaced)|tribunal|high court|drt\b/.test(t);
 
+  // An order already passed (a ban, an attachment, a penalty) is a fact; a probe
+  // still running is not. Read that off the language of the record.
+  const ordered = /\b(bars?|barred|banned|attach(ed|es|ment)|penalt(y|ies) (of|imposed)|imposed|convicted|disqualif|order(ed)? (against|passed)|restrain)\b/.test(t);
+  const probing = /\b(prob(e|es|ing)|investigat|enquiry|inquiry|summon|questioned|raid|search(es)?|show cause|scrutin)\b/.test(t);
+
   if (defaulter) {
-    return {
-      title: "Suit-filed / defaulter record",
-      why: "A confirmed lending default is a serious credit-and-governance signal.",
-      claim: "Reported",
-    };
+    return { category: "Loan default", stage: "default", claim: "Reported" };
   }
   if (criminal) {
     return {
-      title: "Alleged criminal / fraud matter",
-      why: "Alleged criminal or fraud conduct must be verified before any commitment.",
-      claim: "Alleged",
+      category: "Criminal / fraud matter",
+      stage: ordered ? "order" : probing ? "investigation" : "allegation",
+      claim: ordered ? "Reported" : "Alleged",
     };
   }
   if (regulatory) {
     return {
-      title: "Regulatory / investigative matter",
-      why: "Active regulatory scrutiny is a material governance risk to clarify.",
-      claim: severity === "red" ? "Under review" : "Reported",
+      category: "Regulatory action",
+      stage: ordered ? "order" : "investigation",
+      claim: ordered ? "Reported" : severity === "red" ? "Under review" : "Reported",
     };
   }
   if (court) {
-    return {
-      title: "Litigation on record",
-      why: "Open legal exposure can carry financial and reputational liability.",
-      claim: "Under review",
-    };
+    return { category: "Litigation on record", stage: ordered ? "order" : "case", claim: "Under review" };
   }
   if (sourceId === "filings") {
-    return {
-      title: "Disclosure flag in exchange filing",
-      why: "Regulatory disclosures are where adverse corporate events first surface.",
-      claim: "Verified",
-    };
+    return { category: "Exchange disclosure", stage: "flag", claim: "Verified" };
   }
   if (sourceId === "google" || /news|media|report(ed)?|article/.test(t)) {
     return {
-      title: "Adverse media coverage",
-      why: "Warrants review to confirm the matter's materiality and current status.",
+      category: "Adverse media",
+      stage: probing ? "investigation" : "allegation",
       claim: severity === "red" ? "Alleged" : "Reported",
     };
   }
+  return { category: "Governance flag", stage: "flag", claim: severity === "red" ? "Alleged" : "Reported" };
+}
+
+// ── Concern specifics ────────────────────────────────────────────────────────
+
+/** The analyst statement is the issue; the source headline is the proof. Use
+ *  whichever is available for each role, and never print the same line twice. */
+function statementAndEvidence(
+  text: string,
+  hit?: RawHit,
+): { title: string; evidence?: string; countFact?: ConcernFact } {
+  const statement = cleanStatement(text);
+  // Court titles carry a trailing "on 8 August, 2022" — the date is a fact, not
+  // part of the matter, and it survives in the facts row.
+  const headline = hit?.title ? cleanStatement(splitCaseTitle(hit.title).name) : "";
+  const snippet = hit?.snippet ? cleanStatement(hit.snippet) : "";
+
+  // The deterministic summariser writes `Entity: "<headline>" — matched x, y`,
+  // which is the headline wearing a hat. Prefer the headline itself then.
+  const restatesHeadline = headline.length > 0 && dedupeKey(statement).includes(dedupeKey(headline));
+
+  // "2 litigation record(s) surfaced on Indian Kanoon" tells the reader nothing
+  // about the matter. When the record behind the count is available, lead with
+  // it and keep the count as a fact.
+  const count = statement.match(/^(\d+)\s+([a-z ]+?)\s+record\(?s?\)?\s+(?:surfaced|found)/i);
+  if (count && headline) {
+    return {
+      title: shorten(headline, 92),
+      evidence: snippet ? shorten(snippet, 92) : undefined,
+      countFact: { label: "Records", value: `${count[1]} on file` },
+    };
+  }
+
+  if (!statement || restatesHeadline) {
+    return { title: shorten(headline || statement, 92), evidence: snippet ? shorten(snippet, 92) : undefined };
+  }
+  const evidence = headline || snippet;
+  const duplicate = evidence && dedupeKey(evidence) === dedupeKey(statement);
   return {
-    title: "Governance flag",
-    why: "Flagged for review before the meeting.",
-    claim: severity === "red" ? "Alleged" : "Reported",
+    title: shorten(statement, 92),
+    evidence: evidence && !duplicate ? shorten(evidence, 92) : undefined,
   };
+}
+
+/** Named authorities, longest/most specific first. The label is what a partner
+ *  would recognise, not the raw match. */
+const AUTHORITIES: Array<[RegExp, string]> = [
+  [/serious fraud investigation office|\bsfio\b/i, "SFIO"],
+  [/central bureau of investigation|\bcbi\b/i, "CBI"],
+  [/enforcement directorate|\bed\b/i, "Enforcement Directorate"],
+  [/securities appellate tribunal|\bsat\b/i, "Securities Appellate Tribunal"],
+  [/securities and exchange board|\bsebi\b/i, "SEBI"],
+  [/reserve bank|\brbi\b/i, "RBI"],
+  [/\bnclat\b/i, "NCLAT"],
+  [/\bnclt\b/i, "NCLT"],
+  [/debts? recovery tribunal|\bdrt\b/i, "Debts Recovery Tribunal"],
+  [/income tax appellate tribunal|\bitat\b/i, "Income Tax Appellate Tribunal"],
+  [/tax tribunal/i, "Tax tribunal"],
+  [/income[- ]tax|\bcbdt\b/i, "Income Tax department"],
+  [/\bgst\b/i, "GST authority"],
+  [/economic offences wing|\beow\b/i, "EOW"],
+  [/competition commission|\bcci\b/i, "CCI"],
+  [/registrar of companies|\broc\b|\bmca\b/i, "Registrar of Companies"],
+  [/supreme court/i, "Supreme Court"],
+  [/([A-Za-z]+ )?high court/i, "High Court"],
+  [/\bfir\b|\bpolice\b/i, "Police / FIR"],
+  // Last resorts — better than "the forum" when the record only says this much.
+  [/\btribunal\b/i, "Tribunal"],
+  [/\bcourt\b/i, "Court"],
+];
+
+function matchAuthority(text: string): string | undefined {
+  for (const [re, label] of AUTHORITIES) {
+    const m = text.match(re);
+    if (!m) continue;
+    // "Delhi High Court" reads better than a bare "High Court".
+    if (label === "High Court" && m[1]) return shorten(`${m[1].trim()} High Court`, 34);
+    return label;
+  }
+  return undefined;
+}
+
+/** Whoever the finding itself names wins: a statement about an ED probe must
+ *  not be attributed to the court whose record happens to cite it. Only when
+ *  the statement names nobody do we fall back to the record's own forum. */
+function extractAuthority(statement: string, combined: string, hit?: RawHit): string | undefined {
+  const named = matchAuthority(statement);
+  if (named) return named;
+  const court = str(hit?.extra?.court);
+  if (court) return shorten(court, 34);
+  return matchAuthority(combined);
+}
+
+function extractAmount(t: string): string | undefined {
+  const m = t.match(/(?:rs\.?|inr|₹)\s?([\d,]+(?:\.\d+)?)\s*(crores?|cr\b|lakhs?|lacs?|billion|bn\b|million|mn\b)?/i);
+  if (!m) return undefined;
+  const unit = (m[2] ?? "").toLowerCase();
+  const label = unit.startsWith("cr")
+    ? " crore"
+    : unit.startsWith("la")
+      ? " lakh"
+      : unit.startsWith("b")
+        ? " billion"
+        : unit.startsWith("m")
+          ? " million"
+          : "";
+  return `Rs ${m[1]}${label}`;
+}
+
+/** Who the matter names — the subject itself, or a promoter/associate. The
+ *  distinction changes what the reader does about it. */
+function extractWho(statement: string, hit: RawHit | undefined, subject: Run["subject"]): string | undefined {
+  const isDirector = subject.type === "director";
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+  const combined = norm(`${statement} ${hit?.title ?? ""} ${hit?.snippet ?? ""}`);
+  const shortSubject = norm(subject.company).split(" ").slice(0, 2).join(" ");
+  const entity = hit?.entity;
+
+  // A named promoter beats everything — it says exactly whose matter this is.
+  const promoter = subject.promoters.find(
+    (p) => (entity && norm(entity) === norm(p)) || combined.includes(norm(p)),
+  );
+  if (promoter) return `${promoter}, promoter`;
+
+  // The record may name a promoter without naming which one ("CBI names the
+  // promoter…"). Say that, rather than misattributing it to the company.
+  if (/\b(promoter|director|chairman|managing director|founder|md)\b/i.test(statement) && !isDirector) {
+    return "A promoter / director";
+  }
+
+  const namesSubject =
+    (entity && norm(entity).includes(shortSubject)) ||
+    (shortSubject.length > 3 && combined.includes(shortSubject));
+  // The subject's name is already the page title — repeating it in every card
+  // costs a line and tells the reader nothing. What matters is whether the
+  // matter attaches to the subject itself or to someone around it.
+  if (namesSubject) return isDirector ? "The individual" : "The company itself";
+
+  return entity ? shorten(entity, 30) : undefined;
+}
+
+function extractFacts(
+  text: string,
+  hit: RawHit | undefined,
+  subject: Run["subject"],
+  countFact?: ConcernFact,
+): ConcernFact[] {
+  const t = `${text} ${hit?.title ?? ""} ${hit?.snippet ?? ""}`;
+  const facts: ConcernFact[] = [];
+
+  const who = extractWho(text, hit, subject);
+  if (who) facts.push({ label: "Names", value: who });
+
+  const authority = extractAuthority(text, t, hit);
+  if (authority) facts.push({ label: "Before", value: authority });
+
+  const amount = extractAmount(t);
+  if (amount) facts.push({ label: "Amount", value: amount });
+
+  if (countFact) facts.push(countFact);
+
+  const when = normaliseDate(hit?.date) ?? dateInText(t);
+  if (when) facts.push({ label: "As of", value: when });
+
+  // Four short facts is the row's budget at print size; more would wrap and
+  // cost the card a line.
+  return facts.slice(0, 4);
+}
+
+/** The consequence, written from THIS matter's stage and quantum. */
+function composeWhy(stage: Stage, facts: ConcernFact[]): string {
+  const value = (label: string) => facts.find((f) => f.label === label)?.value;
+  const authority = value("Before");
+  const amount = value("Amount");
+  const names = value("Names");
+  const onWhom = names ? names.replace(/,\s*promoter$/, "").replace(/^The /, "the ") : "the subject";
+
+  switch (stage) {
+    case "default":
+      return `A lender has already recorded${amount ? ` ${amount} of` : ""} unpaid dues against ${onWhom} — expect it to bind fresh credit, covenants and promoter guarantees. Ask for the settlement position and the lender's current stand.`;
+    case "order":
+      return `${authority ?? "The authority"} has already acted, so this is decided, not alleged${amount ? ` (${amount})` : ""} — confirm what was imposed on ${onWhom}, whether it has been complied with, and whether an appeal is pending.`;
+    case "investigation":
+      return `${authority ?? "The authority"} has not concluded, so nothing is proven and the exposure is unquantified — get the current status of the ${amount ? `${amount} ` : ""}matter in writing before committing.`;
+    case "case":
+      return `Live before ${authority ?? "the forum"}, so exposure on ${onWhom} runs until judgment${amount ? ` and ${amount} is claimed` : ""} — ask for the claim amount, the defence, and the next hearing date.`;
+    case "allegation":
+      return `Reported but not adjudicated — treat it as unverified against ${onWhom} and check the primary record${authority ? ` with ${authority}` : ""} before relying on it.`;
+    default:
+      return `Flagged by the source as adverse to ${onWhom} — confirm the underlying facts and the current status before the meeting.`;
+  }
 }
 
 // ── Recent developments ──────────────────────────────────────────────────────
@@ -403,7 +633,9 @@ function buildDevelopments(bySource: SourceIndex, citations: Citation[]): Develo
       out.push({
         date: normaliseDate(h.date),
         headline: shorten(stripQuotes(h.title), 90),
-        status: flagged ? `Flagged: ${h.matchedKeywords!.slice(0, 2).join(", ")}` : "Routine filing",
+        // One keyword: the status column shares a narrow portrait column with
+        // the headline, and the headline is what carries the news.
+        status: flagged ? `Flagged: ${h.matchedKeywords![0]}` : "Routine filing",
         tone: flagged ? "amber" : "neutral",
         sourceRef: h.url ? refByUrl.get(h.url) : undefined,
       });
@@ -422,7 +654,7 @@ function buildDevelopments(bySource: SourceIndex, citations: Citation[]): Develo
       out.push({
         date: normaliseDate(h.date),
         headline: shorten(stripQuotes(h.title), 90),
-        status: kws.length > 0 ? `Adverse: ${kws.slice(0, 2).join(", ")}` : "Coverage",
+        status: kws.length > 0 ? `Adverse: ${kws[0]}` : "Coverage",
         tone: hard ? "red" : kws.length > 0 ? "amber" : "neutral",
         sourceRef: h.url ? refByUrl.get(h.url) : undefined,
       });
@@ -722,14 +954,38 @@ function guessSourceId(sourceName: string | undefined, text: string): string | u
   return undefined;
 }
 
-function cleanExplanation(text: string, snippet?: string): string {
+/** Normalise a sentence from a finding, headline or snippet for display. */
+function cleanStatement(text: string): string {
   let out = stripQuotes(text).replace(/\s+/g, " ").trim();
   // Drop a leading "Entity: " prefix the rule-based summary adds.
   out = out.replace(/^[^:]{2,40}:\s+/, (m) => (m.length < 30 ? m : ""));
-  if (out.length < 45 && snippet) {
-    out = `${out} — ${stripQuotes(snippet)}`.trim();
-  }
-  return shorten(out, 150);
+  // Drop its keyword-matching tail — an internal detail, not a finding.
+  out = out.replace(/\s*—\s*matched\s+[^.]*\.?$/i, "");
+  return stripQuotes(out);
+}
+
+/** Comparison key for "is this the same matter?" — ignores punctuation, case
+ *  and the filler words two phrasings of one event differ by. */
+function dedupeKey(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\b(the|a|an|of|in|on|at|to|for|and|is|are|has|have|been|over|its)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** A date written into the prose ("on 8 August, 2022", "2019"), used when the
+ *  source carried no date field of its own. */
+function dateInText(t: string): string | undefined {
+  const full = t.match(/\b(\d{1,2}\s+[A-Za-z]{3,9},?\s+(?:19|20)\d{2})\b/);
+  if (full) return shortDate(full[1]);
+  const year = t.match(/\b(19|20)\d{2}\b/);
+  return year ? year[0] : undefined;
+}
+
+function stripPeriod(s: string): string {
+  return s.replace(/[.\s]+$/, "");
 }
 
 function nameFromTitle(title: string): string {
@@ -744,10 +1000,6 @@ function shorten(s: string, max: number): string {
   const t = s.trim();
   if (t.length <= max) return t;
   return `${t.slice(0, max - 1).trimEnd()}…`;
-}
-
-function lowerFirst(s: string): string {
-  return s ? s[0].toLowerCase() + s.slice(1) : s;
 }
 
 function normaliseDate(raw?: string): string | undefined {
