@@ -22,8 +22,10 @@ import type { Run, Subject } from "./types";
 
 const POLL_MS = 500;
 
-/** Past this a run will never land — a recycled instance, most likely. */
-const RUN_TIMEOUT_MS = 10 * 60 * 1000;
+/** Past this a run will never land — a recycled instance, most likely. Set
+ *  generously: a company run now screens its whole board director by director
+ *  after the brief lands, which is legitimately minutes of extra work. */
+const RUN_TIMEOUT_MS = 20 * 60 * 1000;
 
 /** Consecutive failed polls tolerated before a run is given up on. Counted per
  *  run, so one dead run never takes its siblings down with it. */

@@ -206,6 +206,45 @@ export interface CollectorResult {
   queries?: string[];
 }
 
+// ── Board diligence (company mode) ───────────────────────────────────────────
+// Running a company is not the same as running its people. The board list on its
+// own says who they are; it says nothing about whether any of them carries
+// litigation, a struck-off company, or adverse press. So for a company subject
+// each director is put through their own focused pre-screen — keyed to their DIN
+// so a namesake's record is never charged to them — and the results stream back
+// one person at a time.
+
+/** One cited line under a director's diligence. */
+export interface DiligenceFinding {
+  severity: Severity;
+  text: string;
+  /** The source behind it, when there is one — rendered as a direct link. */
+  url?: string;
+}
+
+/** The diligence outcome for a single person on (or named alongside) the board. */
+export interface PersonDiligence {
+  /** Stable key — the DIN where resolved, else a slug of the name. */
+  id: string;
+  name: string;
+  din?: string;
+  /** Board designation, e.g. "Managing Director". */
+  role?: string;
+  tenure?: string;
+  /** Where this person's check is in its own lifecycle. */
+  status: "pending" | "running" | "done" | "error";
+  /** The worst severity across their confirmed findings. */
+  verdict?: Severity;
+  /** One-line reading of the person. */
+  headline?: string;
+  /** Red/amber items found for them, each cited. */
+  concerns: DiligenceFinding[];
+  /** Other companies they are linked to on the register. */
+  otherDirectorships: DiligenceFinding[];
+  /** Honest note — e.g. identity not resolved, or a source was unavailable. */
+  note?: string;
+}
+
 /** A full research run — from input through to the finished brief. */
 export interface Run {
   id: string;
@@ -227,5 +266,8 @@ export interface Run {
     /** Which engine wrote the narrative. */
     synthesizedBy?: "ai" | "rules";
   };
+  /** Per-director diligence (company mode). Streams in one person at a time
+   *  after the company brief lands, so the board fills with verdicts live. */
+  diligence?: PersonDiligence[];
   error?: string;
 }

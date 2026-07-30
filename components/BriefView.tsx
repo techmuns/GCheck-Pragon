@@ -9,6 +9,7 @@ import BriefPrint from "./BriefPrint";
 import ConcernCards from "./ConcernCards";
 import NewsTable from "./NewsTable";
 import ProfileCard from "./ProfileCard";
+import DiligenceSection from "./DiligenceSection";
 import CitationRef, { sourceUrls } from "./CitationRef";
 import { buildPrintBrief, formatGenerated, listConcerns } from "@/lib/printBrief";
 
@@ -264,6 +265,13 @@ export default function BriefView({ run, onReset }: Props) {
             {sourcesLocked > 0 && <Figure value={sourcesLocked} label="need upgrade" />}
           </div>
         </div>
+
+        {/* Board Diligence — the deep per-director pre-screen. For a company this
+            is the main event, so it sits high, right under the verdict; it fills
+            in live as each director is checked. */}
+        {run.subject.type === "company" && run.diligence && run.diligence.length > 0 && (
+          <DiligenceSection people={run.diligence} running={run.status === "running"} />
+        )}
 
         {/* Sections — full width summary, two columns below on large screens */}
         <div className="grid gap-3 lg:grid-cols-2">

@@ -3,6 +3,7 @@ import { collectors, type CollectorContext } from "./collectors";
 import { resolveIdentity } from "./collectors/directors";
 import { anchorNames, resolveDirector } from "./collectors/indiafilings";
 import { synthesizeBrief } from "./synthesize";
+import { diligenceEnabled, runBoardDiligence } from "./diligence";
 import type { CollectorResult, RunEvent, SourceProgress, Subject } from "./types";
 
 // ── Research workflow (Phase 2) ────────────────────────────────────────────
@@ -156,7 +157,30 @@ async function execute(runId: string): Promise<void> {
   try {
     appendEvent(runId, { level: "step", text: "Writing the brief" });
     const brief = await synthesizeBrief(subject, results, config);
-    updateRun(runId, { status: "complete", brief });
+
+    // Company mode: the company brief is only half the job. Publish it now — so
+    // the reader has it in seconds, not minutes — then screen the board one
+    // director at a time, streaming each verdict onto the run as it lands. The
+    // whole thing is wrapped: a diligence failure never unships the brief that
+    // already went out.
+    if (diligenceEnabled(subject)) {
+      updateRun(runId, { brief });
+      appendEvent(runId, { level: "step", text: "Screening the board — running deep diligence on each director" });
+      try {
+        await runBoardDiligence(subject, results, config, {
+          emit: (text) => appendEvent(runId, { level: "step", text }),
+          onUpdate: (people) => updateRun(runId, { diligence: people }),
+        });
+      } catch (err) {
+        appendEvent(runId, {
+          level: "warn",
+          text: `Board diligence stopped early — ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+      updateRun(runId, { status: "complete", brief });
+    } else {
+      updateRun(runId, { status: "complete", brief });
+    }
   } catch (err) {
     updateRun(runId, { status: "error", error: err instanceof Error ? err.message : "Failed to assemble the brief." });
   }

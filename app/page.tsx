@@ -36,8 +36,12 @@ export default function Home() {
 
   const showForm = active === null;
   const showPrep = active !== null && active.phase !== "error" && !ready;
-  const showProgress = active !== null && ready && active.phase === "running";
-  const showBrief = active !== null && ready && active.phase === "done" && active.run?.brief != null;
+  // The brief appears the moment it lands, even while a company's board is still
+  // being screened — the diligence streams into it live, so there is no reason to
+  // hold the whole page on a spinner until the last director is done.
+  const hasBrief = active?.run?.brief != null;
+  const showBrief = active !== null && ready && hasBrief && active.phase !== "error";
+  const showProgress = active !== null && ready && active.phase === "running" && !hasBrief;
   const showError = active !== null && active.phase === "error";
 
   // When the form stands alone (no runs yet), the content column centres itself;
