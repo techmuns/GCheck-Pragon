@@ -1,6 +1,7 @@
 import type { CollectorResult, RawHit, Subject } from "../types";
 import { anchorsOf, entitiesOf, entityMentioned, gradesIdentity, subjectConfidence } from "../queries";
 import { env } from "./env";
+import { searchWeb, withRetry } from "./google";
 import { fetchWithTimeout, stripHtml, type Collector } from "./types";
 import { cached } from "../searchCache";
 
@@ -8,15 +9,43 @@ import { cached } from "../searchCache";
 // Litigation search for the company and each promoter. Per the checklist:
 // sort by relevance, capture the top 5 cases as heading + link.
 //
-// Backends, in priority order:
-//   1. Munshot web-search scoped to site:indiankanoon.org (works from servers,
-//      uses tooling we already have) — DEFAULT when MUNSHOT_TOKEN is set
-//   2. Official Indian Kanoon API (INDIANKANOON_API_TOKEN)
-//   3. Public indiankanoon.org search (blocked from most servers)
+// Every backend is a RUNG, not a mode. This source used to pick one backend up
+// front — Munshot if its token was set — and stand or fall with it: a transient
+// "Munshot search 502" then took the whole Court Cases box down with "Couldn't
+// reach", even though a SerpAPI/keyless web search or the public site could have
+// answered it. It now walks the backends in order until one answers, so a single
+// gateway blip degrades instead of failing:
+//   1. Official Indian Kanoon API      (INDIANKANOON_API_TOKEN) — most authoritative
+//   2. Resilient web search, site-scoped (Munshot → SerpAPI → Google → keyless)
+//   3. Public indiankanoon.org search   (keyless; blocked from most servers)
 
 const MAX_CASES = 5;
 
-export const indianKanoonCollector: Collector = async ({ subject }) => {
+interface CaseHit {
+  title: string;
+  url?: string;
+  court?: string;
+}
+
+interface Strategy {
+  id: string;
+  label: string;
+  run: (term: string) => Promise<CaseHit[]>;
+}
+
+/** The ordered backends for this run's configuration. */
+function strategies(): Strategy[] {
+  const out: Strategy[] = [];
+  if (env.indianKanoonToken) out.push({ id: "api", label: "Indian Kanoon API", run: searchApi });
+  // The resilient web sweep already chains Munshot → SerpAPI → Google → keyless,
+  // cached and retried — routing through it is exactly what makes a 502 on any
+  // one backend degrade to the next instead of breaking the source.
+  out.push({ id: "web", label: "web search (site:indiankanoon.org)", run: searchViaWeb });
+  out.push({ id: "public", label: "public indiankanoon.org search", run: searchPublic });
+  return out;
+}
+
+export const indianKanoonCollector: Collector = async ({ subject, emit }) => {
   const base: Omit<CollectorResult, "status" | "hits"> = {
     sourceId: "indiankanoon",
     sourceName: "Indian Kanoon",
@@ -28,10 +57,12 @@ export const indianKanoonCollector: Collector = async ({ subject }) => {
     return { ...base, status: "skipped", note: "No entities to search.", hits: [] };
   }
 
-  const mode: "munshot" | "api" | "public" = env.munshotToken ? "munshot" : env.indianKanoonToken ? "api" : "public";
+  const chain = strategies();
   const hits: RawHit[] = [];
   const ranQueries: string[] = [];
-  let anyError: string | undefined;
+  const errors: string[] = [];
+  const servedBy = new Set<string>();
+  let anyAnswered = false;
   let offTarget = 0;
 
   // A director subject resolved to an identity gets its litigation graded, so a
@@ -42,46 +73,61 @@ export const indianKanoonCollector: Collector = async ({ subject }) => {
   for (const e of entities) {
     for (const term of searchTerms(e.name, subject)) {
       ranQueries.push(term);
-      try {
-        // Cached like the web sweep: the munshot mode spends the same metered
-        // search endpoint, and a case list is the slowest-moving thing we fetch —
-        // a judgment handed down mid-window is not a thing that happens.
-        const cases = await cached(`kanoon:${mode}:${term}`, () =>
-          mode === "munshot" ? searchViaMunshot(term) : mode === "api" ? searchApi(term) : searchPublic(term),
-        );
-        let kept = 0;
-        for (const c of cases) {
-          if (kept >= MAX_CASES) break;
-          const confidence = graded ? subjectConfidence(c.title, subject) : undefined;
-          // Only keep cases whose title actually names this party — a relevance
-          // search returns neighbouring parties (sibling brands) too. A case
-          // carrying the subject's DIN or company identifies them without it.
-          if (!entityMentioned(c.title, e.name) && confidence !== "confirmed") {
-            offTarget += 1;
-            continue;
-          }
-          const key = c.url ?? c.title;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          kept += 1;
-          hits.push({ title: c.title, url: c.url, entity: e.name, confidence, extra: { court: c.court } });
+
+      // Walk the backends until one answers. An ANSWER — even an empty one — is
+      // accepted: a party with no cases is a real result, not a reason to spend
+      // the next backend's quota. Only a THROW falls through to the next rung.
+      let cases: CaseHit[] | undefined;
+      for (const s of chain) {
+        try {
+          cases = await cached(`kanoon:${s.id}:${term}`, () => withRetry(() => s.run(term)));
+          anyAnswered = true;
+          servedBy.add(s.label);
+          break;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (!errors.includes(msg)) errors.push(msg);
+          emit?.(`Indian Kanoon ${s.label} unavailable (${msg}) — trying the next backend`, { level: "warn" });
         }
-      } catch (err) {
-        anyError = err instanceof Error ? err.message : String(err);
+      }
+      if (cases === undefined) continue; // every backend failed for this term
+
+      let kept = 0;
+      for (const c of cases) {
+        if (kept >= MAX_CASES) break;
+        const confidence = graded ? subjectConfidence(c.title, subject) : undefined;
+        // Only keep cases whose title actually names this party — a relevance
+        // search returns neighbouring parties (sibling brands) too. A case
+        // carrying the subject's DIN or company identifies them without it.
+        if (!entityMentioned(c.title, e.name) && confidence !== "confirmed") {
+          offTarget += 1;
+          continue;
+        }
+        const key = c.url ?? c.title;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        kept += 1;
+        hits.push({ title: c.title, url: c.url, entity: e.name, confidence, extra: { court: c.court } });
       }
     }
   }
 
-  if (hits.length === 0 && anyError) {
-    return { ...base, status: "error", note: `Search failed: ${anyError}`, hits: [], queries: ranQueries };
+  // A real failure is one where NOTHING answered anywhere. A subject every
+  // backend agreed had no cases is "done" and quiet — never "couldn't reach".
+  if (!anyAnswered && errors.length > 0) {
+    return {
+      ...base,
+      status: "error",
+      note: `Search unavailable across every backend: ${errors.join(" / ")}`,
+      hits: [],
+      queries: ranQueries,
+    };
   }
 
-  const modeNote =
-    mode === "munshot"
-      ? "via Munshot web search (site:indiankanoon.org)"
-      : mode === "public"
-        ? "Public search (add INDIANKANOON_API_TOKEN or MUNSHOT_TOKEN for reliable results)."
-        : undefined;
+  const servedNote = servedBy.size > 0 ? `via ${[...servedBy].join(", ")}` : undefined;
+  // Some backends stumbled but another carried the search — say so, so a partial
+  // degrade is visible without being alarming.
+  const degradeNote = errors.length > 0 ? `Some backends were unavailable this run (${errors.join("; ")}).` : undefined;
   const filterNote = offTarget > 0 ? `Filtered ${offTarget} case(s) naming a different party.` : undefined;
   const unverified = hits.filter((h) => h.confidence === "unverified").length;
   const gradeNote =
@@ -92,7 +138,7 @@ export const indianKanoonCollector: Collector = async ({ subject }) => {
   return {
     ...base,
     status: "done",
-    note: [modeNote, filterNote, gradeNote].filter(Boolean).join(" ") || undefined,
+    note: [servedNote, filterNote, gradeNote, degradeNote].filter(Boolean).join(" ") || undefined,
     hits,
     queries: ranQueries,
   };
@@ -119,33 +165,13 @@ function searchTerms(name: string, subject: Subject): string[] {
   return [...new Set(terms)];
 }
 
-interface CaseHit {
-  title: string;
-  url?: string;
-  court?: string;
-}
-
-// Munshot web-search scoped to Indian Kanoon — returns case pages by relevance.
-async function searchViaMunshot(entity: string): Promise<CaseHit[]> {
-  const res = await fetchWithTimeout(env.munshotSearchUrl, {
-    method: "POST",
-    timeoutMs: 15000,
-    headers: {
-      "Content-Type": "application/json",
-      accept: "application/json",
-      Authorization: `Bearer ${env.munshotToken}`,
-    },
-    body: JSON.stringify({ query: `site:indiankanoon.org "${entity}"`, country: env.munshotCountry }),
-  });
-  if (!res.ok) throw new Error(`Munshot search ${res.status}`);
-  const data = await res.json();
-  const rows: unknown[] = Array.isArray(data?.results) ? data.results : [];
-  return rows
-    .map((r) => {
-      const o = r as Record<string, unknown>;
-      const url = String(o.link ?? o.url ?? "");
-      return { title: stripHtml(String(o.title ?? "")), url };
-    })
+// Resilient web search scoped to Indian Kanoon — returns case pages by
+// relevance. Runs through the shared chain (Munshot → SerpAPI → Google →
+// keyless), so no single backend's outage can take this source down.
+async function searchViaWeb(entity: string): Promise<CaseHit[]> {
+  const results = await searchWeb(`site:indiankanoon.org "${entity}"`);
+  return results
+    .map((r) => ({ title: stripHtml(r.title ?? ""), url: r.url ?? "" }))
     // Keep only actual case documents (/doc/), not search/listing pages.
     .filter((c) => /indiankanoon\.org\/doc\//.test(c.url) && c.title.length > 0);
 }
