@@ -198,6 +198,7 @@ async function diligenceOne(seed: Seed, companyName: string, config: AppConfig):
   let din = seed.din ? normaliseDin(seed.din) : undefined;
   let resolvedName = seed.name;
   const anchors = new Set<string>([companyName]);
+  let companies: Array<{ name: string; status?: string }> | undefined;
   try {
     const record = await withDeadline(
       resolveDirector({ din, name: seed.name, anchorCompany: companyName }),
@@ -208,6 +209,10 @@ async function diligenceOne(seed: Seed, companyName: string, config: AppConfig):
       din = record.din || din;
       resolvedName = record.name || seed.name;
       for (const a of anchorNames(record)) anchors.add(a);
+      // Structured company list, for the board's relationship network. Kept
+      // separate from the rendered directorship lines so the graph works on
+      // names and statuses rather than parsing display strings.
+      companies = record.entities.map((e) => ({ name: e.name, status: e.status }));
     }
   } catch {
     // No registry record — fall through on the name and the parent company
@@ -250,6 +255,7 @@ async function diligenceOne(seed: Seed, companyName: string, config: AppConfig):
     headline: brief.headline,
     concerns,
     otherDirectorships: directorships,
+    companies,
     note: din ? undefined : "No unique registry record matched this name — findings are name-matched only.",
   };
 }

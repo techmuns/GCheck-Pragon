@@ -10,6 +10,8 @@ import ConcernCards from "./ConcernCards";
 import NewsTable from "./NewsTable";
 import ProfileCard from "./ProfileCard";
 import DiligenceSection from "./DiligenceSection";
+import { RiskPanel, NetworkPanel, ScopePanel } from "./InstitutionalPanels";
+import { sourceTier } from "@/lib/risk";
 import CitationRef, { sourceUrls } from "./CitationRef";
 import { buildPrintBrief, formatGenerated, listConcerns } from "@/lib/printBrief";
 
@@ -266,12 +268,20 @@ export default function BriefView({ run, onReset }: Props) {
           </div>
         </div>
 
+        {/* Governance risk score — a scored, methodologically-consistent read
+            that sits alongside the categorical verdict. Shown for a person too. */}
+        <RiskPanel run={run} />
+
         {/* Board Diligence — the deep per-director pre-screen. For a company this
             is the main event, so it sits high, right under the verdict; it fills
             in live as each director is checked. */}
         {run.subject.type === "company" && run.diligence && run.diligence.length > 0 && (
           <DiligenceSection people={run.diligence} running={run.status === "running"} />
         )}
+
+        {/* Related-party network — who on the board is connected through which
+            other company. Self-guards to company mode with a screened board. */}
+        <NetworkPanel run={run} />
 
         {/* Sections — full width summary, two columns below on large screens */}
         <div className="grid gap-3 lg:grid-cols-2">
@@ -399,6 +409,12 @@ export default function BriefView({ run, onReset }: Props) {
           })}
         </div>
 
+        {/* Scope & limitations — what was and was not checked, stated plainly,
+            with each source tiered by how authoritative it is. */}
+        <div className="mt-3">
+          <ScopePanel run={run} />
+        </div>
+
         {/* Sources appendix */}
         {brief.citations.length > 0 && (
           <div
@@ -421,9 +437,14 @@ export default function BriefView({ run, onReset }: Props) {
                 // The whole entry — its number included — is the link, the same
                 // way the exported PDF lists its sources. No separate "link"
                 // word to aim at, and the number itself is what a reader clicks.
+                const tier = sourceTier(c.sourceName);
                 const entry = (
                   <>
-                    <span className="tabular font-semibold text-navy-primary/70">[{c.ref}]</span> {c.sourceName} — {c.label}
+                    <span className="tabular font-semibold text-navy-primary/70">[{c.ref}]</span> {c.sourceName}
+                    <span className="mx-1 rounded bg-ice px-1 py-0.5 text-[9.5px] font-semibold uppercase tracking-wide text-ink-secondary/70">
+                      {tier.label}
+                    </span>
+                    — {c.label}
                   </>
                 );
                 return (

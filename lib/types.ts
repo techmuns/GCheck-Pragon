@@ -241,6 +241,9 @@ export interface PersonDiligence {
   concerns: DiligenceFinding[];
   /** Other companies they are linked to on the register. */
   otherDirectorships: DiligenceFinding[];
+  /** The companies the register ties to this person, structured — the raw
+   *  material for the board's relationship network (who shares which company). */
+  companies?: Array<{ name: string; status?: string }>;
   /** Honest note — e.g. identity not resolved, or a source was unavailable. */
   note?: string;
 }
