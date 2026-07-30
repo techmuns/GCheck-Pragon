@@ -3,6 +3,7 @@ import { canonicalUrl } from "./collectors/types";
 import { compareByHierarchy, seniorRole } from "./hierarchy";
 import { nameFromTitle, samePerson, uniqueRefs } from "./people";
 import { buildProfile } from "./profileView";
+import { humanizeCaps } from "./text";
 import { assessRisk, buildScope, riskMethodology, sourceTier, type Band, type RiskContribution } from "./risk";
 import { buildNetwork } from "./network";
 
@@ -734,7 +735,10 @@ function extractAuthority(statement: string, combined: string, hit?: RawHit): st
 }
 
 function extractAmount(t: string): string | undefined {
-  const m = t.match(/(?:rs\.?|inr|₹)\s?([\d,]+(?:\.\d+)?)\s*(crores?|cr\b|lakhs?|lacs?|billion|bn\b|million|mn\b)?/i);
+  // The number must actually START with a digit. `[\d,]+` alone matched a bare
+  // comma, so a sentence containing "Rs ," produced the amount "Rs ," — a fact
+  // card asserting a figure that does not exist.
+  const m = t.match(/(?:rs\.?|inr|₹)\s?(\d[\d,]*(?:\.\d+)?)\s*(crores?|cr\b|lakhs?|lacs?|billion|bn\b|million|mn\b)?/i);
   if (!m) return undefined;
   const unit = (m[2] ?? "").toLowerCase();
   const label = unit.startsWith("cr")
@@ -948,7 +952,7 @@ function buildPeople(
       if (!name) continue;
       const tenure = str(h.extra?.tenure);
       add({
-        name,
+        name: humanizeCaps(name) || name,
         role: str(h.extra?.designation),
         tenure: compactTenure(tenure),
         din: str(h.extra?.din),
@@ -1180,7 +1184,7 @@ function governanceConcern(f: Finding, hit: RawHit, subject: Run["subject"]): Co
     severity: f.severity,
     tone: SEVERITY_TONE[f.severity] ?? "amber",
     category: "Governance flag",
-    title: `${company} — ${status} on the MCA register`,
+    title: humanizeCaps(`${company} — ${status} on the MCA register`),
     facts,
     // The register's own words for it, so the quote can never describe a
     // different company from the one in the title.
@@ -1233,7 +1237,7 @@ function buildNewsRows(bySource: SourceIndex, citations: Citation[]): NewsRow[] 
       const role = str(insight?.extra?.subjectRole);
 
       rows.push({
-        headline: trimToPhrase(stripQuotes(insight?.extra?.sourceTitle ? String(insight.extra.sourceTitle) : h.title), 120),
+        headline: humanizeCaps(trimToPhrase(stripQuotes(insight?.extra?.sourceTitle ? String(insight.extra.sourceTitle) : h.title), 120)),
         summary: insight ? insight.title : h.snippet ? trimToPhrase(stripQuotes(h.snippet), 240) : undefined,
         date: normaliseDate(insight?.date ?? h.date),
         outlet: hostOf(h.url) ?? publisherOf(source.name),
@@ -1487,7 +1491,8 @@ function cleanStatement(text: string): string {
   out = out.replace(/^[^:]{2,40}:\s+/, (m) => (m.length < 30 ? m : ""));
   // Drop its keyword-matching tail — an internal detail, not a finding.
   out = out.replace(/\s*—\s*matched\s+[^.]*\.?$/i, "");
-  return stripQuotes(out);
+  // The register files in capitals; a concern titled in them reads as shouting.
+  return humanizeCaps(stripQuotes(out)) || stripQuotes(out);
 }
 
 /** Comparison key for "is this the same matter?" — ignores punctuation, case

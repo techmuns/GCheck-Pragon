@@ -5,114 +5,110 @@ import type { Run, Severity } from "@/lib/types";
 import { assessRisk, buildScope, riskMethodology, type Band, type ScopeStatus } from "@/lib/risk";
 import { buildNetwork } from "@/lib/network";
 import { severityStyle } from "./severity";
-import { formatGenerated } from "@/lib/printBrief";
+import { humanizeCaps } from "@/lib/text";
 
-// ── Institutional panels ─────────────────────────────────────────────────────
-// The three things that turn an analyst's findings into a report a committee can
-// sign off on: a scored, methodologically-consistent risk read; the map of who
-// on the board is connected to whom; and a plain statement of what was and was
-// not checked. Each is derived, never written — the score is the sum of listed
-// contributions, the network is the shared edges between directors' own records,
-// and the scope is the run's own source ledger.
+// ── Institutional content blocks ─────────────────────────────────────────────
+// Content only — no card, no heading. The page owns its own structure so the
+// brief reads as one document with ruled divisions rather than a stack of
+// floating widgets, and every block here slots into that structure.
 
-const BAND_META: Record<Band, { label: string; sev: Severity }> = {
+export const BAND_META: Record<Band, { label: string; sev: Severity }> = {
   high: { label: "High", sev: "red" },
   elevated: { label: "Elevated", sev: "amber" },
   moderate: { label: "Moderate", sev: "amber" },
   low: { label: "Low", sev: "clear" },
 };
 
-// ── Risk score ───────────────────────────────────────────────────────────────
+// ── Risk: the score dial and what drives it ──────────────────────────────────
 
-export function RiskPanel({ run }: { run: Run }) {
-  const [showMethod, setShowMethod] = useState(false);
+/** The score, its band, and the meter — sized for the report hero. */
+export function RiskDial({ run }: { run: Run }) {
   const r = assessRisk(run);
   const meta = BAND_META[r.band];
   const s = severityStyle[meta.sev];
-  const streaming = run.status === "running";
 
   return (
-    <div className="card-surface fade-in mb-3 p-5">
-      <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
-        <div className="min-w-0">
-          <div className="eyebrow mb-1.5">Governance Risk Score</div>
-          <div className="flex items-baseline gap-2.5">
-            <span className="tabular text-[38px] font-semibold leading-none" style={{ color: s.dot }}>
-              {r.score}
-            </span>
-            <span className="text-[13px] text-ink-secondary">/ 100</span>
-            <span
-              className="ml-1 rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide"
-              style={{ background: s.tint, color: s.ink, border: `1px solid ${s.border}` }}
-            >
-              {meta.label}
-            </span>
-          </div>
-          {/* Band meter */}
-          <div className="mt-3 w-full max-w-[420px]">
-            <div className="relative h-2 w-full overflow-hidden rounded-full bg-soft-border">
-              <div className="h-full rounded-full" style={{ width: `${r.score}%`, background: s.dot, transition: "width 400ms ease" }} />
-            </div>
-            <div className="mt-1 flex justify-between text-[9.5px] uppercase tracking-wide text-ink-secondary/70">
-              <span>Low</span>
-              <span>Moderate</span>
-              <span>Elevated</span>
-              <span>High</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Contributions */}
-        <div className="min-w-[240px] flex-1">
-          <div className="eyebrow mb-2">What drives it</div>
-          {r.contributions.length === 0 ? (
-            <p className="text-[13px] text-ink-secondary">No scored risk signals surfaced.</p>
-          ) : (
-            <ul className="space-y-1.5">
-              {r.contributions.slice(0, 6).map((c, i) => (
-                <li key={i} className="flex items-baseline justify-between gap-3 text-[12.5px]">
-                  <span className="min-w-0 text-ink-primary">
-                    {c.label}
-                    {c.detail && <span className="text-ink-secondary"> — {c.detail}</span>}
-                  </span>
-                  <span
-                    className="tabular shrink-0 font-semibold"
-                    style={{ color: c.points > 0 ? s.dot : "#8FA0B8" }}
-                  >
-                    {c.points > 0 ? `+${c.points}` : "note"}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+    <div>
+      <div className="eyebrow mb-2">Governance risk</div>
+      <div className="flex items-baseline gap-2">
+        <span className="tabular text-[44px] font-semibold leading-none tracking-tight" style={{ color: s.dot }}>
+          {r.score}
+        </span>
+        <span className="text-[13px] text-ink-secondary">/100</span>
       </div>
+      <div
+        className="mt-2 inline-flex rounded-full px-2.5 py-0.5 text-[10.5px] font-bold uppercase tracking-[0.09em]"
+        style={{ background: s.tint, color: s.ink, border: `1px solid ${s.border}` }}
+      >
+        {meta.label}
+      </div>
+      <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-[rgba(23,43,77,0.08)]">
+        <div
+          className="h-full rounded-full"
+          style={{ width: `${Math.max(r.score, 2)}%`, background: s.dot, transition: "width 500ms var(--ease)" }}
+        />
+      </div>
+      <div className="mt-1 flex justify-between text-[8.5px] uppercase tracking-[0.06em] text-ink-secondary/60">
+        <span>Low</span>
+        <span>Mod</span>
+        <span>Elev</span>
+        <span>High</span>
+      </div>
+    </div>
+  );
+}
 
-      {(r.coverage.partial || streaming || r.uncorroborated) && (
-        <div className="mt-3 space-y-1 border-t border-[rgba(23,43,77,0.08)] pt-2.5">
-          {streaming && (
-            <p className="text-[11.5px] text-ink-secondary">Board screening still in progress — the score rises as flagged directors are found.</p>
-          )}
+/** The itemised contributions, plus the methodology behind them. */
+export function RiskDrivers({ run }: { run: Run }) {
+  const [open, setOpen] = useState(false);
+  const r = assessRisk(run);
+  const s = severityStyle[BAND_META[r.band].sev];
+
+  return (
+    <div>
+      <div className="eyebrow mb-2">What drives it</div>
+      {r.contributions.length === 0 ? (
+        <p className="text-[13px] text-ink-secondary">No scored risk signals surfaced.</p>
+      ) : (
+        <ul className="space-y-1">
+          {r.contributions.slice(0, 6).map((c, i) => (
+            <li key={i} className="flex items-baseline justify-between gap-3 text-[12.5px] leading-snug">
+              <span className="min-w-0 text-ink-primary">
+                {c.label}
+                {c.detail && <span className="text-ink-secondary"> · {c.detail}</span>}
+              </span>
+              <span className="tabular shrink-0 font-semibold" style={{ color: c.points > 0 ? s.dot : "#9AA6B6" }}>
+                {c.points > 0 ? `+${c.points}` : "note"}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {(r.coverage.partial || r.uncorroborated) && (
+        <div className="mt-2.5 space-y-1">
           {r.coverage.partial && (
-            <p className="text-[11.5px] text-[#7C5A0F]">
-              Rests on partial coverage — {r.coverage.completed} of {r.coverage.total} sources completed, so a low score is not yet a clean bill of health.
+            <p className="text-[11.5px] leading-snug text-[#7C5A0F]">
+              Partial coverage — {r.coverage.completed} of {r.coverage.total} sources completed.
             </p>
           )}
           {r.uncorroborated && (
-            <p className="text-[11.5px] text-ink-secondary">The sharpest finding is single-source (press) with no official or court record behind it.</p>
+            <p className="text-[11.5px] leading-snug text-ink-secondary">
+              Sharpest finding is press-only — no official or court record behind it.
+            </p>
           )}
         </div>
       )}
 
       <button
         type="button"
-        onClick={() => setShowMethod((v) => !v)}
-        className="mt-3 text-[11.5px] font-medium text-navy-primary transition hover:text-navy-deep"
+        onClick={() => setOpen((v) => !v)}
+        className="no-print mt-2.5 text-[11.5px] font-medium text-navy-primary underline-offset-2 transition hover:underline"
       >
-        {showMethod ? "Hide methodology" : "How this is scored"}
+        {open ? "Hide methodology" : "How this is scored"}
       </button>
-      {showMethod && (
-        <ol className="mt-2 space-y-1.5 rounded-lg bg-surface-band/60 p-3 text-[11.5px] leading-relaxed text-ink-secondary">
+      {open && (
+        <ol className="mt-2 space-y-1.5 rounded-lg bg-surface-band/70 p-3 text-[11.5px] leading-relaxed text-ink-secondary">
           {riskMethodology().map((line, i) => (
             <li key={i}>{line}</li>
           ))}
@@ -122,53 +118,54 @@ export function RiskPanel({ run }: { run: Run }) {
   );
 }
 
-// ── Relationship network ─────────────────────────────────────────────────────
+// ── Related-party network ────────────────────────────────────────────────────
 
-export function NetworkPanel({ run }: { run: Run }) {
+export function NetworkContent({ run }: { run: Run }) {
   const net = buildNetwork(run);
   if (!net) return null;
 
-  return (
-    <div className="card-surface fade-in mb-3 p-5">
-      <div className="mb-2">
-        <h3 className="font-display text-[15.5px] text-navy-deep">Related-Party Network</h3>
-        <p className="text-[12px] text-ink-secondary">
-          Companies where two or more of the board sit together — the channels a related-party review looks for.
-        </p>
-      </div>
+  if (net.interlocks.length === 0) {
+    return (
+      <p className="text-[13px] italic text-ink-secondary/80">
+        No shared directorships across the {net.withRecord} director record(s) resolved.
+      </p>
+    );
+  }
 
-      {net.interlocks.length === 0 ? (
-        <p className="text-[13px] italic text-ink-secondary/80">
-          No shared directorships surfaced across the {net.withRecord} director record(s) resolved.
-        </p>
-      ) : (
-        <ul className="space-y-2">
-          {net.interlocks.map((it, i) => (
-            <li key={i} className="flex items-start gap-2.5">
-              <span
-                className="mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full"
-                style={{ backgroundColor: it.flagged ? severityStyle.red.dot : severityStyle.info.dot }}
-                aria-hidden
-              />
-              <div className="min-w-0">
-                <span className="text-[13.5px] font-medium text-navy-deep">{it.company}</span>
+  return (
+    <>
+      <ul className="space-y-2.5">
+        {net.interlocks.map((it, i) => (
+          <li key={i} className="flex items-start gap-2.5">
+            <span
+              className="mt-[7px] inline-block h-1.5 w-1.5 shrink-0 rounded-full"
+              style={{ backgroundColor: it.flagged ? severityStyle.red.dot : severityStyle.info.dot }}
+              aria-hidden
+            />
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-baseline gap-x-2">
+                <span className="text-[13.5px] font-medium text-navy-deep">{humanizeCaps(it.company)}</span>
                 {it.flagged && (
-                  <span className="ml-2 rounded bg-[#FBF1F2] px-1.5 py-0.5 text-[10px] font-semibold text-[#8E2436]">
+                  <span
+                    className="rounded px-1.5 py-0.5 text-[10px] font-semibold"
+                    style={{ background: severityStyle.red.tint, color: severityStyle.red.ink }}
+                  >
                     {it.status ?? "not in good standing"}
                   </span>
                 )}
-                <span className="ml-2 text-[11px] text-ink-secondary">{it.directors.length} directors</span>
-                <div className="text-[12px] leading-relaxed text-ink-secondary">{it.directors.join(" · ")}</div>
+                <span className="text-[11px] text-ink-secondary">{it.directors.length} directors</span>
               </div>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <p className="mt-3 border-t border-[rgba(23,43,77,0.08)] pt-2.5 text-[11px] text-ink-secondary/80">
-        Interlocks only — shareholding and ultimate beneficial ownership require the upgraded registry (PrivateCircle).
+              <div className="text-[12px] leading-relaxed text-ink-secondary">
+                {it.directors.map(humanizeCaps).join(" · ")}
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-3 text-[11px] leading-relaxed text-ink-secondary/75">
+        Interlocks only — shareholding and ultimate beneficial ownership require the upgraded registry.
       </p>
-    </div>
+    </>
   );
 }
 
@@ -181,31 +178,27 @@ const STATUS_META: Record<ScopeStatus, { label: string; color: string }> = {
   upgrade: { label: "Upgrade", color: "#B68B3A" },
 };
 
-export function ScopePanel({ run }: { run: Run }) {
+export function ScopeContent({ run }: { run: Run }) {
   const scope = buildScope(run);
   return (
-    <div className="card-surface fade-in mb-3 p-5">
-      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <h3 className="font-display text-[15.5px] text-navy-deep">Scope &amp; Limitations</h3>
-        <span className="text-[11px] text-ink-secondary">As of {formatGenerated(run.createdAt)}</span>
-      </div>
+    <>
       <p className="mb-3 text-[12.5px] leading-relaxed text-ink-primary">{scope.statement}</p>
-      <ul className="grid grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-2">
+      <ul className="grid grid-cols-1 gap-x-8 gap-y-1.5 sm:grid-cols-2">
         {scope.lines.map((l, i) => {
           const m = STATUS_META[l.status];
           return (
-            <li key={i} className="flex items-center justify-between gap-2 text-[12.5px]">
+            <li key={i} className="flex items-baseline justify-between gap-2 border-b border-[rgba(23,43,77,0.05)] pb-1 text-[12.5px] last:border-0">
               <span className="min-w-0 truncate text-ink-primary">
                 {l.name}
-                <span className="ml-1.5 text-[10px] uppercase tracking-wide text-ink-secondary/70">{l.tierLabel}</span>
+                <span className="ml-1.5 text-[9.5px] uppercase tracking-[0.05em] text-ink-secondary/60">{l.tierLabel}</span>
               </span>
-              <span className="shrink-0 font-semibold" style={{ color: m.color }}>
+              <span className="shrink-0 text-[11.5px] font-semibold" style={{ color: m.color }}>
                 {m.label}
               </span>
             </li>
           );
         })}
       </ul>
-    </div>
+    </>
   );
 }

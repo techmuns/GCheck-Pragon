@@ -4,13 +4,16 @@ import { useState } from "react";
 import type { DiligenceFinding, PersonDiligence, Severity } from "@/lib/types";
 import { severityStyle } from "./severity";
 
-// ── Board Diligence ──────────────────────────────────────────────────────────
-// The per-director deep dive, streamed live: each board member is put through
-// their own pre-screen — keyed to their DIN — and their verdict lands here as it
-// completes, so the board fills in one card at a time rather than after a long
-// blank wait. A card carries the person's verdict, a one-line reading, the items
-// found for them (each linking to its source), and the other companies the
-// register ties them to.
+// ── Board diligence ──────────────────────────────────────────────────────────
+// One card per director, each carrying their own verdict, the items found for
+// them, and the companies the register ties them to. Content only — the page
+// supplies the heading and the frame.
+//
+// Density is the point here. A board of ten was producing ten tall cards each
+// dominated by a long "also linked to" list, which buried the one director who
+// actually had something against them. So the companies list is collapsed by
+// default, findings are capped until expanded, and the verdict is legible from
+// the card's edge colour before a word is read.
 
 const VERDICT_LABEL: Record<Severity, string> = {
   red: "Red flag",
@@ -19,42 +22,34 @@ const VERDICT_LABEL: Record<Severity, string> = {
   info: "Unresolved",
 };
 
-export default function DiligenceSection({ people, running }: { people: PersonDiligence[]; running: boolean }) {
-  const total = people.length;
-  const done = people.filter((p) => p.status === "done" || p.status === "error").length;
-  const red = people.filter((p) => p.verdict === "red").length;
-  const amber = people.filter((p) => p.verdict === "amber").length;
-  const stillChecking = running && done < total;
+export function diligenceStats(people: PersonDiligence[]) {
+  return {
+    total: people.length,
+    done: people.filter((p) => p.status === "done" || p.status === "error").length,
+    red: people.filter((p) => p.verdict === "red").length,
+    amber: people.filter((p) => p.verdict === "amber").length,
+  };
+}
+
+export default function DiligenceGrid({ people, running }: { people: PersonDiligence[]; running: boolean }) {
+  const { total, done } = diligenceStats(people);
+  // A director carrying something outranks one who came back clean: on a long
+  // board the reader should meet the problem first, not scroll for it.
+  const rank = (p: PersonDiligence) => (p.verdict === "red" ? 0 : p.verdict === "amber" ? 1 : p.status === "error" ? 3 : 2);
+  const ordered = [...people].sort((a, b) => rank(a) - rank(b));
 
   return (
-    <div className="card-surface fade-in mb-3 p-5" data-diligence-root>
-      <div className="mb-3 flex flex-wrap items-end justify-between gap-x-4 gap-y-1.5">
-        <div>
-          <h3 className="font-display text-[15.5px] text-navy-deep">Board Diligence</h3>
-          <p className="text-[12px] text-ink-secondary">
-            Every director run through their own deep pre-screen, checked by DIN — not by name.
-          </p>
-        </div>
-        <div className="flex items-center gap-3 text-[12.5px]">
-          {red > 0 && <Tally n={red} label={red === 1 ? "red flag" : "red flags"} color={severityStyle.red.dot} />}
-          {amber > 0 && <Tally n={amber} label="to review" color={severityStyle.amber.dot} />}
-          <span className="tabular font-semibold text-ink-secondary">
-            {done}/{total} checked
-          </span>
-        </div>
-      </div>
-
-      {stillChecking && (
-        <div className="mb-3 h-1 w-full overflow-hidden rounded-full bg-soft-border" aria-hidden>
+    <div>
+      {running && done < total && (
+        <div className="mb-3 h-0.5 w-full overflow-hidden rounded-full bg-[rgba(23,43,77,0.08)]" aria-hidden>
           <div
-            className="h-full rounded-full"
-            style={{ width: `${total ? (done / total) * 100 : 0}%`, background: "#27457E", transition: "width 400ms ease" }}
+            className="h-full rounded-full bg-navy-primary"
+            style={{ width: `${total ? (done / total) * 100 : 0}%`, transition: "width 400ms var(--ease)" }}
           />
         </div>
       )}
-
-      <ul className="grid grid-cols-1 gap-2 lg:grid-cols-2">
-        {people.map((p) => (
+      <ul className="grid grid-cols-1 gap-2.5 lg:grid-cols-2">
+        {ordered.map((p) => (
           <li key={p.id}>
             <PersonCard p={p} />
           </li>
@@ -64,52 +59,50 @@ export default function DiligenceSection({ people, running }: { people: PersonDi
   );
 }
 
-function Tally({ n, label, color }: { n: number; label: string; color: string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
-      <span className="tabular font-semibold text-ink-primary">{n}</span>
-      <span className="text-ink-secondary">{label}</span>
-    </span>
-  );
-}
-
 function PersonCard({ p }: { p: PersonDiligence }) {
   const [open, setOpen] = useState(false);
   const busy = p.status === "pending" || p.status === "running";
   const v = p.verdict ?? "info";
-  const dot = busy ? "#94A3B8" : severityStyle[v].dot;
-  const extraConcerns = Math.max(0, p.concerns.length - 2);
-  const canExpand = extraConcerns > 0 || p.otherDirectorships.length > 0;
-  const meta = [p.role, p.din ? `DIN ${p.din}` : null, p.tenure ? `${p.tenure} tenure` : null].filter(Boolean).join(" · ");
+  const edge = busy || p.status === "error" ? "#CBD5E1" : severityStyle[v].dot;
+
+  const VISIBLE = 2;
+  const hiddenConcerns = Math.max(0, p.concerns.length - VISIBLE);
+  const companies = p.companies ?? [];
+  const canExpand = hiddenConcerns > 0 || companies.length > 0;
+
+  const meta = [p.role, p.din ? `DIN ${p.din}` : null, p.tenure].filter(Boolean).join(" · ");
 
   return (
     <div
-      className="h-full rounded-xl border border-[rgba(23,43,77,0.08)] bg-white p-3.5"
-      style={{ borderLeft: `3px solid ${dot}` }}
+      className="flex h-full flex-col rounded-lg border border-[rgba(23,43,77,0.09)] bg-white p-3.5"
+      style={{ borderLeft: `2.5px solid ${edge}` }}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <span className="block text-[13.5px] font-semibold leading-tight text-navy-deep">{p.name}</span>
-          {meta && <span className="mt-0.5 block text-[11px] leading-tight text-ink-secondary">{meta}</span>}
+          <span className="block text-[13.5px] font-semibold leading-snug text-navy-deep">{p.name}</span>
+          {meta && <span className="mt-0.5 block text-[11px] leading-snug text-ink-secondary">{meta}</span>}
         </div>
         <VerdictChip p={p} />
       </div>
 
       {p.status === "error" ? (
-        <p className="mt-2 text-[12px] italic text-ink-secondary/80">{p.note ?? "Couldn’t complete this check."}</p>
+        <p className="mt-2 text-[12px] italic leading-snug text-ink-secondary/80">
+          {p.note ?? "Couldn’t complete this check."}
+        </p>
       ) : busy ? (
         <p className="mt-2 text-[12px] italic text-ink-secondary/70">Checking…</p>
       ) : (
         <>
-          {p.headline && <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-primary">{p.headline}</p>}
+          {p.concerns.length === 0 && p.headline && (
+            <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-secondary">{p.headline}</p>
+          )}
 
           {p.concerns.length > 0 && (
-            <ul className="mt-2 space-y-1">
-              {(open ? p.concerns : p.concerns.slice(0, 2)).map((f, i) => (
-                <li key={i} className="flex items-start gap-2 text-[12px] leading-relaxed">
+            <ul className="mt-2 space-y-1.5">
+              {(open ? p.concerns : p.concerns.slice(0, VISIBLE)).map((f, i) => (
+                <li key={i} className="flex items-start gap-2 text-[12.5px] leading-relaxed">
                   <span
-                    className="mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full"
+                    className="mt-[7px] inline-block h-1.5 w-1.5 shrink-0 rounded-full"
                     style={{ backgroundColor: severityStyle[f.severity].dot }}
                     aria-hidden
                   />
@@ -122,17 +115,12 @@ function PersonCard({ p }: { p: PersonDiligence }) {
             </ul>
           )}
 
-          {open && p.otherDirectorships.length > 0 && (
-            <div className="mt-2.5 border-t border-[rgba(23,43,77,0.06)] pt-2">
-              <div className="eyebrow mb-1 !text-[9px]">Also linked to</div>
-              <ul className="space-y-0.5">
-                {p.otherDirectorships.map((f, i) => (
-                  <li key={i} className="text-[11.5px] leading-relaxed text-ink-secondary">
-                    {f.text}
-                    <SourceLink f={f} />
-                  </li>
-                ))}
-              </ul>
+          {open && companies.length > 0 && (
+            <div className="mt-2.5 border-t border-[rgba(23,43,77,0.07)] pt-2">
+              <div className="eyebrow mb-1 !text-[9px]">Also on the board of</div>
+              <p className="text-[11.5px] leading-relaxed text-ink-secondary">
+                {companies.map((c) => c.name).join(" · ")}
+              </p>
             </div>
           )}
 
@@ -142,13 +130,13 @@ function PersonCard({ p }: { p: PersonDiligence }) {
             <button
               type="button"
               onClick={() => setOpen((o) => !o)}
-              className="mt-2 text-[11.5px] font-medium text-navy-primary transition hover:text-navy-deep"
+              className="no-print mt-auto pt-2 text-left text-[11.5px] font-medium text-navy-primary underline-offset-2 transition hover:underline"
             >
               {open
                 ? "Show less"
-                : extraConcerns > 0
-                  ? `+${extraConcerns} more · details`
-                  : "Show details"}
+                : hiddenConcerns > 0
+                  ? `+${hiddenConcerns} more · ${companies.length} companies`
+                  : `${companies.length} other ${companies.length === 1 ? "company" : "companies"}`}
             </button>
           )}
         </>
@@ -160,19 +148,23 @@ function PersonCard({ p }: { p: PersonDiligence }) {
 function VerdictChip({ p }: { p: PersonDiligence }) {
   if (p.status === "pending" || p.status === "running") {
     return (
-      <span className="shrink-0 rounded-full bg-ice px-2 py-0.5 text-[10px] font-semibold text-ink-secondary">
-        checking…
+      <span className="shrink-0 rounded-full bg-ice px-2 py-0.5 text-[9.5px] font-semibold uppercase tracking-wide text-ink-secondary">
+        checking
       </span>
     );
   }
   if (p.status === "error") {
-    return <span className="shrink-0 rounded-full bg-ice px-2 py-0.5 text-[10px] font-semibold text-ink-secondary">n/a</span>;
+    return (
+      <span className="shrink-0 rounded-full bg-ice px-2 py-0.5 text-[9.5px] font-semibold uppercase tracking-wide text-ink-secondary">
+        n/a
+      </span>
+    );
   }
   const v = p.verdict ?? "info";
   const s = severityStyle[v];
   return (
     <span
-      className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide"
+      className="shrink-0 rounded-full px-2 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.07em]"
       style={{ background: s.tint, color: s.ink, border: `1px solid ${s.border}` }}
     >
       {VERDICT_LABEL[v]}
@@ -188,7 +180,7 @@ function SourceLink({ f }: { f: DiligenceFinding }) {
       target="_blank"
       rel="noreferrer"
       title={f.url}
-      className="ml-1 align-super text-[10px] font-semibold text-royal no-underline hover:underline"
+      className="ml-1 align-super text-[9.5px] font-semibold text-royal no-underline hover:underline"
     >
       ↗
     </a>

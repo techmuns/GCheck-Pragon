@@ -12,6 +12,7 @@ import { resolveDirector, anchorNames } from "./collectors/indiafilings";
 import { compareByHierarchy, seniorRole, type RankablePerson } from "./hierarchy";
 import { nameFromTitle } from "./people";
 import { normaliseDin } from "./directorId";
+import { cleanFindingText, titleCaseName } from "./text";
 
 // ── Board diligence ──────────────────────────────────────────────────────────
 // Running a company is not the same as running its people. The company brief
@@ -231,9 +232,14 @@ async function diligenceOne(seed: Seed, companyName: string, config: AppConfig):
   const collected = await runSources(directorSubject, diligenceSources(), config);
   const brief = assembleBrief(directorSubject, collected, config);
   const urlByRef = new Map(brief.citations.filter((c) => c.url).map((c) => [c.ref, c.url as string]));
+  // The card is already titled with this person's name and the register writes
+  // in capitals, so the raw finding — "PANKAJ KUMAR VERMA: "SOME CO LIMITED" —
+  // matched legal." — is mostly noise repeated once per row. Cleaned here, at
+  // the source, so the screen and the exported report agree.
+  const shownName = titleCaseName(resolvedName) || resolvedName;
   const link = (f: Finding): DiligenceFinding => ({
     severity: f.severity,
-    text: f.text,
+    text: cleanFindingText(f.text, resolvedName).split(resolvedName).join(shownName),
     url: f.sourceRef !== undefined ? urlByRef.get(f.sourceRef) : undefined,
   });
 
@@ -250,12 +256,12 @@ async function diligenceOne(seed: Seed, companyName: string, config: AppConfig):
 
   return {
     din,
-    name: resolvedName,
+    name: shownName,
     verdict: brief.verdict,
-    headline: brief.headline,
+    headline: cleanFindingText(brief.headline, resolvedName).split(resolvedName).join(shownName),
     concerns,
     otherDirectorships: directorships,
-    companies,
+    companies: companies?.map((c) => ({ name: titleCaseName(c.name) || c.name, status: c.status })),
     note: din ? undefined : "No unique registry record matched this name — findings are name-matched only.",
   };
 }
