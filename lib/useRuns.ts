@@ -97,7 +97,7 @@ export interface UseRuns {
   /** The run being viewed, or null when the search form is up. */
   active: TrackedRun | null;
   activeKey: string | null;
-  start: (company: string, promoters: string[], type?: "company" | "director") => void;
+  start: (company: string, promoters: string[], type?: "company" | "director", ticker?: string) => void;
   /** Show a run. Passing null shows the search form without touching anything. */
   select: (key: string | null) => void;
   /** Stop tracking a run in the UI. The server keeps working; this is a tab
@@ -228,12 +228,13 @@ export function useRuns(): UseRuns {
   }, [patch]);
 
   const start = useCallback(
-    (company: string, promoters: string[], type: "company" | "director" = "company") => {
+    (company: string, promoters: string[], type: "company" | "director" = "company", ticker?: string) => {
       const key = newKey();
       const subject: Subject = {
         type,
         company: type === "director" ? displayName(company) : company,
         promoters,
+        ticker,
       };
 
       const fresh: TrackedRun = { key, subject, run: null, phase: "starting", startedAt: Date.now(), seen: true };
@@ -256,7 +257,7 @@ export function useRuns(): UseRuns {
           const res = await fetch(apiUrl("/api/research"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ type, company, promoters }),
+            body: JSON.stringify({ type, company, promoters, ticker }),
           });
           if (!res.ok) {
             const body = await res.json().catch(() => ({}));

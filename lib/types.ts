@@ -100,6 +100,23 @@ export interface Citation {
   url?: string;
 }
 
+/** One row of the search-box typeahead. Structured rather than a bare string so
+ *  a company suggestion can show its sector and carry its ticker, and a director
+ *  suggestion its DIN, without the two modes needing different plumbing. */
+export interface Suggestion {
+  /** What lands in the input when this row is picked — the plain company name,
+   *  or the DIN-encoded director string the run parses back apart. */
+  value: string;
+  /** The primary line shown in the dropdown. */
+  label: string;
+  /** The secondary line — sector · country for a company, DIN · company for a
+   *  director. */
+  sub?: string;
+  /** A listed company's ticker, carried through so the run can enable
+   *  exchange-filings lookup for it. */
+  ticker?: string;
+}
+
 /** The subject of a research run. */
 export interface Subject {
   /** Whether this run targets a company or an individual director/person.

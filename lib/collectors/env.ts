@@ -14,6 +14,12 @@ export const env = {
   munshotNewsUrl: process.env.MUNSHOT_NEWS_URL || "https://fastapi.muns.io/tools/news-search",
   munshotCountry: process.env.MUNSHOT_COUNTRY || "IN",
 
+  // Stock/company search — the typeahead behind the company box. Resolves a
+  // typed fragment to real listed companies (ticker, name, sector, country),
+  // so a company search starts from an entity that exists rather than free
+  // text. Reuses MUNSHOT_TOKEN.
+  munshotStockSearchUrl: process.env.MUNSHOT_STOCK_SEARCH_URL || "https://birdnest.muns.io/stock/search",
+
   // Article reader. A headline says a matter exists; only the body says what it
   // was and — the part that changes the whole reading — whether the subject
   // brought the complaint or answered it. Muns reuses MUNSHOT_TOKEN; Firecrawl

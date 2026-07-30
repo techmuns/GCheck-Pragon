@@ -8,7 +8,7 @@ import { displayName } from "@/lib/directorId";
 type Mode = "company" | "director";
 
 interface Props {
-  onSubmit: (company: string, promoters: string[], type?: Mode) => void;
+  onSubmit: (company: string, promoters: string[], type?: Mode, ticker?: string) => void;
   busy?: boolean;
 }
 
@@ -17,6 +17,10 @@ interface Props {
 export default function SearchForm({ onSubmit, busy }: Props) {
   const [mode, setMode] = useState<Mode>("company");
   const [company, setCompany] = useState("");
+  // A ticker captured from a picked company suggestion. It rides along to enable
+  // exchange-filings lookup, and is cleared the moment the text is edited by
+  // hand so a stale ticker can never attach to a different company.
+  const [ticker, setTicker] = useState<string | undefined>();
   const [recent, setRecent] = useState<RecentSearch[]>([]);
 
   // localStorage is client-only — read after mount to avoid a hydration mismatch.
@@ -27,7 +31,7 @@ export default function SearchForm({ onSubmit, busy }: Props) {
   function submit() {
     if (!company.trim() || busy) return;
     // Both modes screen a single subject — no promoter list to collect.
-    onSubmit(company.trim(), [], mode);
+    onSubmit(company.trim(), [], mode, mode === "company" ? ticker : undefined);
   }
 
   return (
@@ -64,7 +68,12 @@ export default function SearchForm({ onSubmit, busy }: Props) {
         <AutocompleteField
           kind={isDirector ? "promoter" : "company"}
           value={company}
-          onChange={setCompany}
+          onChange={(v) => {
+            setCompany(v);
+            // Typing by hand invalidates a ticker picked from the dropdown.
+            setTicker(undefined);
+          }}
+          onSelect={(s) => setTicker(s.ticker)}
           // The box takes a DIN as readily as a name — say so where the user is
           // already looking, because nothing else on the page reveals it.
           placeholder={isDirector ? "e.g. Mukesh Ambani — or DIN 00001695" : "e.g. Reliance Industries"}
