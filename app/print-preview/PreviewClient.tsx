@@ -31,7 +31,7 @@ export default function PreviewClient() {
     <main style={host} className="no-print">
       <div style={bar}>
         <span style={{ fontSize: 13, fontWeight: 700, color: "#172B4D" }}>Print-brief preview</span>
-        <span style={{ fontSize: 12, color: "#6B7280" }}>A4 portrait · one page</span>
+        <span style={{ fontSize: 12, color: "#6B7280" }}>A4 portrait · +profile page</span>
         <div style={{ flex: 1 }} />
         {SIZES.map((s) => (
           <button key={s} onClick={() => pick(s)} style={{ ...btn, ...(s === size ? btnOn : {}) }}>

@@ -212,6 +212,8 @@ function readRun(): Run {
 function directorRun(): Run {
   const progress: SourceProgress[] = [
     { sourceId: "google", name: "Google & News", kind: "api", status: "done", hits: 4 },
+    { sourceId: "news", name: "News Deep Dive", kind: "api", status: "done", hits: 3 },
+    { sourceId: "profile", name: "Profile & Background", kind: "api", status: "done", hits: 7 },
     { sourceId: "indiankanoon", name: "Court Cases", kind: "api", status: "done", hits: 3 },
     { sourceId: "registry", name: "Company Registry (Tofler)", kind: "api", status: "skipped", note: "Director search — no company board to look up." },
     { sourceId: "wikidata", name: "Wikidata (Directors)", kind: "api", status: "done", hits: 2 },
@@ -219,6 +221,68 @@ function directorRun(): Run {
   ];
 
   const collected: CollectorResult[] = [
+    {
+      sourceId: "profile",
+      sourceName: "Profile & Background",
+      kind: "api",
+      status: "done",
+      note: "Read 2 profile page(s) and extracted 5 background fact(s).",
+      hits: [
+        {
+          title: "Chairman of Vertex Holdings",
+          url: "https://www.forbes.com/profile/vijay-malhotra/",
+          entity: "Vijay Malhotra",
+          confidence: "confirmed",
+          extra: {
+            category: "profile",
+            role: "Chairman & Managing Director",
+            employer: "Vertex Holdings",
+            headline: "Chairman & Managing Director of Vertex Holdings, a Mumbai infrastructure group",
+            bio: "Vijay Malhotra chairs Vertex Holdings, a diversified infrastructure and capital-markets group he built from a single road-construction contract in the late 1990s into a listed conglomerate spanning EPC, real estate and financial services.",
+            netWorth: "$310M",
+            worldRank: "#78 (Forbes India Rich List)",
+            nationality: "Indian",
+            bornYear: "1965",
+            education: "MBA, INSEAD",
+          },
+        },
+        {
+          title: "Founded Vertex Holdings in 1998 with a single road-construction contract",
+          url: "https://en.wikipedia.org/wiki/Vijay_Malhotra_(businessman)",
+          entity: "Vijay Malhotra",
+          confidence: "confirmed",
+          extra: { category: "profile-highlight" },
+        },
+        {
+          title: "Took Vertex Holdings public on the BSE in 2011",
+          url: "https://en.wikipedia.org/wiki/Vijay_Malhotra_(businessman)",
+          entity: "Vijay Malhotra",
+          confidence: "confirmed",
+          extra: { category: "profile-highlight" },
+        },
+        {
+          title: "Serves as a director of Meridian Capital Advisors",
+          url: "https://www.forbes.com/profile/vijay-malhotra/",
+          entity: "Vijay Malhotra",
+          confidence: "confirmed",
+          extra: { category: "profile-highlight" },
+        },
+        {
+          title: "Chairs the CII Western Region infrastructure committee",
+          url: "https://en.wikipedia.org/wiki/Vijay_Malhotra_(businessman)",
+          entity: "Vijay Malhotra",
+          confidence: "confirmed",
+          extra: { category: "profile-highlight" },
+        },
+        {
+          title: "Named EY Entrepreneur of the Year (Infrastructure), 2016",
+          url: "https://www.forbes.com/profile/vijay-malhotra/",
+          entity: "Vijay Malhotra",
+          confidence: "confirmed",
+          extra: { category: "profile-highlight" },
+        },
+      ],
+    },
     {
       sourceId: "wikidata",
       sourceName: "Wikidata (Directors)",
@@ -258,6 +322,8 @@ function directorRun(): Run {
     { ref: 2, sourceName: "Indian Kanoon", label: "SEBI vs Vijay Malhotra", url: "https://indiankanoon.org/doc/301/" },
     { ref: 3, sourceName: "Indian Kanoon", label: "Vijay Malhotra vs Enforcement Directorate", url: "https://indiankanoon.org/doc/302/" },
     { ref: 4, sourceName: "Wikidata (Directors)", label: "Chairperson of Vertex Holdings", url: "https://www.wikidata.org/wiki/Q1" },
+    { ref: 5, sourceName: "Profile & Background", label: "Chairman & Managing Director, Vertex Holdings", url: "https://www.forbes.com/profile/vijay-malhotra/" },
+    { ref: 6, sourceName: "Profile & Background", label: "Vijay Malhotra (businessman)", url: "https://en.wikipedia.org/wiki/Vijay_Malhotra_(businessman)" },
   ];
 
   const sections: RenderedSection[] = [

@@ -888,8 +888,77 @@ body.pb-preview > .pb-root {
   text-align: center;
 }
 
+/* Profile & Background — the optional second page ---------------------------- */
+/* A page that follows the executive brief. On screen (the preview harness) it
+   sits under page one with a gap; in print it starts a fresh sheet. */
+.pb-page-next { margin-top: 8mm; }
+.pb-profile-lead {
+  margin: 6pt 0 0;
+  font-size: 12.5pt;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--navy);
+}
+.pb-profile-employer { font-weight: 500; color: var(--ink); }
+.pb-profile-bio {
+  margin: 7pt 0 0;
+  font-size: 9pt;
+  line-height: 1.5;
+  color: var(--ink);
+}
+.pb-profile-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(34mm, 1fr));
+  gap: 6pt;
+  margin-top: 8pt;
+}
+.pb-pm {
+  background: var(--panel);
+  border: 0.75pt solid var(--line);
+  border-radius: 5pt;
+  padding: 5pt 9pt;
+  break-inside: avoid;
+}
+.pb-pm-val {
+  font-size: 13.5pt;
+  font-weight: 700;
+  line-height: 1.05;
+  color: var(--navy);
+  font-variant-numeric: tabular-nums;
+}
+.pb-pm-label {
+  font-size: 6.8pt;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--meta);
+  margin-top: 2.5pt;
+}
+.pb-profile-attrs { margin-top: 8pt; }
+.pb-profile-career { margin-top: 9pt; }
+.pb-hl { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2pt; }
+.pb-hl-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 7pt;
+  align-items: baseline;
+  padding: 3pt 0;
+  border-bottom: 0.6pt dotted var(--line);
+  break-inside: avoid;
+}
+.pb-hl-item:last-child { border-bottom: 0; }
+.pb-hl-item .pb-dot { position: relative; top: -1.5pt; }
+.pb-hl-text { font-size: 8.8pt; line-height: 1.4; color: var(--ink); }
+/* Anchor the disclaimer to the foot of the profile sheet, like the main page. */
+.pb-profile-foot { margin-top: auto; padding-top: 6pt; }
+
 /* ── Print media: page geometry + hide the app chrome ─────────────────────── */
 @media print {
+  /* The profile page starts a fresh sheet rather than flowing under page one. */
+  .pb-page-next {
+    margin-top: 0;
+    break-before: page;
+  }
   @page {
     size: A4 portrait;
     margin: 0;

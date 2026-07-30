@@ -10,16 +10,18 @@ import type {
   Person,
   PositiveRow,
   PrintBrief,
+  PrintProfile,
   SourceQualityRow,
   SourceRef,
 } from "@/lib/printBrief";
 
-// ── One-page A4-portrait pre-meeting brief (print / PDF) ─────────────────────
+// ── A4-portrait pre-meeting brief (print / PDF) ──────────────────────────────
 // A purpose-built institutional report, not a print of the on-screen dashboard.
 // Fixed structure, dynamic content: every section caps its rows, collapses when
-// empty, and the whole thing is engineered to land on exactly one page. All the
-// ranking/capping/claim-typing is done upstream in buildPrintBrief — this file
-// is layout only.
+// empty, and the executive brief is engineered to land on exactly one page. When
+// a profile was read, a second detail page follows it — the answer to "who is
+// this?" wants room the first page does not have. All the ranking/capping/
+// claim-typing is done upstream in buildPrintBrief — this file is layout only.
 //
 // It is portalled to <body> so a single print rule can isolate it: the app is
 // hidden and only this one page is rendered to PDF. Hidden on screen (it appears
@@ -83,8 +85,102 @@ function PrintDoc({ brief }: { brief: PrintBrief }) {
 
         <Footer brief={brief} />
       </div>
+
+      {/* Second page: the full profile. Prints only when one was read. */}
+      {brief.profile && <ProfilePage brief={brief} profile={brief.profile} />}
     </div>
     </SourceUrls.Provider>
+  );
+}
+
+// ── Profile & Background (second page) ───────────────────────────────────────
+// Its own A4 sheet, so the detail the question deserves does not have to be
+// squeezed into the executive page's margins: the role and the business behind
+// it, the headline figures as tiles, the placing facts, and the full career
+// history — every line linking back to the page it was read from.
+
+function ProfilePage({ brief, profile }: { brief: PrintBrief; profile: PrintProfile }) {
+  return (
+    <div className="pb-page pb-page-next">
+      <header className="pb-header">
+        <div className="pb-header-top">
+          <div className="pb-brand">
+            <span className="pb-brand-mark">Paragon</span>
+            <span className="pb-brand-sep">|</span>
+            <span className="pb-brand-sub">Profile &amp; Background</span>
+          </div>
+          <div className="pb-gen">
+            <span className="pb-gen-label">Subject</span>
+            <span className="pb-gen-val">{brief.company}</span>
+          </div>
+        </div>
+        {(profile.role || profile.employer) && (
+          <p className="pb-profile-lead">
+            {profile.role}
+            {profile.employer && (
+              <span className="pb-profile-employer">
+                {profile.role ? " · " : ""}
+                {profile.employer}
+              </span>
+            )}
+          </p>
+        )}
+      </header>
+
+      {profile.bio && <p className="pb-profile-bio">{profile.bio}</p>}
+
+      {profile.metrics.length > 0 && (
+        <div className="pb-profile-metrics">
+          {profile.metrics.map((m, i) => (
+            <div className="pb-pm" key={i}>
+              <div className="pb-pm-val">
+                {m.value}
+                <Ref n={m.sourceRef} />
+              </div>
+              <div className="pb-pm-label">{m.label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {profile.attributes.length > 0 && (
+        <dl className="pb-snap pb-profile-attrs">
+          {profile.attributes.map((a, i) => (
+            <div className="pb-snap-item" key={i}>
+              <dt className="pb-snap-label">{a.label}</dt>
+              <dd className="pb-snap-val">
+                {a.value}
+                <Ref n={a.sourceRef} />
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
+
+      {profile.highlights.length > 0 && (
+        <Section
+          title="Career & Background"
+          className="pb-profile-career"
+          meta={profile.extraHighlights > 0 ? `+${profile.extraHighlights} more in dashboard` : undefined}
+        >
+          <ul className="pb-hl">
+            {profile.highlights.map((h, i) => (
+              <li className="pb-hl-item" key={i}>
+                <span className="pb-dot pb-bg-neutral" />
+                <span className="pb-hl-text">
+                  {h.text}
+                  <Ref n={h.sourceRef} />
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
+
+      <div className="pb-profile-foot">
+        <div className="pb-disclaimer">{brief.disclaimer}</div>
+      </div>
+    </div>
   );
 }
 

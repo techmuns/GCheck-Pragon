@@ -2,6 +2,7 @@ import type { Citation, Finding, RawHit, RenderedSection, Run, Severity } from "
 import { canonicalUrl } from "./collectors/types";
 import { compareByHierarchy, seniorRole } from "./hierarchy";
 import { nameFromTitle, samePerson, uniqueRefs } from "./people";
+import { buildProfile } from "./profileView";
 
 // ── Print-brief derivation ──────────────────────────────────────────────────
 // Turns a finished Run into the fixed, decision-grade shape the one-page A4
@@ -58,6 +59,37 @@ export interface NewsRow {
   url?: string;
 }
 export type ClaimType = "Verified" | "Reported" | "Alleged" | "Under review";
+
+// ── Profile & Background (a second, detailed PDF page) ───────────────────────
+// The one-page executive brief is full; the profile is the answer to "who is
+// this?" and wants room, so it prints as its own detail page rather than
+// clipping page one. Same derivation as the on-screen card (lib/profileView), so
+// the two never disagree; every value keeps its citation.
+
+export interface PrintProfileFact {
+  label: string;
+  value: string;
+  sourceRef?: number;
+}
+
+export interface PrintProfileHighlight {
+  text: string;
+  sourceRef?: number;
+}
+
+export interface PrintProfile {
+  role?: string;
+  employer?: string;
+  bio?: string;
+  /** Headline figures — net worth, ranking, revenue… — shown as tiles. */
+  metrics: PrintProfileFact[];
+  /** Placing facts — nationality, born, education, HQ — shown as a band. */
+  attributes: PrintProfileFact[];
+  /** Career / background milestones. */
+  highlights: PrintProfileHighlight[];
+  /** How many milestones did not fit the page. */
+  extraHighlights: number;
+}
 
 export interface PrintMetric {
   value: string;
@@ -146,6 +178,8 @@ export interface PrintBrief {
   verdictSentence: string;
   pill: { label: string; tone: Tone };
   executive: string;
+  /** The optional second page — present only when a profile was read. */
+  profile: PrintProfile | null;
   metrics: PrintMetric[];
   concerns: Concern[];
   extraConcerns: number;
@@ -221,6 +255,7 @@ export function buildPrintBrief(run: Run, generatedAt: string): PrintBrief | nul
     verdictSentence: brief.headline,
     pill: pillFor(brief.verdict),
     executive: buildExecutive(brief.verdict, concernsAll, doneSources, totalSources),
+    profile: buildProfileBlock(collected, brief.citations),
     metrics: buildMetrics(brief.verdict, redFlags, toReview, doneSources, totalSources),
     concerns,
     extraConcerns: Math.max(0, concernsAll.length - concerns.length),
@@ -913,6 +948,41 @@ function buildPositives(sections: RenderedSection[]): PositiveRow[] {
   return section.findings
     .filter((f) => f.text.trim().length > 0)
     .map((f) => ({ text: trimToPhrase(stripQuotes(f.text), 110), sourceRef: f.sourceRef }));
+}
+
+/**
+ * The Profile & Background detail page, derived from the collector's own hits.
+ *
+ * Read through lib/profileView so the printed page and the on-screen card share
+ * one derivation — a net worth cannot read one way on screen and another on
+ * paper. Each value is matched back to its citation by the URL it was read from,
+ * so every fact on the page carries a live [n] to its own source. Returns null
+ * when no profile was read, so the second page simply does not print.
+ */
+function buildProfileBlock(collected: Run["collected"], citations: Citation[]): PrintProfile | null {
+  const hits = (collected ?? []).find((c) => c.sourceId === "profile")?.hits ?? [];
+  const view = buildProfile(hits);
+  if (!view) return null;
+
+  const refByUrl = new Map(citations.filter((c) => c.url).map((c) => [c.url as string, c.ref]));
+  const ref = (url?: string) => (url ? refByUrl.get(url) : undefined);
+
+  // Bounded, not capped to a handful: this is the detailed page, but a runaway
+  // list still must not overflow a fixed sheet.
+  const HIGHLIGHT_CAP = 12;
+  const highlights = view.highlights
+    .slice(0, HIGHLIGHT_CAP)
+    .map((h) => ({ text: trimToPhrase(stripQuotes(h.text), 200), sourceRef: ref(h.url) }));
+
+  return {
+    role: view.role,
+    employer: view.employer,
+    bio: view.bio ? trimToPhrase(view.bio, 600) : undefined,
+    metrics: view.metrics.map((m) => ({ label: m.label, value: m.value, sourceRef: ref(m.url) })),
+    attributes: view.attributes.map((m) => ({ label: m.label, value: m.value, sourceRef: ref(m.url) })),
+    highlights,
+    extraHighlights: Math.max(0, view.highlights.length - highlights.length),
+  };
 }
 
 /**
