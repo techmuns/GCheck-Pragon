@@ -10,7 +10,11 @@ import type {
   Person,
   PositiveRow,
   PrintBrief,
+  PrintDiligencePerson,
+  PrintNetwork,
   PrintProfile,
+  PrintRisk,
+  PrintScope,
   SourceQualityRow,
   SourceRef,
 } from "@/lib/printBrief";
@@ -88,8 +92,193 @@ function PrintDoc({ brief }: { brief: PrintBrief }) {
 
       {/* Second page: the full profile. Prints only when one was read. */}
       {brief.profile && <ProfilePage brief={brief} profile={brief.profile} />}
+
+      {/* Continuation: the scored risk read, the board diligence, the network
+          and the scope — everything the dashboard shows that the one-page
+          executive brief has no room for. Flows across as many pages as needed,
+          so no director is ever dropped. */}
+      <ReportContinuation brief={brief} />
     </div>
     </SourceUrls.Provider>
+  );
+}
+
+// ── Continuation (flowing pages) ─────────────────────────────────────────────
+// Unlike the fixed executive/profile sheets, this section flows: a named print
+// page gives it margins, and break-inside rules keep a card or a row from
+// splitting across the fold. This is what lets the whole board appear without
+// being clipped to fit one sheet.
+
+function ReportContinuation({ brief }: { brief: PrintBrief }) {
+  return (
+    <div className="pb-flow">
+      <RiskBlock risk={brief.risk} />
+      {brief.diligence.length > 0 && <DiligenceBlock people={brief.diligence} />}
+      {brief.network && <NetworkBlock network={brief.network} />}
+      <ScopeBlock scope={brief.scope} generatedAt={brief.generatedAt} />
+    </div>
+  );
+}
+
+function RiskBlock({ risk }: { risk: PrintRisk }) {
+  return (
+    <section className="pb-flow-section pb-flow-lead">
+      <div className="pb-flow-head">Governance Risk Score</div>
+      <div className="pb-risk-top">
+        <div className="pb-risk-scorewrap">
+          <span className={`pb-risk-score pb-fg-${risk.tone}`}>{risk.score}</span>
+          <span className="pb-risk-outof">/ 100</span>
+          <span className={`pb-pill pb-tone-${risk.tone}`}>{risk.bandLabel}</span>
+        </div>
+        <div className="pb-risk-meter">
+          <div className={`pb-risk-meter-fill pb-bg-${risk.tone}`} style={{ width: `${risk.score}%` }} />
+        </div>
+        <div className="pb-risk-scale">
+          <span>Low</span>
+          <span>Moderate</span>
+          <span>Elevated</span>
+          <span>High</span>
+        </div>
+      </div>
+
+      {risk.contributions.length > 0 && (
+        <ul className="pb-risk-contribs">
+          {risk.contributions.map((c, i) => (
+            <li key={i} className="pb-risk-contrib">
+              <span className="pb-risk-contrib-label">
+                {c.label}
+                {c.detail && <span className="pb-risk-contrib-detail"> — {c.detail}</span>}
+              </span>
+              <span className={`pb-risk-contrib-pts ${c.points > 0 ? `pb-fg-${risk.tone}` : "pb-fg-neutral"}`}>
+                {c.points > 0 ? `+${c.points}` : "note"}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {(risk.coveragePartial || risk.uncorroborated) && (
+        <p className="pb-risk-caveat">
+          {risk.coveragePartial && "Rests on partial coverage — a low score here is not a clean bill of health. "}
+          {risk.uncorroborated && "The sharpest finding is single-source (press), with no official or court record behind it."}
+        </p>
+      )}
+
+      <div className="pb-method">
+        <div className="pb-method-label">Methodology</div>
+        <ol>
+          {risk.methodology.map((m, i) => (
+            <li key={i}>{m}</li>
+          ))}
+        </ol>
+      </div>
+    </section>
+  );
+}
+
+const DILIGENCE_TONE_LABEL: Record<PrintDiligencePerson["tone"], string> = {
+  red: "pb-edge-red",
+  amber: "pb-edge-amber",
+  green: "pb-edge-green",
+  neutral: "pb-edge-neutral",
+};
+
+function DiligenceBlock({ people }: { people: PrintDiligencePerson[] }) {
+  const flaggedRed = people.filter((p) => p.verdict === "red").length;
+  const flaggedAmber = people.filter((p) => p.verdict === "amber").length;
+  return (
+    <section className="pb-flow-section">
+      <div className="pb-flow-head">
+        Board Diligence
+        <span className="pb-flow-head-meta">
+          {people.length} director(s){flaggedRed > 0 ? ` · ${flaggedRed} red` : ""}
+          {flaggedAmber > 0 ? ` · ${flaggedAmber} to review` : ""} — each screened by DIN
+        </span>
+      </div>
+      <ul className="pb-dili">
+        {people.map((p, i) => (
+          <li key={i} className={`pb-dili-card ${DILIGENCE_TONE_LABEL[p.tone]}`}>
+            <div className="pb-dili-top">
+              <span className="pb-dili-name">{p.name}</span>
+              <span className={`pb-claim pb-tone-${p.tone}`}>{p.verdictLabel}</span>
+            </div>
+            <div className="pb-dili-meta">
+              {[p.role, p.din ? `DIN ${p.din}` : null, p.tenure ? `${p.tenure} tenure` : null].filter(Boolean).join(" · ")}
+            </div>
+            {p.headline && <div className="pb-dili-headline">{p.headline}</div>}
+            {p.concerns.length > 0 && (
+              <ul className="pb-dili-concerns">
+                {p.concerns.map((c, j) => (
+                  <li key={j} className="pb-dili-concern">
+                    <span className={`pb-dot pb-bg-${c.tone}`} />
+                    <span>
+                      {c.text}
+                      <Ref n={c.sourceRef} />
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {p.companies.length > 0 && (
+              <div className="pb-dili-cos">
+                <span className="pb-dili-cos-label">Also linked to</span> {p.companies.join(" · ")}
+              </div>
+            )}
+            {p.note && <div className="pb-dili-note">{p.note}</div>}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function NetworkBlock({ network }: { network: PrintNetwork }) {
+  return (
+    <section className="pb-flow-section">
+      <div className="pb-flow-head">
+        Related-Party Network
+        <span className="pb-flow-head-meta">Companies two or more directors share</span>
+      </div>
+      <ul className="pb-net">
+        {network.interlocks.map((it, i) => (
+          <li key={i} className="pb-net-row">
+            <span className={`pb-dot ${it.flagged ? "pb-bg-red" : "pb-bg-neutral"}`} />
+            <div>
+              <span className="pb-net-co">{it.company}</span>
+              {it.flagged && <span className="pb-net-flag">{it.status ?? "not in good standing"}</span>}
+              <span className="pb-net-count">{it.directors.length} directors</span>
+              <div className="pb-net-dirs">{it.directors.join(" · ")}</div>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <p className="pb-net-note">
+        Interlocks only — shareholding and ultimate beneficial ownership require the upgraded registry (PrivateCircle).
+      </p>
+    </section>
+  );
+}
+
+function ScopeBlock({ scope, generatedAt }: { scope: PrintScope; generatedAt: string }) {
+  return (
+    <section className="pb-flow-section">
+      <div className="pb-flow-head">
+        Scope &amp; Limitations
+        <span className="pb-flow-head-meta">As of {generatedAt}</span>
+      </div>
+      <p className="pb-scope-statement">{scope.statement}</p>
+      <ul className="pb-scope-list">
+        {scope.lines.map((l, i) => (
+          <li key={i} className="pb-scope-row">
+            <span className="pb-scope-name">
+              {l.name}
+              <span className="pb-scope-tier">{l.tierLabel}</span>
+            </span>
+            <span className={`pb-scope-status pb-fg-${l.tone}`}>{l.statusLabel}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -521,16 +710,20 @@ function Footer({ brief }: { brief: PrintBrief }) {
 function SourceItem({ s }: { s: SourceRef }) {
   // The whole entry — reference number included — is the clickable link when a
   // URL exists, so citation numbers are live in the exported PDF.
+  const body = (
+    <>
+      <span className="pb-ref">[{s.ref}]</span> {s.label}
+      {s.tier && <span className="pb-source-tier">{s.tier}</span>}
+    </>
+  );
   return (
     <li className="pb-source">
       {s.url ? (
         <a className="pb-source-link" href={s.url} target="_blank" rel="noreferrer">
-          <span className="pb-ref">[{s.ref}]</span> {s.label}
+          {body}
         </a>
       ) : (
-        <>
-          <span className="pb-ref">[{s.ref}]</span> {s.label}
-        </>
+        body
       )}
     </li>
   );

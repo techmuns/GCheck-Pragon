@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRun } from "@/lib/store";
 import { launchBrowser } from "@/lib/collectors/browser";
-import { buildPrintBrief, formatGenerated } from "@/lib/printBrief";
 
 export const dynamic = "force-dynamic";
 
@@ -30,12 +29,6 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   const port = process.env.PORT ?? "3000";
   const target = `http://127.0.0.1:${port}/print?id=${encodeURIComponent(params.id)}`;
 
-  // The brief is one page unless a profile was read, in which case a second
-  // detail page follows it. Bound the export to exactly the pages the document
-  // has, so a stray trailing sheet can never slip in.
-  const printBrief = buildPrintBrief(run, formatGenerated(run.createdAt));
-  const pageRanges = printBrief?.profile ? "1-2" : "1";
-
   const browser = await launchBrowser();
   try {
     const page = await browser.newPage();
@@ -49,9 +42,11 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     const pdf = await page.pdf({
       printBackground: true,
-      // Honour the document's own `@page { size: A4 portrait; margin: 0 }`.
+      // Honour the document's own `@page` sizes — the fixed executive/profile
+      // sheets (margin 0) and the flowing continuation (a margined named page).
+      // All pages are exported: the report is as long as it needs to be to leave
+      // nothing out, and the deterministic page geometry adds no trailing blank.
       preferCSSPageSize: true,
-      pageRanges,
     });
 
     const name = `${fileName(run.subject.company)}.pdf`;

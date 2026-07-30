@@ -1,8 +1,10 @@
-import type { Citation, Finding, RawHit, RenderedSection, Run, Severity } from "./types";
+import type { Citation, Finding, PersonDiligence, RawHit, RenderedSection, Run, Severity } from "./types";
 import { canonicalUrl } from "./collectors/types";
 import { compareByHierarchy, seniorRole } from "./hierarchy";
 import { nameFromTitle, samePerson, uniqueRefs } from "./people";
 import { buildProfile } from "./profileView";
+import { assessRisk, buildScope, riskMethodology, sourceTier, type Band, type RiskContribution } from "./risk";
+import { buildNetwork } from "./network";
 
 // ── Print-brief derivation ──────────────────────────────────────────────────
 // Turns a finished Run into the fixed, decision-grade shape the one-page A4
@@ -168,6 +170,60 @@ export interface SourceRef {
   ref: number;
   label: string;
   url?: string;
+  /** Authority tier of the source ("Official register", "Court record", …). */
+  tier?: string;
+}
+
+// ── Institutional blocks (parity with the on-screen dashboard) ───────────────
+
+export interface PrintRisk {
+  score: number;
+  band: Band;
+  bandLabel: string;
+  tone: Tone;
+  contributions: RiskContribution[];
+  methodology: string[];
+  coveragePartial: boolean;
+  uncorroborated: boolean;
+}
+
+export interface PrintDiligencePerson {
+  name: string;
+  din?: string;
+  role?: string;
+  tenure?: string;
+  status: PersonDiligence["status"];
+  verdict?: Severity;
+  verdictLabel: string;
+  tone: Tone;
+  headline?: string;
+  concerns: Array<{ text: string; tone: Tone; sourceRef?: number }>;
+  companies: string[];
+  note?: string;
+}
+
+export interface PrintInterlock {
+  company: string;
+  status?: string;
+  flagged: boolean;
+  directors: string[];
+}
+
+export interface PrintNetwork {
+  interlocks: PrintInterlock[];
+  withRecord: number;
+}
+
+export interface PrintScopeLine {
+  name: string;
+  tierLabel: string;
+  statusLabel: string;
+  tone: Tone;
+}
+
+export interface PrintScope {
+  statement: string;
+  lines: PrintScopeLine[];
 }
 
 export interface PrintBrief {
@@ -180,6 +236,14 @@ export interface PrintBrief {
   executive: string;
   /** The optional second page — present only when a profile was read. */
   profile: PrintProfile | null;
+  /** The scored governance risk read, shown on page one. */
+  risk: PrintRisk;
+  /** Per-director board diligence — the same data as the dashboard panel. */
+  diligence: PrintDiligencePerson[];
+  /** The board's related-party interlock network (company mode). */
+  network: PrintNetwork | null;
+  /** Scope & limitations — what was and was not checked, with source tiers. */
+  scope: PrintScope;
   metrics: PrintMetric[];
   concerns: Concern[];
   extraConcerns: number;
@@ -246,6 +310,7 @@ export function buildPrintBrief(run: Run, generatedAt: string): PrintBrief | nul
   const totalSources = run.progress.length;
 
   const sourcesAll = buildSources(brief.citations);
+  const risk = buildRiskBlock(run);
 
   return {
     company: run.subject.company,
@@ -256,7 +321,11 @@ export function buildPrintBrief(run: Run, generatedAt: string): PrintBrief | nul
     pill: pillFor(brief.verdict),
     executive: buildExecutive(brief.verdict, concernsAll, doneSources, totalSources),
     profile: buildProfileBlock(collected, brief.citations),
-    metrics: buildMetrics(brief.verdict, redFlags, toReview, doneSources, totalSources),
+    risk,
+    diligence: buildDiligenceBlock(run),
+    network: buildNetworkBlock(run),
+    scope: buildScopeBlock(run),
+    metrics: buildMetrics(risk, toReview, doneSources, totalSources),
     concerns,
     extraConcerns: Math.max(0, concernsAll.length - concerns.length),
     concernsEmptyText: brief.sections.find((s) => s.id === "red-flags")?.emptyText,
@@ -390,19 +459,16 @@ function buildExecutive(
   return parts.join(" ");
 }
 
-function buildMetrics(
-  verdict: Severity,
-  redFlags: number,
-  toReview: number,
-  done: number,
-  total: number,
-): PrintMetric[] {
-  const riskLabel: Record<Severity, string> = { red: "High", amber: "Moderate", clear: "Low", info: "Limited" };
+function buildMetrics(risk: PrintRisk, toReview: number, done: number, total: number): PrintMetric[] {
+  // Red-flag count comes off the score's own contributions, so the tile and the
+  // scored read below it never disagree about how many there were.
+  const redFlags = risk.contributions.find((c) => c.label === "Red-flag findings");
+  const redCount = redFlags?.detail?.match(/^(\d+)/)?.[1] ?? "0";
   return [
-    { value: String(redFlags), label: "Red flags", tone: redFlags > 0 ? "red" : "neutral" },
+    { value: redCount, label: "Red flags", tone: Number(redCount) > 0 ? "red" : "neutral" },
     { value: String(toReview), label: "To review", tone: toReview > 0 ? "amber" : "neutral" },
     { value: `${done}/${total}`, label: "Sources verified", tone: done > 0 ? "green" : "neutral" },
-    { value: riskLabel[verdict], label: "Overall risk", tone: SEVERITY_TONE[verdict] },
+    { value: `${risk.score}`, label: `Risk score · ${risk.bandLabel}`, tone: risk.tone },
   ];
 }
 
@@ -985,6 +1051,97 @@ function buildProfileBlock(collected: Run["collected"], citations: Citation[]): 
   };
 }
 
+// ── Institutional blocks ─────────────────────────────────────────────────────
+// The dashboard's risk score, board diligence, network and scope, mapped to the
+// fixed print shapes. Same derivations as the screen (lib/risk, lib/network), so
+// the exported report says exactly what the dashboard did — nothing on screen is
+// left out of the file.
+
+const BAND_LABEL: Record<Band, string> = { high: "High", elevated: "Elevated", moderate: "Moderate", low: "Low" };
+const BAND_TONE: Record<Band, Tone> = { high: "red", elevated: "amber", moderate: "amber", low: "green" };
+
+function buildRiskBlock(run: Run): PrintRisk {
+  const r = assessRisk(run);
+  return {
+    score: r.score,
+    band: r.band,
+    bandLabel: BAND_LABEL[r.band],
+    tone: BAND_TONE[r.band],
+    contributions: r.contributions.slice(0, 7),
+    methodology: riskMethodology(),
+    coveragePartial: r.coverage.partial,
+    uncorroborated: r.uncorroborated,
+  };
+}
+
+const DILIGENCE_VERDICT_LABEL: Record<Severity, string> = {
+  red: "Red flag",
+  amber: "Review",
+  clear: "Clear",
+  info: "Unresolved",
+};
+
+function buildDiligenceBlock(run: Run): PrintDiligencePerson[] {
+  const people = run.diligence ?? [];
+  const urlByRef = new Map(run.brief?.citations.filter((c) => c.url).map((c) => [c.url as string, c.ref]) ?? []);
+  return people.map((p) => {
+    const v = p.verdict ?? "info";
+    return {
+      name: p.name,
+      din: p.din,
+      role: p.role,
+      tenure: p.tenure,
+      status: p.status,
+      verdict: p.verdict,
+      verdictLabel: p.status === "error" ? "n/a" : p.status !== "done" ? "checking" : DILIGENCE_VERDICT_LABEL[v],
+      tone: p.status === "done" ? SEVERITY_TONE[v] : "neutral",
+      headline: p.headline,
+      concerns: p.concerns.map((c) => ({
+        text: trimToPhrase(stripQuotes(c.text), 150),
+        tone: SEVERITY_TONE[c.severity],
+        sourceRef: c.url ? urlByRef.get(c.url) : undefined,
+      })),
+      companies: (p.companies ?? []).map((c) => c.name).slice(0, 8),
+      note: p.note,
+    };
+  });
+}
+
+function buildNetworkBlock(run: Run): PrintNetwork | null {
+  const net = buildNetwork(run);
+  if (!net || net.interlocks.length === 0) return null;
+  return {
+    withRecord: net.withRecord,
+    interlocks: net.interlocks.map((i) => ({
+      company: i.company,
+      status: i.status,
+      flagged: i.flagged,
+      directors: i.directors,
+    })),
+  };
+}
+
+function buildScopeBlock(run: Run): PrintScope {
+  const scope = buildScope(run);
+  const toneOf = (status: string): Tone =>
+    status === "covered" ? "green" : status === "partial" ? "amber" : status === "upgrade" ? "amber" : "neutral";
+  const label: Record<string, string> = {
+    covered: "Covered",
+    partial: "Partial",
+    "not-run": "Not run",
+    upgrade: "Upgrade",
+  };
+  return {
+    statement: scope.statement,
+    lines: scope.lines.map((l) => ({
+      name: l.name,
+      tierLabel: l.tierLabel,
+      statusLabel: label[l.status] ?? l.status,
+      tone: toneOf(l.status),
+    })),
+  };
+}
+
 /**
  * A registry standing flag, written from the record.
  *
@@ -1234,6 +1391,7 @@ function buildSources(citations: Citation[]): SourceRef[] {
     ref: c.ref,
     label: shorten(`${publisherOf(c.sourceName)} — ${stripQuotes(c.label)}`, 46),
     url: c.url,
+    tier: sourceTier(c.sourceName).label,
   }));
 }
 

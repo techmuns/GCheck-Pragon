@@ -1,5 +1,4 @@
-import type { CollectorResult, Run, SourceProgress } from "./types";
-import { listConcerns } from "./printBrief";
+import type { CollectorResult, Finding, Run, SourceProgress } from "./types";
 import { boardFlagCounts, buildNetwork } from "./network";
 
 // ── Risk methodology, source tiers & scope ───────────────────────────────────
@@ -129,8 +128,11 @@ export function assessRisk(run: Run): RiskAssessment {
     if (points > 0) contributions.push({ label, points, detail });
   };
 
-  // Company-level concerns (the itemised red/amber matters).
-  const concerns = listConcerns(run);
+  // Company-level concerns (the itemised red/amber matters). Read straight from
+  // the assembled summary section rather than through the print-brief builder,
+  // so this module has no dependency on it and the two cannot import in a cycle.
+  const summary = run.brief?.sections.find((s) => s.id === "red-flags");
+  const concerns: Finding[] = (summary?.findings ?? []).filter((f) => f.severity === "red" || f.severity === "amber");
   const red = concerns.filter((c) => c.severity === "red").length;
   const amber = concerns.filter((c) => c.severity === "amber").length;
   add("Red-flag findings", red * 18, CAP.redConcerns, red > 0 ? `${red} item(s)` : undefined);
@@ -174,15 +176,18 @@ export function assessRisk(run: Run): RiskAssessment {
   const completed = run.progress.filter((p) => p.status === "done").length;
   const partial = total > 0 && completed / total < 0.6;
 
-  // Corroboration of the sharpest finding.
+  // Corroboration of the sharpest finding: is the leading concern backed only by
+  // a press source, with nothing on the official register or a court record to
+  // stand behind it?
   const sharpest = concerns[0];
+  const citations = run.brief?.citations ?? [];
+  const sharpestCitation =
+    sharpest?.sourceRef !== undefined ? citations.find((c) => c.ref === sharpest.sourceRef) : undefined;
+  const sharpestIsPress = sharpestCitation ? sourceTier(sharpestCitation.sourceName).tier === "press" : false;
   const hasOfficialOrCourt = collected.some(
     (c) => (c.sourceId === "indiankanoon" || sourceTier(c.sourceId).tier === "official") && c.status === "done" && c.hits.length > 0,
   );
-  const uncorroborated =
-    Boolean(sharpest) &&
-    sharpest.category === "Adverse media" &&
-    !hasOfficialOrCourt;
+  const uncorroborated = Boolean(sharpest) && sharpestIsPress && !hasOfficialOrCourt;
   if (uncorroborated) {
     contributions.push({
       label: "Sharpest finding is single-source (press)",

@@ -1,4 +1,4 @@
-import type { Citation, CollectorResult, RenderedSection, Run, SourceProgress } from "@/lib/types";
+import type { Citation, CollectorResult, PersonDiligence, RenderedSection, Run, SourceProgress } from "@/lib/types";
 
 // ── Synthetic runs for the print-brief QA harness ─────────────────────────────
 // Three densities exercise the fixed one-page layout end to end:
@@ -618,6 +618,58 @@ function maxRun(): Run {
     },
   ];
 
+  const co = (name: string, status = "Active") => ({ name, status });
+  const diligence: PersonDiligence[] = [
+    {
+      id: "din:00110234", name: "Rajesh Kumar Verma", din: "00110234", role: "Managing Director", tenure: "23y 5m",
+      status: "done", verdict: "red",
+      headline: "Red flags for Rajesh Kumar Verma — SFIO scrutiny and a struck-off company in his history.",
+      concerns: [
+        { severity: "red", text: "Named in an SFIO investigation into diversion of homebuyer funds.", url: "https://news.example.com/ad1" },
+        { severity: "red", text: "Shell Holdings, on which he sits, is recorded as \"Strike Off\" on the MCA register.", url: "https://www.indiafilings.com/z" },
+      ],
+      otherDirectorships: [],
+      companies: [co("Adarsh Infrastructure & Realty Holdings (India) Private Limited"), co("Volcan Investments Private Limited"), co("Shell Holdings Private Limited", "Strike Off")],
+    },
+    {
+      id: "din:00110235", name: "Sunita Rajesh Verma", din: "00110235", role: "Whole-time Director", tenure: "21y 2m",
+      status: "done", verdict: "amber",
+      headline: "Sunita Rajesh Verma: items to review, no hard red flags.",
+      concerns: [{ severity: "amber", text: "1 litigation record surfaced on Indian Kanoon.", url: "https://indiankanoon.org/doc/201/" }],
+      otherDirectorships: [],
+      companies: [co("Adarsh Infrastructure & Realty Holdings (India) Private Limited"), co("Volcan Investments Private Limited"), co("Shell Holdings Private Limited", "Strike Off")],
+    },
+    {
+      id: "din:00110236", name: "Deepak Chandrasekaran Iyer", din: "00110236", role: "Director", tenure: "9y 8m",
+      status: "done", verdict: "clear",
+      headline: "No red flags surfaced for Deepak Chandrasekaran Iyer across the sources that ran.",
+      concerns: [], otherDirectorships: [],
+      companies: [co("Adarsh Infrastructure & Realty Holdings (India) Private Limited"), co("Meridian Capital Advisors Private Limited")],
+    },
+    {
+      id: "din:00110237", name: "Farida Contractor", din: "00110237", role: "Independent Director", tenure: "3y 4m",
+      status: "done", verdict: "clear",
+      headline: "No red flags surfaced for Farida Contractor across the sources that ran.",
+      concerns: [], otherDirectorships: [],
+      companies: [co("Adarsh Infrastructure & Realty Holdings (India) Private Limited")],
+    },
+    {
+      id: "din:00110238", name: "Vikram Singh Rathore", din: "00110238", role: "Director", tenure: "5y 0m",
+      status: "done", verdict: "amber",
+      headline: "Vikram Singh Rathore: one litigation matter to review.",
+      concerns: [{ severity: "amber", text: "Named as a respondent in a DRT recovery matter.", url: "https://indiankanoon.org/doc/201/" }],
+      otherDirectorships: [],
+      companies: [co("Adarsh Infrastructure & Realty Holdings (India) Private Limited"), co("Volcan Investments Private Limited")],
+    },
+    {
+      id: "din:00110239", name: "Neha Agarwal", din: "00110239", role: "Company Secretary", tenure: "1y 6m",
+      status: "done", verdict: "clear",
+      headline: "No red flags surfaced for Neha Agarwal.",
+      concerns: [], otherDirectorships: [],
+      companies: [co("Adarsh Infrastructure & Realty Holdings (India) Private Limited")],
+    },
+  ];
+
   return {
     id: "mock_max",
     subject: {
@@ -629,6 +681,7 @@ function maxRun(): Run {
     createdAt: CREATED,
     progress,
     collected,
+    diligence,
     brief: {
       verdict: "red",
       headline: "Serious governance red flags for Adarsh Infrastructure — active SFIO/CBI/ED scrutiny and a large suit-filed default. Do not proceed without deep diligence.",
