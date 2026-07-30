@@ -21,6 +21,45 @@ interface Props {
 // /api/autocomplete as structured rows — a primary line and a quiet second line
 // (a company's sector · country, or a director's DIN · company) — so a name is
 // something the reader can tell apart from its namesakes before they pick it.
+//
+// The field is built so that typing never waits on the network: an answer
+// already in the session cache is shown outright, a shorter prefix's answer is
+// narrowed locally to stand in until the real one lands, superseded requests are
+// aborted, and only the newest response may write to the list.
+
+/** Short, because a keystroke now costs nothing when the answer is cached and is
+ *  aborted the moment the next one arrives. */
+const DEBOUNCE_MS = 160;
+
+/** Flattened form for local narrowing — matches the server's own matcher. */
+function norm(s: string): string {
+  return s.toLowerCase().replace(/[.,&'"()-]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * A provisional list for a query we have not asked about yet, taken from the
+ * longest already-answered prefix of it and filtered to what still matches.
+ *
+ * Only ever a stand-in: it cannot invent a row the server never sent, and it is
+ * replaced by the authoritative answer as soon as that arrives. Returns null
+ * when there is nothing to narrow, so the caller can tell "no provisional" from
+ * "provisionally empty".
+ */
+function narrowFromPrefix(
+  cache: Map<string, Suggestion[]>,
+  kind: string,
+  q: string,
+): Suggestion[] | null {
+  const lower = q.toLowerCase();
+  for (let cut = lower.length - 1; cut >= 2; cut--) {
+    const prior = cache.get(`${kind}:${lower.slice(0, cut)}`);
+    if (!prior) continue;
+    const needle = norm(q);
+    const narrowed = prior.filter((s) => norm(`${s.label} ${s.value}`).includes(needle));
+    return narrowed;
+  }
+  return null;
+}
 export default function AutocompleteField({
   kind,
   value,
@@ -37,36 +76,87 @@ export default function AutocompleteField({
   const [active, setActive] = useState(-1);
   const boxRef = useRef<HTMLDivElement>(null);
 
+  // Everything this session has already looked up, keyed by kind + query. A
+  // typeahead re-asks the same prefixes constantly — backspace one letter and
+  // you are back on a query answered a second ago — and paying a round trip for
+  // an answer already in hand is most of what makes a field feel slow.
+  const cache = useRef<Map<string, Suggestion[]>>(new Map());
+  // Only the newest request may write to state. Without this a slow early
+  // response can land after a fast later one and overwrite the right list with
+  // a stale one — the classic typeahead flicker.
+  const seq = useRef(0);
+  const inflight = useRef<AbortController | null>(null);
+  // Picking a row sets the value, which would otherwise fire a fresh lookup for
+  // the exact text we just resolved.
+  const skipNext = useRef(false);
+
   useEffect(() => {
     const q = value.trim();
+    if (skipNext.current) {
+      skipNext.current = false;
+      return;
+    }
     if (!q) {
+      inflight.current?.abort();
       setSuggestions([]);
       setLoading(false);
       return;
     }
-    let cancelled = false;
+
+    const key = `${kind}:${q.toLowerCase()}`;
+
+    // Already answered — show it and spend nothing.
+    const hit = cache.current.get(key);
+    if (hit) {
+      setSuggestions(hit);
+      setActive(-1);
+      setLoading(false);
+      return;
+    }
+
+    // Nothing exact, but a shorter prefix may already be answered. Narrowing it
+    // locally gives the user a correct-looking list on the very keystroke rather
+    // than an empty box, and the authoritative answer replaces it a moment later.
+    const provisional = narrowFromPrefix(cache.current, kind, q);
+    if (provisional) {
+      setSuggestions(provisional);
+      setActive(-1);
+    }
     setLoading(true);
-    // A live lookup against a metered backend, not a local filter — so the pause
-    // before firing is longer than a pure-UI debounce would need. Same feel to
-    // type against; far fewer calls.
+
+    const mine = ++seq.current;
     const t = setTimeout(async () => {
+      inflight.current?.abort();
+      const controller = new AbortController();
+      inflight.current = controller;
       try {
-        const res = await fetch(apiUrl(`/api/autocomplete?kind=${kind}&q=${encodeURIComponent(q)}`));
+        const res = await fetch(apiUrl(`/api/autocomplete?kind=${kind}&q=${encodeURIComponent(q)}`), {
+          signal: controller.signal,
+        });
         const data = await res.json();
-        if (!cancelled) {
-          setSuggestions(Array.isArray(data.suggestions) ? data.suggestions : []);
+        const list: Suggestion[] = Array.isArray(data.suggestions) ? data.suggestions : [];
+        cache.current.set(key, list);
+        // Bound the map — a long session of typing would otherwise grow it
+        // without limit. Insertion order is Map's iteration order, so the first
+        // key is the coldest.
+        if (cache.current.size > 200) {
+          const oldest = cache.current.keys().next();
+          if (!oldest.done) cache.current.delete(oldest.value);
+        }
+        if (mine === seq.current) {
+          setSuggestions(list);
           setActive(-1);
         }
       } catch {
-        if (!cancelled) setSuggestions([]);
+        // An abort is the expected path when the user keeps typing, and a
+        // failure should never wipe a provisional list that is still useful.
+        if (mine === seq.current && !provisional) setSuggestions([]);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (mine === seq.current) setLoading(false);
       }
-    }, 300);
-    return () => {
-      cancelled = true;
-      clearTimeout(t);
-    };
+    }, DEBOUNCE_MS);
+
+    return () => clearTimeout(t);
   }, [value, kind]);
 
   useEffect(() => {
@@ -78,9 +168,15 @@ export default function AutocompleteField({
   }, []);
 
   function choose(s: Suggestion) {
+    // The value is about to become the row we just resolved; looking it up again
+    // would spend a call to be told what the user has already picked.
+    skipNext.current = true;
+    inflight.current?.abort();
+    seq.current += 1;
     onChange(s.value);
     setOpen(false);
     setSuggestions([]);
+    setLoading(false);
     onSelect?.(s);
     onCommit?.(s.value);
   }
@@ -130,7 +226,10 @@ export default function AutocompleteField({
           aria-controls="ac-list"
           aria-autocomplete="list"
         />
-        {loading && value.trim() && (
+        {/* Only when there is genuinely nothing on screen yet. A spinner over a
+            list the user is already reading says "wait" about an answer that has
+            arrived, which is what made the field feel slower than it was. */}
+        {loading && value.trim() && suggestions.length === 0 && (
           <span
             className="pointer-events-none absolute right-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin rounded-full border-2 border-navy-primary/25 border-t-navy-primary/70"
             aria-hidden
