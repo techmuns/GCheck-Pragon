@@ -31,14 +31,13 @@ body {
 }
 
 /* Canvas — cool blue mist with three faint tonal pools (navy · royal · sky) */
+/* A single quiet paper tone. The canvas used to carry three tinted pools and a
+   vertical gradient, which fought every white card sitting on it; a document
+   meant to be read for its content wants a surface that does not compete. */
 body {
   min-height: 100vh;
-  background-color: #eef3fa;
-  background-image:
-    radial-gradient(1100px 560px at 100% -10%, rgba(39, 69, 126, 0.07), transparent 60%),
-    radial-gradient(820px 460px at -8% 108%, rgba(61, 125, 214, 0.06), transparent 58%),
-    radial-gradient(700px 420px at 52% 122%, rgba(96, 165, 214, 0.05), transparent 60%),
-    linear-gradient(180deg, #f3f7fc 0%, #e7eef8 100%);
+  background-color: #f2f5f9;
+  background-image: radial-gradient(1200px 640px at 50% -18%, rgba(39, 69, 126, 0.045), transparent 62%);
   background-attachment: fixed;
 }
 
@@ -108,21 +107,25 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* ── Surfaces ──────────────────────────────────────────────────────────── */
+/* ── Surfaces ──────────────────────────────────────────────────────────────
+   Flat white on a hairline rule, with a shadow barely there.
+   A deep drop-shadow under every card makes a page look like a set of floating
+   widgets; an institutional document reads as one sheet with divisions ruled on
+   it. The lift is kept only far enough to separate a card from the canvas, and
+   the gradient wash is gone — it was tinting the white differently at the top
+   and bottom of each card, which is exactly the sort of thing that reads as
+   cheap without anyone being able to say why. */
 .card-surface {
-  border-radius: 1.15rem;
+  border-radius: 0.875rem;
   background-color: #ffffff;
-  background-image: linear-gradient(159deg, #ffffff 0%, #fcfdfe 56%, #f6f9fd 100%);
-  border: 1px solid rgba(23, 43, 77, 0.11);
-  box-shadow:
-    0 1px 2px rgba(23, 43, 77, 0.05),
-    0 13px 30px rgba(23, 43, 77, 0.11);
+  border: 1px solid rgba(23, 43, 77, 0.09);
+  box-shadow: 0 1px 2px rgba(23, 43, 77, 0.04);
 }
 
 .surface-soft {
-  border-radius: 0.75rem;
-  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(244, 247, 252, 0.6));
-  border: 1px solid rgba(23, 43, 77, 0.06);
+  border-radius: 0.625rem;
+  background-color: #fafbfd;
+  border: 1px solid rgba(23, 43, 77, 0.07);
 }
 
 .hover-lift {

@@ -7,11 +7,35 @@ import { severityStyle } from "./severity";
 // Compact, signal-coded, on-brand. Colour is always meaning: red=risk,
 // gold=review, green=clear, navy/grey=neutral.
 
-const VERDICT_META: Record<Severity, { label: string; plain: string; color: string; soft: string }> = {
-  red: { label: "Red Flags", plain: "Serious issues found — review before meeting", color: "#C0392B", soft: "#FAE8E5" },
-  amber: { label: "Review", plain: "Some items to check before meeting", color: "#B7791F", soft: "#F6EED9" },
-  clear: { label: "Clear", plain: "Nothing concerning surfaced", color: "#2F855A", soft: "#E7F5F1" },
-  info: { label: "Limited", plain: "Only some sources ran", color: "#6B7280", soft: "#EEF2F8" },
+const VERDICT_META: Record<Severity, { label: string; plain: string; line: string; color: string; soft: string }> = {
+  red: {
+    label: "Red flags",
+    plain: "Serious issues found — review before meeting",
+    line: "Serious issues found",
+    color: severityStyle.red.ink,
+    soft: severityStyle.red.tint,
+  },
+  amber: {
+    label: "Review",
+    plain: "Some items to check before meeting",
+    line: "Worth raising before the meeting",
+    color: severityStyle.amber.ink,
+    soft: severityStyle.amber.tint,
+  },
+  clear: {
+    label: "Clear",
+    plain: "Nothing concerning surfaced",
+    line: "Nothing concerning surfaced",
+    color: severityStyle.clear.ink,
+    soft: severityStyle.clear.tint,
+  },
+  info: {
+    label: "Limited",
+    plain: "Only some sources ran",
+    line: "Not enough ran to be conclusive",
+    color: "#5A6B84",
+    soft: "#F1F4F9",
+  },
 };
 
 // A 3-step risk scale with the current level lit — clearer than a gauge.

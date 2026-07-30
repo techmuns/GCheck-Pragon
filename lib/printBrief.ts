@@ -1,4 +1,4 @@
-import type { Citation, RawHit, RenderedSection, Run, Severity } from "./types";
+import type { Citation, Finding, RawHit, RenderedSection, Run, Severity } from "./types";
 import { canonicalUrl } from "./collectors/types";
 import { compareByHierarchy, seniorRole } from "./hierarchy";
 import { nameFromTitle, samePerson, uniqueRefs } from "./people";
@@ -38,6 +38,24 @@ export type Tone = "red" | "amber" | "green" | "neutral";
 export interface PositiveRow {
   text: string;
   sourceRef?: number;
+}
+
+/** A row of the Recent News table. A headline says a matter exists; the summary
+ *  is what it actually said, which is the part a reader can act on. */
+export interface NewsRow {
+  headline: string;
+  /** What the piece says, in a sentence — the read article's extracted finding
+   *  where there is one, the search snippet otherwise. */
+  summary?: string;
+  date?: string;
+  /** The publication, not the search engine that found it. */
+  outlet?: string;
+  tone: Tone;
+  /** How this relates to the subject: read in full, name-matched only, or
+   *  coverage of one of their companies that never names them. */
+  attribution?: string;
+  sourceRef?: number;
+  url?: string;
 }
 export type ClaimType = "Verified" | "Reported" | "Alleged" | "Under review";
 
@@ -143,6 +161,7 @@ export interface PrintBrief {
   extraCases: number;
   positives: PositiveRow[];
   extraPositives: number;
+  news: NewsRow[];
   sourceQuality: SourceQualityRow[];
   researchGaps: string[];
   sources: SourceRef[];
@@ -215,6 +234,7 @@ export function buildPrintBrief(run: Run, generatedAt: string): PrintBrief | nul
     extraCases: Math.max(0, casesAll.length - CAPS.cases),
     positives: positivesAll.slice(0, CAPS.positives),
     extraPositives: Math.max(0, positivesAll.length - CAPS.positives),
+    news: buildNewsRows(bySource, brief.citations),
     sourceQuality: buildSourceQuality(run),
     researchGaps: buildResearchGaps(run, cin, peopleAll.length),
     sources: sourcesAll.slice(0, CAPS.sources),
@@ -246,11 +266,26 @@ interface HitRef {
   sourceName: string;
 }
 
+/** How much a hit is worth as the record behind a finding. A registry standing
+ *  flag and the directorship row for the same company share one URL, and the
+ *  flag is the one a concern is about — first-writer-wins handed back the
+ *  directorship and the concern lost every fact the flag carried. */
+function hitWeight(h: RawHit): number {
+  const c = h.extra?.category;
+  if (c === "governance") return 3;
+  if (c === "insight") return 2;
+  if (c === "directorship") return 0;
+  return 1;
+}
+
 function indexHitsByUrl(collected: Run["collected"]): Map<string, HitRef> {
   const out = new Map<string, HitRef>();
   for (const c of collected ?? []) {
     for (const h of c.hits) {
-      if (h.url && !out.has(h.url)) out.set(h.url, { hit: h, sourceId: c.sourceId, sourceName: c.sourceName });
+      if (!h.url) continue;
+      const existing = out.get(h.url);
+      if (existing && hitWeight(existing.hit) >= hitWeight(h)) continue;
+      out.set(h.url, { hit: h, sourceId: c.sourceId, sourceName: c.sourceName });
     }
   }
   return out;
@@ -373,6 +408,21 @@ function buildConcerns(
     const hitRef = citation?.url ? hitByUrl.get(citation.url) : undefined;
     const hit = hitRef?.hit;
     const sourceId = hitRef?.sourceId ?? guessSourceId(citation?.sourceName, f.text);
+
+    // A registry standing flag is built from the record itself rather than from
+    // the sentence written about it. The two used to be assembled separately,
+    // and when the model's wording named one company while its citation pointed
+    // at another, the card printed a claim about SCOTTISH INFRATECH above
+    // evidence quoting ASHOO INFRAESTATES. A card whose proof contradicts its
+    // own headline is worse than no card.
+    if (hit?.extra?.category === "governance") {
+      const registryConcern = governanceConcern(f, hit, subject);
+      const gKey = dedupeKey(registryConcern.title);
+      if (seen.has(gKey)) continue;
+      seen.add(gKey);
+      concerns.push(registryConcern);
+      continue;
+    }
 
     const meta = classifyConcern(f.severity, sourceId, f.text, hit);
     const { title, evidence, countFact } = statementAndEvidence(f.text, hit);
@@ -865,6 +915,124 @@ function buildPositives(sections: RenderedSection[]): PositiveRow[] {
     .map((f) => ({ text: trimToPhrase(stripQuotes(f.text), 110), sourceRef: f.sourceRef }));
 }
 
+/**
+ * A registry standing flag, written from the record.
+ *
+ * The old card said "Flagged by the source as adverse to the individual —
+ * confirm the underlying facts", three times over, which tells a reader
+ * nothing they could act on. Everything below is a fact the register actually
+ * published and this pipeline already fetched: which company, its CIN, where
+ * it is registered, when it was incorporated, when the subject joined its
+ * board, and when it last filed. That is the who / what / where / when a
+ * partner needs to open the conversation.
+ */
+function governanceConcern(f: Finding, hit: RawHit, subject: Run["subject"]): Concern {
+  const x = hit.extra ?? {};
+  const company = str(x.company) ?? "This company";
+  const status = str(x.status) ?? "not in good standing";
+  const person = str(x.person) ?? subject.company;
+
+  const facts: ConcernFact[] = [];
+  const add = (label: string, value?: string) => {
+    if (value) facts.push({ label, value });
+  };
+  add("Status", status);
+  add("CIN", str(x.cin));
+  add("Registrar", str(x.roc));
+  add("Incorporated", str(x.incorporatedOn));
+  add("Subject joined", str(x.joinedOn));
+  add("Last AGM", str(x.lastAgm));
+  add("Registered", str(x.address));
+
+  const struck = /strike|struck/i.test(status);
+  const why = struck
+    ? `A struck-off company is off the register and cannot legally trade. ${person} is on its board of record, so ask when it ceased operating, whether it was struck off for non-filing, and whether any restoration or director-disqualification proceedings followed — striking off for default can disqualify a director for five years under s.164(2).`
+    : `The register does not show ${company} in good standing. Ask ${person} what its current position is and whether any filing or restoration is outstanding.`;
+
+  return {
+    severity: f.severity,
+    tone: SEVERITY_TONE[f.severity] ?? "amber",
+    category: "Governance flag",
+    title: `${company} — ${status} on the MCA register`,
+    facts,
+    // The register's own words for it, so the quote can never describe a
+    // different company from the one in the title.
+    evidence: `${company} — ${status}`,
+    evidenceSource: "MCA register, via IndiaFilings",
+    whyItMatters: why,
+    claim: "Verified",
+    sourceRef: f.sourceRef,
+  };
+}
+
+
+/**
+ * The Recent News table.
+ *
+ * A list of headlines is a list of things that exist. What a reader needs is
+ * what each one said — so every row carries a summary: the extracted finding
+ * where the article was actually opened and read, and the search snippet where
+ * it was not. A row with neither says so rather than pretending.
+ */
+function buildNewsRows(bySource: SourceIndex, citations: Citation[]): NewsRow[] {
+  const refByUrl = new Map<string, number>();
+  for (const c of citations) if (c.url) refByUrl.set(c.url, c.ref);
+
+  // Insights first: they were read, so their summary is the real one, and they
+  // supersede the bare headline they came from.
+  const insightByUrl = new Map<string, RawHit>();
+  for (const id of ["news", "google"]) {
+    for (const h of bySource[id]?.hits ?? []) {
+      if (h.extra?.category === "insight" && h.url) insightByUrl.set(canonicalUrl(h.url) ?? h.url, h);
+    }
+  }
+
+  const rows: NewsRow[] = [];
+  const seen = new Set<string>();
+
+  for (const id of ["news", "google"]) {
+    const source = bySource[id];
+    if (source?.status !== "done") continue;
+
+    for (const h of source.hits) {
+      if (h.extra?.category === "insight") continue;
+      const key = canonicalUrl(h.url) ?? h.title.toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+
+      const insight = insightByUrl.get(key);
+      const kws = h.matchedKeywords ?? [];
+      const hard = kws.some((k) => ["fraud", "cbi", "eow", "criminal", "wilful", "defaulter"].includes(k.toLowerCase()));
+      const role = str(insight?.extra?.subjectRole);
+
+      rows.push({
+        headline: trimToPhrase(stripQuotes(insight?.extra?.sourceTitle ? String(insight.extra.sourceTitle) : h.title), 120),
+        summary: insight ? insight.title : h.snippet ? trimToPhrase(stripQuotes(h.snippet), 240) : undefined,
+        date: normaliseDate(insight?.date ?? h.date),
+        outlet: hostOf(h.url) ?? publisherOf(source.name),
+        tone: insight?.extra?.polarity === "positive" ? "green" : hard ? "red" : kws.length > 0 ? "amber" : "neutral",
+        attribution:
+          role && role !== "unclear" && role !== "not_mentioned"
+            ? `Read in full — the subject is the ${role}`
+            : insight
+              ? "Read in full"
+              : h.confidence === "unverified"
+                ? "Name match only — not confirmed as this person"
+                : h.extra?.namesSubject === false && h.entity
+                  ? `Coverage of ${h.entity}; the subject is not named`
+                  : undefined,
+        sourceRef: h.url ? refByUrl.get(h.url) : undefined,
+        url: h.url,
+      });
+    }
+  }
+
+  // Adverse first, then anything dated, then the rest — a reader scanning the
+  // top of the table should meet the sharpest item first.
+  const rank: Record<Tone, number> = { red: 3, amber: 2, green: 1, neutral: 0 };
+  return rows.sort((a, b) => rank[b.tone] - rank[a.tone]).slice(0, 12);
+}
+
 function buildCases(bySource: SourceIndex, citations: Citation[]): CaseRow[] {
   const refByUrl = new Map(citations.filter((c) => c.url).map((c) => [c.url as string, c.ref]));
   const out: CaseRow[] = [];
@@ -997,6 +1165,17 @@ function buildSources(citations: Citation[]): SourceRef[] {
     label: shorten(`${publisherOf(c.sourceName)} — ${stripQuotes(c.label)}`, 46),
     url: c.url,
   }));
+}
+
+/** The publication, from its own domain — "indiankanoon.org", not the whole URL
+ *  spilling across the column it is supposed to fit in. */
+function hostOf(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return undefined;
+  }
 }
 
 function publisherOf(sourceName: string): string {

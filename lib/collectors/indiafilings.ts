@@ -496,6 +496,17 @@ async function directorRun(
 
   hits.push(...governanceHits(record));
 
+  /** Fold a company page's master data onto every hit already emitted for it,
+   *  so a finding about that company can state when it was incorporated, where
+   *  it is registered and when it last filed — rather than only that something
+   *  is wrong with it. */
+  const enrich = (cin: string | undefined, detail: Record<string, unknown>) => {
+    if (!cin) return;
+    for (const h of hits) {
+      if (h.extra?.cin === cin) h.extra = { ...h.extra, ...detail };
+    }
+  };
+
   // Company pages are opened only to learn who else sits on these boards. They
   // are budgeted and never allowed to contradict the person's own record.
   const boards = record.entities.filter((e) => e.kind === "company").slice(0, MAX_COMPANY_PAGES);
@@ -505,6 +516,22 @@ async function directorRun(
       const company = await companyByUrl(e.url);
       queries.push(e.url);
       if (!company) continue;
+
+      enrich(company.cin, {
+        roc: company.roc,
+        incorporatedOn: company.incorporatedOn,
+        address: company.address,
+        email: company.email,
+        authorisedCapital: company.authorisedCapital,
+        paidUpCapital: company.paidUpCapital,
+        listing: company.listing,
+        lastAgm: company.lastAgm,
+        boardSize: company.directors.length,
+        // When this person joined the board, which is what makes a struck-off
+        // company theirs to answer for rather than merely adjacent to them.
+        joinedOn: company.directors.find((d) => d.din === record.din)?.since,
+      });
+
       for (const d of company.directors) {
         if (d.din === record.din) continue;
         hits.push({
@@ -546,7 +573,15 @@ function governanceHits(record: DirectorRecord): RawHit[] {
       title: `${e.name} is recorded as "${e.status}" on the MCA register`,
       url: e.url,
       entity: e.name,
-      extra: { category: "governance", flag: "entity-status", company: e.name, cin: e.id, status: e.status },
+      extra: {
+        category: "governance",
+        flag: "entity-status",
+        company: e.name,
+        cin: e.id,
+        status: e.status,
+        din: record.din,
+        person: record.name,
+      },
     });
   }
 
