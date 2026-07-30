@@ -59,6 +59,15 @@ export const defaultConfig: AppConfig = {
       url: "https://www.wikidata.org",
     },
     {
+      id: "profile",
+      name: "Profile & Background",
+      kind: "api",
+      description:
+        "The public profile of the person or company — role, net worth and ranking where a source publishes one, biography and career milestones — read from sources like Forbes and Wikipedia.",
+      enabled: true,
+      url: "https://www.forbes.com",
+    },
+    {
       // Listed-company only (keys off a stock ticker), so disabled by default —
       // this tool targets unlisted-company due diligence. The collector stays
       // registered and can be re-enabled from the admin panel if a listed
@@ -110,16 +119,19 @@ export const defaultConfig: AppConfig = {
 
   sections: [
     { id: "red-flags", title: "Key Concerns", hint: "The most important things to know before the meeting.", enabled: true, order: 0 },
-    { id: "snapshot", title: "Company Snapshot", hint: "Who they are, in one glance.", enabled: true, order: 1 },
-    { id: "management", title: "Key People", hint: "The people behind the company.", enabled: true, order: 2 },
-    { id: "directorships", title: "Company & Directors", hint: "Other and past companies the directors are involved with.", enabled: true, order: 3 },
-    { id: "litigation", title: "Court Cases", hint: "Court cases involving the company or its people.", enabled: true, order: 4 },
-    { id: "defaulters", title: "Loan Defaults", hint: "Loan-default and defaulter records.", enabled: true, order: 5 },
-    { id: "filings", title: "Filings & Disclosures", hint: "Exchange filings, annual reports and earnings — listed companies only.", enabled: false, order: 6 },
-    { id: "press", title: "Recent News", hint: "Recent coverage worth attention.", enabled: true, order: 7 },
+    // Who this person or company actually is — the background a partner wants
+    // before the meeting, read from public profiles (Forbes, Wikipedia, …).
+    { id: "profile", title: "Profile & Background", hint: "Who they are and what they've done, from public profiles.", enabled: true, order: 1 },
+    { id: "snapshot", title: "Company Snapshot", hint: "Who they are, in one glance.", enabled: true, order: 2 },
+    { id: "management", title: "Key People", hint: "The people behind the company.", enabled: true, order: 3 },
+    { id: "directorships", title: "Company & Directors", hint: "Other and past companies the directors are involved with.", enabled: true, order: 4 },
+    { id: "litigation", title: "Court Cases", hint: "Court cases involving the company or its people.", enabled: true, order: 5 },
+    { id: "defaulters", title: "Loan Defaults", hint: "Loan-default and defaulter records.", enabled: true, order: 6 },
+    { id: "filings", title: "Filings & Disclosures", hint: "Exchange filings, annual reports and earnings — listed companies only.", enabled: false, order: 7 },
+    { id: "press", title: "Recent News", hint: "Recent coverage worth attention.", enabled: true, order: 8 },
     // Good news is not a concern. Without somewhere of its own to go it was
     // being written into Key Concerns, where an award read as a governance risk.
-    { id: "positives", title: "Positive Signals", hint: "Recognitions, funding and a clean registry standing.", enabled: true, order: 8 },
+    { id: "positives", title: "Positive Signals", hint: "Recognitions, funding and a clean registry standing.", enabled: true, order: 9 },
   ],
 
   synthesisPrompt: [

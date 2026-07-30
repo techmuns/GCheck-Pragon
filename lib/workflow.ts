@@ -30,6 +30,9 @@ const SOURCE_DEADLINE_MS = Number(process.env.SOURCE_DEADLINE_SECONDS ?? 240) * 
 const DEADLINE_OVERRIDES: Record<string, number> = {
   news: 300_000,
   google: 120_000,
+  // A few searches, then it opens and reads up to three profile pages and runs
+  // an extraction over each — minutes, like the news sweep, not seconds.
+  profile: 150_000,
   indiafilings: 60_000,
   wikidata: 30_000,
 };

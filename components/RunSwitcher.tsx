@@ -140,8 +140,9 @@ function RunTab({
   );
 }
 
-/** A 16px ring that fills with the run's real progress, or a settled dot. */
-function StatusMark({ run: t, done, total }: { run: TrackedRun; done: number; total: number }) {
+/** A 16px ring that fills with the run's real progress, or a settled dot. Shared
+ *  with the sidebar rail so a run's status mark reads identically in both. */
+export function StatusMark({ run: t, done, total }: { run: TrackedRun; done: number; total: number }) {
   const busy = t.phase === "starting" || t.phase === "running";
 
   if (!busy) {

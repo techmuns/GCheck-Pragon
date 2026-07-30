@@ -8,6 +8,7 @@ import { VERDICT_META } from "./BriefViz";
 import BriefPrint from "./BriefPrint";
 import ConcernCards from "./ConcernCards";
 import NewsTable from "./NewsTable";
+import ProfileCard from "./ProfileCard";
 import CitationRef, { sourceUrls } from "./CitationRef";
 import { buildPrintBrief, formatGenerated, listConcerns } from "@/lib/printBrief";
 
@@ -269,6 +270,14 @@ export default function BriefView({ run, onReset }: Props) {
           {brief.sections.map((section, si) => {
             const isSummary = section.id === "red-flags";
             const isNews = section.id === "press";
+            // The profile is rendered as a rich card (role, headline figures,
+            // career milestones) from the collector's own hits, the same way
+            // news is a table rather than a bullet list — a headline figure like
+            // a net worth wants a tile, not a line item.
+            const isProfile = section.id === "profile";
+            const profileHits = isProfile
+              ? (run.collected?.find((c) => c.sourceId === "profile")?.hits ?? [])
+              : [];
             // Key Concerns renders the itemised cards; every other section keeps
             // its plain finding list.
             //
@@ -289,14 +298,16 @@ export default function BriefView({ run, onReset }: Props) {
               ? concerns.length
               : isNews
                 ? (printBrief?.news.length ?? 0)
-                : section.findings.filter((f) => f.severity !== "info").length;
+                : isProfile
+                  ? profileHits.filter((h) => h.extra?.category === "profile-highlight").length
+                  : section.findings.filter((f) => f.severity !== "info").length;
             return (
               <div
                 key={section.id}
                 // Concerns and the news table both run full width — a table
                 // squeezed into half a grid wraps every cell onto four lines
                 // and stops being a table.
-                className={`card-surface reveal p-5 ${isSummary || isNews ? "lg:col-span-2" : ""}`}
+                className={`card-surface reveal p-5 ${isSummary || isNews || isProfile ? "lg:col-span-2" : ""}`}
                 style={{
                   ...revealAt(4 + si),
                   ...(isSummary ? { borderLeft: `3px solid ${meta.color}` } : null),
@@ -317,6 +328,10 @@ export default function BriefView({ run, onReset }: Props) {
                   // question is what each piece SAYS and whether it concerns
                   // this person — neither of which a headline answers.
                   <NewsTable rows={printBrief?.news ?? []} citations={brief.citations} />
+                ) : isProfile ? (
+                  // Background as a card: role, headline figures, career facts —
+                  // read from the profile pages, each fact linking to its source.
+                  <ProfileCard hits={profileHits} citations={brief.citations} />
                 ) : isSummary ? (
                   // Green only where the reassurance is earned. Where the run
                   // could not settle who this is, the assembler supplies its own

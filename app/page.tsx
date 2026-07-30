@@ -1,13 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import SearchForm from "@/components/SearchForm";
 import AuroraBackground from "@/components/AuroraBackground";
 import PrepCountdown from "@/components/PrepCountdown";
 import ResearchProgress from "@/components/ResearchProgress";
 import BriefView from "@/components/BriefView";
-import RunSwitcher from "@/components/RunSwitcher";
+import RunSidebar from "@/components/RunSidebar";
 import { useRuns } from "@/lib/useRuns";
 
 export default function Home() {
@@ -41,62 +40,62 @@ export default function Home() {
   const showBrief = active !== null && ready && active.phase === "done" && active.run?.brief != null;
   const showError = active !== null && active.phase === "error";
 
-  // The rail is the one fixed thing on the page, so the layout only centres
-  // when there is nothing to sit under it.
+  // When the form stands alone (no runs yet), the content column centres itself;
+  // once there is a brief or a running pre-screen, it sits at the top.
   const centered = runs.length === 0 && showForm;
 
   return (
-    <main
-      className={`flex min-h-screen w-full flex-col items-center px-4 py-10 sm:px-6 lg:px-8 ${
-        centered ? "justify-center" : ""
-      }`}
-    >
+    <div className="min-h-screen">
       {/* Calm aurora backdrop — behind the search box and lead-in states; it
           steps aside once a brief takes over. */}
       {(centered || showPrep) && <AuroraBackground />}
 
-      <RunSwitcher runs={runs} activeKey={activeKey} onSelect={select} onClose={close} />
+      {/* Recent runs — a fixed left rail on desktop, a horizontal bar on mobile. */}
+      <RunSidebar runs={runs} activeKey={activeKey} onSelect={select} onClose={close} />
 
-      {showForm && <SearchForm onSubmit={start} />}
+      {/* Content column, offset clear of the rail on desktop. */}
+      <main
+        className={`flex min-h-screen w-full flex-col items-center px-4 py-10 sm:px-6 lg:py-12 lg:pr-8 lg:pl-[17rem] ${
+          centered ? "justify-center" : ""
+        }`}
+      >
+        {showForm && <SearchForm onSubmit={start} />}
 
-      {showPrep && active && (
-        <PrepCountdown subject={active.run?.subject ?? active.subject} onDone={onPrepped} holding={active.run === null} />
-      )}
+        {showPrep && active && (
+          <PrepCountdown subject={active.run?.subject ?? active.subject} onDone={onPrepped} holding={active.run === null} />
+        )}
 
-      {showProgress && active?.run && (
-        <ResearchProgress
-          subject={active.run.subject}
-          progress={active.run.progress}
-          events={active.run.events}
-        />
-      )}
+        {showProgress && active?.run && (
+          <ResearchProgress
+            subject={active.run.subject}
+            progress={active.run.progress}
+            events={active.run.events}
+          />
+        )}
 
-      {showBrief && active?.run && <BriefView run={active.run} onReset={() => select(null)} />}
+        {showBrief && active?.run && <BriefView run={active.run} onReset={() => select(null)} />}
 
-      {showError && active && (
-        <div className="card-surface fade-in w-full max-w-md p-6 text-center">
-          <div className="eyebrow mb-1 !text-coral">Something went wrong</div>
-          <p className="text-[14px] text-ink-primary">{active.error ?? "The pre-screen failed."}</p>
-          <p className="mt-1 text-[12px] text-ink-secondary">
-            Only this search stopped. Anything else still running is unaffected.
-          </p>
-          <button
-            type="button"
-            onClick={() => select(null)}
-            className="blob-btn mt-4 rounded-xl px-5 py-2.5 text-[13px] font-semibold"
-          >
-            New search
-          </button>
-        </div>
-      )}
+        {showError && active && (
+          <div className="card-surface fade-in w-full max-w-md p-6 text-center">
+            <div className="eyebrow mb-1 !text-coral">Something went wrong</div>
+            <p className="text-[14px] text-ink-primary">{active.error ?? "The pre-screen failed."}</p>
+            <p className="mt-1 text-[12px] text-ink-secondary">
+              Only this search stopped. Anything else still running is unaffected.
+            </p>
+            <button
+              type="button"
+              onClick={() => select(null)}
+              className="blob-btn mt-4 rounded-xl px-5 py-2.5 text-[13px] font-semibold"
+            >
+              New search
+            </button>
+          </div>
+        )}
 
-      <footer className="mt-10 flex items-center gap-2 text-[11px] text-ink-secondary/60">
-        <span>Paragon Partners · Governance Pre-Screen</span>
-        <span aria-hidden>·</span>
-        <Link href="/admin" className="text-navy-primary/60 transition hover:text-navy-primary">
-          Settings
-        </Link>
-      </footer>
-    </main>
+        <footer className="mt-10 text-[11px] text-ink-secondary/60">
+          <span>Paragon Partners · Governance Pre-Screen</span>
+        </footer>
+      </main>
+    </div>
   );
 }

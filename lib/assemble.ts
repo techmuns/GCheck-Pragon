@@ -12,6 +12,7 @@ import type {
 import { canonicalUrl } from "./collectors/types";
 import { compareByHierarchy, seniorRole, type RankablePerson } from "./hierarchy";
 import { nameFromTitle, samePerson, uniqueRefs } from "./people";
+import { buildProfile } from "./profileView";
 
 // ── Deterministic brief assembler ──────────────────────────────────────────
 // Turns raw collector output into an honest, source-linked brief. No
@@ -129,6 +130,8 @@ function buildSection(id: string, title: string, ctx: Ctx): RenderedSection {
   switch (id) {
     case "red-flags":
       return redFlagSection(title, ctx);
+    case "profile":
+      return profileSection(id, title, ctx);
     case "snapshot":
       return snapshotSection(id, title, ctx);
     case "management":
@@ -408,6 +411,43 @@ function identityFinding(ctx: Ctx): Finding {
     text: `Identified as ${name}, DIN ${ctx.subject.din}${linked > 0 ? ` — ${linked} company record(s) linked` : ""}.`,
     sourceRef: ctx.cite(registry.sourceName, `DIN ${ctx.subject.din}`, identity.url),
   };
+}
+
+// Profile & Background — who the subject is, read from public profiles (Forbes,
+// Wikipedia, …): the role and business behind it, net worth and ranking where a
+// source published one, and the career facts that place them. Every fact is
+// cited to the page it was read from; the rich rendering (metric tiles + career
+// highlights) lives in the ProfileCard, which reads the same collected hits, so
+// the two never disagree. Honest empty state — hidden when nothing was read.
+function profileSection(id: string, title: string, ctx: Ctx): RenderedSection {
+  const c = ctx.byId["profile"];
+  // No source, or it did not complete: hide the section. Key Concerns already
+  // notes any source that was skipped, errored or locked, so nothing is lost.
+  if (!c || c.status !== "done") return { id, title, findings: [], empty: true };
+
+  const view = buildProfile(c.hits);
+  if (!view) return { id, title, findings: [], empty: true };
+
+  const findings: Finding[] = [];
+  const cite = (label: string, url?: string) => (url ? ctx.cite(c.sourceName, label, url) : undefined);
+
+  // Lead line: the role and the business behind it, else the one-line bio.
+  const lead = view.role ? (view.employer ? `${view.role}, ${view.employer}` : view.role) : view.bio;
+  if (lead) findings.push({ severity: "info", text: lead, sourceRef: cite(lead, view.primaryUrl) });
+
+  // Headline figures and placing facts, each cited to the page it came from.
+  for (const m of [...view.metrics, ...view.attributes]) {
+    const text = `${m.label}: ${m.value}`;
+    findings.push({ severity: "info", text, sourceRef: cite(text, m.url) });
+  }
+
+  // Career / background milestones.
+  for (const h of view.highlights) {
+    findings.push({ severity: "info", text: h.text, sourceRef: cite(h.text, h.url) });
+  }
+
+  if (findings.length === 0) return { id, title, findings: [], empty: true };
+  return { id, title, findings };
 }
 
 // Company snapshot — identity of the subject as it appears on the public

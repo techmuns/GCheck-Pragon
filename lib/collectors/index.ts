@@ -8,11 +8,13 @@ import { registryCollector } from "./registry";
 import { indiafilingsCollector } from "./indiafilings";
 import { newsCollector } from "./news";
 import { filingsCollector } from "./filings";
+import { profileCollector } from "./profile";
 
 // Registry — maps a source id (from config) to its collector implementation.
 export const collectors: Record<string, Collector> = {
   google: googleCollector,
   news: newsCollector,
+  profile: profileCollector,
   indiankanoon: indianKanoonCollector,
   wikidata: wikidataCollector,
   indiafilings: indiafilingsCollector,
