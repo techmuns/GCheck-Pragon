@@ -16,11 +16,27 @@ services:
         sync: false
       - key: OPENAI_MODEL
         value: gpt-4o-mini
-      # Web + news search. MUNSHOT_TOKEN is a Munshot *user session JWT* and
-      # expires — keep SERPAPI_KEY (or GOOGLE_API_KEY + GOOGLE_CX) set alongside
-      # it so search falls back instead of going dark when it does.
+      # Web search, the news deep dive, AND the article reader all ride this one
+      # token. It is a Munshot *user session JWT* and it expires — keep
+      # SERPAPI_KEY (or GOOGLE_API_KEY + GOOGLE_CX) set alongside it so search
+      # falls back instead of going dark, and FIRECRAWL_API_KEY so article
+      # reading survives too. Without a reader the brief is written from
+      # headlines, which cannot tell you who brought a complaint.
       - key: MUNSHOT_TOKEN
         sync: false
+      # Fallback article reader. Set it in the dashboard if you have a key.
+      - key: FIRECRAWL_API_KEY
+        sync: false
+      # Cost dials for a deep run. Each article opened costs one reader call and
+      # one OpenAI call, so MAX_ARTICLE_READS is the main one to turn down.
+      - key: MAX_ARTICLE_READS
+        value: "8"
+      - key: MAX_NEWS_QUERIES
+        value: "24"
+      # How long one source may take before the run goes ahead without it. The
+      # news sweep and the article reads are deliberately long.
+      - key: SOURCE_DEADLINE_SECONDS
+        value: "240"
       # How long an identical search is reused before it costs quota again.
       # 15 minutes by default — raise it to stretch a metered plan further.
       - key: SEARCH_CACHE_TTL_SECONDS

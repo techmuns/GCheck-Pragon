@@ -85,14 +85,34 @@ All optional — every source degrades honestly if its key/login is absent.
 |-----|---------|
 | `OPENAI_API_KEY` | AI-written brief (rules-based fallback without it) |
 | `OPENAI_MODEL` | model override (default `gpt-4o-mini`) |
-| `MUNSHOT_TOKEN` | Munshot web + news search. **Expires** — see the note below |
-| `SERPAPI_KEY` **or** `GOOGLE_API_KEY` + `GOOGLE_CX` | richer Google results (keyless fallback otherwise) |
+| `MUNSHOT_TOKEN` | Munshot web search, the news deep dive, **and** the article reader. **Expires** — see the note below |
+| `FIRECRAWL_API_KEY` | fallback article reader, for publishers Muns can't open and for when the Munshot token expires |
+| `SERPAPI_KEY` **or** `GOOGLE_API_KEY` + `GOOGLE_CX` | richer Google results, and the news sweep's fallback engine (keyless fallback for web only) |
 | `INDIANKANOON_API_TOKEN` | official Indian Kanoon API (public search otherwise) |
-| `MUNSHOT_TOKEN` | web search **and** reliable name→record lookup for the free company-registry (director) source |
+| `MAX_ARTICLE_READS` | how many articles one run may open — each is a reader call + an OpenAI call (default 8) |
+| `MAX_NEWS_QUERIES` | cap on the news ladder (default 24) |
+| `SOURCE_DEADLINE_SECONDS` | how long one source may take before the run goes on without it (default 240) |
 | `PRIVATECIRCLE_EMAIL` / `PRIVATECIRCLE_PASSWORD` | PrivateCircle collector |
 | `CIBIL_USERNAME` / `CIBIL_PASSWORD` | CIBIL collector |
 | `NEXT_PUBLIC_API_BASE` | hybrid frontend → backend URL (build-time) |
 | `CORS_ALLOW_ORIGIN` | backend: restrict to your Pages origin (default `*`) |
+
+> **Never prefix any of these with `NEXT_PUBLIC_`.** That prefix tells Next to
+> inline the value into the JavaScript bundle every visitor downloads. It is
+> correct for `NEXT_PUBLIC_API_BASE` (a public URL) and catastrophic for a
+> credential: `NEXT_PUBLIC_MUNSHOT_TOKEN` would publish your Munshot session to
+> anyone who opens devtools. Every key above is read **server-side only**, in
+> `lib/collectors/env.ts`, and must stay that way.
+
+### Where each kind of secret actually goes
+
+A common and costly mix-up, because all three places are called "secrets":
+
+| Store | Reaches | Use it for |
+|---|---|---|
+| **GitHub → Settings → Secrets** | GitHub Actions runners only | deploy tokens for a workflow. **Not** the running app — nothing here is visible to the server at request time |
+| **Cloudflare Pages → Variables** | the Pages *build*, and Pages Functions at runtime | `NEXT_PUBLIC_API_BASE` (build-time). This repo ships no Functions, so a runtime secret here has nothing to read it |
+| **Your Node host** (Render/Railway/Fly/container) | the running server process | **everything in the table above** — this is the only place they do anything |
 
 ## Note on persistence
 
