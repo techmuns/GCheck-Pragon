@@ -5,6 +5,7 @@ import SearchForm from "@/components/SearchForm";
 import AuroraBackground from "@/components/AuroraBackground";
 import PrepCountdown from "@/components/PrepCountdown";
 import ResearchProgress from "@/components/ResearchProgress";
+import RunComplete from "@/components/RunComplete";
 import BriefView from "@/components/BriefView";
 import RunSidebar from "@/components/RunSidebar";
 import { useRuns } from "@/lib/useRuns";
@@ -20,13 +21,23 @@ export default function Home() {
     if (activeKey) setPrepped((p) => ({ ...p, [activeKey]: true }));
   }, [activeKey]);
 
-  // Drop the flag for runs that have gone, so the map cannot grow forever.
+  // The hand-off between the walk and the brief, held per run for the same
+  // reason: it is a moment in one run's life, not a state of the page, and
+  // returning to a run already read must not replay it.
+  const [handed, setHanded] = useState<Record<string, boolean>>({});
+  const onHandedOff = useCallback(() => {
+    if (activeKey) setHanded((h) => ({ ...h, [activeKey]: true }));
+  }, [activeKey]);
+
+  // Drop the flags for runs that have gone, so the maps cannot grow forever.
   useEffect(() => {
-    setPrepped((p) => {
-      const keys = new Set(runs.map((t) => t.key));
-      const next = Object.fromEntries(Object.entries(p).filter(([k]) => keys.has(k)));
-      return Object.keys(next).length === Object.keys(p).length ? p : next;
-    });
+    const keys = new Set(runs.map((t) => t.key));
+    const prune = (m: Record<string, boolean>) => {
+      const next = Object.fromEntries(Object.entries(m).filter(([k]) => keys.has(k)));
+      return Object.keys(next).length === Object.keys(m).length ? m : next;
+    };
+    setPrepped(prune);
+    setHanded(prune);
   }, [runs]);
 
   const counted = activeKey ? Boolean(prepped[activeKey]) : false;
@@ -41,7 +52,12 @@ export default function Home() {
   // being screened — the diligence streams into it live, so there is no reason to
   // hold the whole page on a spinner until the last director is done.
   const hasBrief = active?.run?.brief != null;
-  const showBrief = active !== null && ready && hasBrief && active.phase !== "error";
+  // Work the reader has watched happen is handed over, not swapped: the walk
+  // closing straight into the report mid-blink gave no moment to change what
+  // they were reading for. One beat sits between them, once per run.
+  const handedOff = activeKey ? Boolean(handed[activeKey]) : false;
+  const showHandoff = active !== null && ready && hasBrief && active.phase !== "error" && !handedOff;
+  const showBrief = active !== null && ready && hasBrief && active.phase !== "error" && handedOff;
   const showProgress = active !== null && ready && active.phase === "running" && !hasBrief;
   const showError = active !== null && active.phase === "error";
 
@@ -77,6 +93,8 @@ export default function Home() {
             events={active.run.events}
           />
         )}
+
+        {showHandoff && active?.run && <RunComplete run={active.run} onDone={onHandedOff} />}
 
         {showBrief && active?.run && (
           <BriefView
