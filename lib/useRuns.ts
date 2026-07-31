@@ -31,8 +31,12 @@ const RUN_TIMEOUT_MS = 20 * 60 * 1000;
  *  run, so one dead run never takes its siblings down with it. */
 const MAX_POLL_FAILURES = 10;
 
-/** How many runs to keep on screen. Older finished ones drop off the end. */
-const MAX_TRACKED = 6;
+/** How many runs to keep on screen. Older finished ones drop off the end.
+ *
+ *  Sized for the board sweep: picking several key people off one brief starts a
+ *  run each, and a cap of six meant a five-person pick could evict the very
+ *  brief they were picked from. */
+const MAX_TRACKED = 14;
 
 const STORE_KEY = "paragon.openRuns";
 
@@ -54,6 +58,11 @@ export interface TrackedRun {
   /** False when a run finished while the user was looking at something else —
    *  the only thing that earns an attention dot. */
   seen: boolean;
+  /** The run this one was started from — set when a key person is picked off a
+   *  brief and screened in their own right. The rail nests these under their
+   *  parent, because a director pulled off a board is not a search the user
+   *  made from the front door and does not read as one in a flat list. */
+  parentKey?: string;
 }
 
 function newKey(): string {
@@ -66,6 +75,7 @@ interface StoredRun {
   serverId: string;
   subject: Subject;
   startedAt: number;
+  parentKey?: string;
 }
 
 function readStore(): StoredRun[] {
@@ -87,11 +97,26 @@ function writeStore(runs: TrackedRun[]): void {
   try {
     const keep = runs
       .filter((t): t is TrackedRun & { serverId: string } => Boolean(t.serverId))
-      .map(({ key, serverId, subject, startedAt }) => ({ key, serverId, subject, startedAt }));
+      .map(({ key, serverId, subject, startedAt, parentKey }) => ({ key, serverId, subject, startedAt, parentKey }));
     window.localStorage.setItem(STORE_KEY, JSON.stringify(keep));
   } catch {
     /* storage unavailable — reattaching after a reload is a nicety, not a promise */
   }
+}
+
+export interface StartOptions {
+  /** Start this run beneath an existing one, rather than as a search of its
+   *  own. Used when a key person is picked off a brief and screened. */
+  parentKey?: string;
+  /** Leave the user where they are instead of switching to the new run.
+   *  Picking five people off a board starts five runs, and jumping to
+   *  whichever finished being created last would take the reader off the brief
+   *  they are still reading. */
+  keepFocus?: boolean;
+  /** Keep this out of the front page's recent-search list. A child run is
+   *  reachable from its parent, and five of them from one click would flush
+   *  everything the user actually searched for out of that list. */
+  skipHistory?: boolean;
 }
 
 export interface UseRuns {
@@ -99,7 +124,13 @@ export interface UseRuns {
   /** The run being viewed, or null when the search form is up. */
   active: TrackedRun | null;
   activeKey: string | null;
-  start: (company: string, promoters: string[], type?: "company" | "director", ticker?: string) => void;
+  start: (
+    company: string,
+    promoters: string[],
+    type?: "company" | "director",
+    ticker?: string,
+    opts?: StartOptions,
+  ) => void;
   /** Show a run. Passing null shows the search form without touching anything. */
   select: (key: string | null) => void;
   /** Stop tracking a run in the UI. The server keeps working; this is a tab
@@ -153,6 +184,7 @@ export function useRuns(): UseRuns {
             error: run.error,
             startedAt: s.startedAt,
             seen: true,
+            parentKey: s.parentKey,
           };
         } catch {
           return null;
@@ -230,7 +262,13 @@ export function useRuns(): UseRuns {
   }, [patch]);
 
   const start = useCallback(
-    (company: string, promoters: string[], type: "company" | "director" = "company", ticker?: string) => {
+    (
+      company: string,
+      promoters: string[],
+      type: "company" | "director" = "company",
+      ticker?: string,
+      opts: StartOptions = {},
+    ) => {
       const key = newKey();
       const subject: Subject = {
         type,
@@ -239,20 +277,22 @@ export function useRuns(): UseRuns {
         ticker,
       };
 
-      const fresh: TrackedRun = { key, subject, run: null, phase: "starting", startedAt: Date.now(), seen: true };
-      setRuns((prev) =>
-        [
-          fresh,
-          // Live runs are never dropped to make room; only finished ones are.
-          ...prev.filter((t) => t.phase === "starting" || t.phase === "running"),
-          ...prev.filter((t) => t.phase === "done" || t.phase === "error"),
-        ].slice(0, MAX_TRACKED),
-      );
-      setActiveKey(key);
+      const fresh: TrackedRun = {
+        key,
+        subject,
+        run: null,
+        phase: "starting",
+        startedAt: Date.now(),
+        seen: true,
+        parentKey: opts.parentKey,
+      };
+
+      setRuns((prev) => (opts.parentKey ? insertUnderParent(prev, fresh, opts.parentKey) : promote(prev, fresh)));
+      if (!opts.keepFocus) setActiveKey(key);
 
       // Stored raw, so "run again" re-runs the same person rather than falling
       // back to their name and picking up whoever else shares it.
-      addRecentSearch({ type, company, promoters });
+      if (!opts.skipHistory) addRecentSearch({ type, company, promoters });
 
       void (async () => {
         try {
@@ -284,13 +324,68 @@ export function useRuns(): UseRuns {
   );
 
   const close = useCallback((key: string) => {
-    setRuns((prev) => prev.filter((t) => t.key !== key));
-    setActiveKey((cur) => (cur === key ? null : cur));
-    delete failures.current[key];
+    // Closing a brief closes the runs started from it. They were opened while
+    // reading that brief and are reached through it; left behind they would
+    // read as searches from the front door that the user never made.
+    const doomed = new Set<string>([key]);
+    for (const t of runsRef.current) if (t.parentKey === key) doomed.add(t.key);
+
+    setRuns((prev) => prev.filter((t) => !doomed.has(t.key)));
+    setActiveKey((cur) => (cur && doomed.has(cur) ? null : cur));
+    for (const k of doomed) delete failures.current[k];
   }, []);
 
   const active = runs.find((t) => t.key === activeKey) ?? null;
   return { runs, active, activeKey, start, select, close };
+}
+
+/**
+ * A new search goes to the top of the rail.
+ *
+ * The list used to be re-sorted by phase on every start, floating live runs
+ * above finished ones. That was how it protected work in flight from being
+ * evicted — but it also tears a parent away from the runs started off it the
+ * moment their phases differ, which is most of the time. Eviction is now
+ * handled directly in `trim`, so the order can simply be left alone.
+ */
+function promote(prev: TrackedRun[], fresh: TrackedRun): TrackedRun[] {
+  return trim([fresh, ...prev]);
+}
+
+/**
+ * A run started off a brief belongs directly under it, after any siblings
+ * already there — the rail then reads as "this brief, and the people screened
+ * from it". Prepending would put a director above the board they came from.
+ */
+function insertUnderParent(prev: TrackedRun[], fresh: TrackedRun, parentKey: string): TrackedRun[] {
+  const at = prev.findIndex((t) => t.key === parentKey);
+  if (at < 0) return promote(prev, fresh);
+  let insert = at + 1;
+  while (insert < prev.length && prev[insert].parentKey === parentKey) insert += 1;
+  return trim([...prev.slice(0, insert), fresh, ...prev.slice(insert)]);
+}
+
+/**
+ * Hold the rail to its cap, dropping the coldest finished runs first.
+ *
+ * Two runs are never dropped to make room: one still in flight, and one that
+ * something else on the rail was started from. Evicting a parent would orphan
+ * its children, which would then render as ordinary searches from the front
+ * door — searches the user never made. Where everything is protected the cap
+ * is allowed to be exceeded, because every alternative loses something the
+ * user is actively waiting on.
+ */
+function trim(runs: TrackedRun[]): TrackedRun[] {
+  if (runs.length <= MAX_TRACKED) return runs;
+  const parents = new Set(runs.map((t) => t.parentKey).filter(Boolean));
+  const out = [...runs];
+  for (let i = out.length - 1; i >= 0 && out.length > MAX_TRACKED; i--) {
+    const t = out[i];
+    if (t.phase === "starting" || t.phase === "running") continue;
+    if (parents.has(t.key)) continue;
+    out.splice(i, 1);
+  }
+  return out;
 }
 
 /** How far along a run is, as sources actually settled over sources planned. */

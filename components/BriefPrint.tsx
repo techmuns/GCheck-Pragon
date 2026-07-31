@@ -31,13 +31,34 @@ import type {
 // hidden and only this one page is rendered to PDF. Hidden on screen (it appears
 // only when printing, or in the /print-preview harness).
 
-export default function BriefPrint({ brief }: { brief: PrintBrief }) {
+/**
+ * Which document to print.
+ *
+ * "detailed" is the whole record — the executive sheet, the profile, and the
+ * continuation carrying the risk read, the board, the network, the scope and
+ * what was set aside. "onepager" is the executive sheet alone: the same
+ * analysis, on one side of A4, for the reader who is about to walk into the
+ * meeting and wants the answer rather than the file behind it.
+ *
+ * Deliberately a cut rather than a second layout. Both are the same component
+ * over the same data, so the short one can never say something the long one
+ * does not — which is the failure mode any "summary version" invites.
+ */
+export type PrintVariant = "detailed" | "onepager";
+
+export default function BriefPrint({
+  brief,
+  variant = "detailed",
+}: {
+  brief: PrintBrief;
+  variant?: PrintVariant;
+}) {
   const [host, setHost] = useState<HTMLElement | null>(null);
   useEffect(() => {
     setHost(document.body);
   }, []);
   if (!host) return null;
-  return createPortal(<PrintDoc brief={brief} />, host);
+  return createPortal(<PrintDoc brief={brief} variant={variant} />, host);
 }
 
 // Every inline [n] resolves against this map, so a citation number is a live
@@ -57,7 +78,8 @@ function Ref({ n }: { n?: number }) {
   );
 }
 
-function PrintDoc({ brief }: { brief: PrintBrief }) {
+function PrintDoc({ brief, variant }: { brief: PrintBrief; variant: PrintVariant }) {
+  const full = variant !== "onepager";
   return (
     <SourceUrls.Provider value={brief.sourceUrls}>
     <div className="pb-root">
@@ -90,14 +112,15 @@ function PrintDoc({ brief }: { brief: PrintBrief }) {
         <Footer brief={brief} />
       </div>
 
-      {/* Second page: the full profile. Prints only when one was read. */}
-      {brief.profile && <ProfilePage brief={brief} profile={brief.profile} />}
+      {/* Second page: the full profile. Prints only when one was read, and only
+          for the detailed record — the one-pager stops at the sheet above. */}
+      {full && brief.profile && <ProfilePage brief={brief} profile={brief.profile} />}
 
       {/* Continuation: the scored risk read, the board diligence, the network
           and the scope — everything the dashboard shows that the one-page
           executive brief has no room for. Flows across as many pages as needed,
           so no director is ever dropped. */}
-      <ReportContinuation brief={brief} />
+      {full && <ReportContinuation brief={brief} />}
     </div>
     </SourceUrls.Provider>
   );

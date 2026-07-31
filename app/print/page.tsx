@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import BriefPrint from "@/components/BriefPrint";
+import BriefPrint, { type PrintVariant } from "@/components/BriefPrint";
 import { buildPrintBrief, formatGenerated } from "@/lib/printBrief";
 import type { Run } from "@/lib/types";
 
@@ -18,9 +18,14 @@ import type { Run } from "@/lib/types";
 export default function PrintPage() {
   const [run, setRun] = useState<Run | null>(null);
   const [missing, setMissing] = useState(false);
+  // Which document to export. Read from the URL rather than passed down,
+  // because the only caller is a headless browser opening this page.
+  const [variant, setVariant] = useState<PrintVariant>("detailed");
 
   useEffect(() => {
-    const id = new URLSearchParams(window.location.search).get("id");
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("id");
+    if (params.get("variant") === "onepager") setVariant("onepager");
     if (!id) {
       setMissing(true);
       return;
@@ -45,5 +50,5 @@ export default function PrintPage() {
 
   const brief = buildPrintBrief(run, formatGenerated(run.createdAt));
   if (!brief) return null;
-  return <BriefPrint brief={brief} />;
+  return <BriefPrint brief={brief} variant={variant} />;
 }

@@ -8,6 +8,7 @@ import ResearchProgress from "@/components/ResearchProgress";
 import BriefView from "@/components/BriefView";
 import RunSidebar from "@/components/RunSidebar";
 import { useRuns } from "@/lib/useRuns";
+import { formatSuggestion } from "@/lib/directorId";
 
 export default function Home() {
   const { runs, active, activeKey, start, select, close } = useRuns();
@@ -77,7 +78,26 @@ export default function Home() {
           />
         )}
 
-        {showBrief && active?.run && <BriefView run={active.run} onReset={() => select(null)} />}
+        {showBrief && active?.run && (
+          <BriefView
+            run={active.run}
+            onReset={() => select(null)}
+            onScreenPeople={(people) => {
+              // One director pre-screen each, exactly as the search box would
+              // start them — the DIN goes along where the register gave one, so
+              // the run is about that person rather than about their name. They
+              // are hung under the brief they were picked from and started
+              // without stealing focus, so the reader keeps the page they are on.
+              for (const p of people) {
+                start(formatSuggestion({ name: p.name, din: p.din }), [], "director", undefined, {
+                  parentKey: activeKey ?? undefined,
+                  keepFocus: true,
+                  skipHistory: true,
+                });
+              }
+            }}
+          />
+        )}
 
         {showError && active && (
           <div className="card-surface fade-in w-full max-w-md p-6 text-center">

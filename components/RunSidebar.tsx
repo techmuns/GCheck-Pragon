@@ -67,16 +67,23 @@ export default function RunSidebar({ runs, activeKey, onSelect, onClose }: Props
             </p>
           ) : (
             <ul className="space-y-1">
-              {runs.map((t) => (
-                <li key={t.key}>
-                  <SidebarRow
-                    run={t}
-                    active={t.key === activeKey}
-                    onSelect={() => onSelect(t.key)}
-                    onClose={() => onClose(t.key)}
-                  />
-                </li>
-              ))}
+              {runs.map((t) => {
+                // A run started off another brief — a key person screened in
+                // their own right — sits indented beneath it, with a rule
+                // joining the two. Flat, it would read as a search made from
+                // the front door, which is exactly what it is not.
+                const nested = Boolean(t.parentKey) && runs.some((p) => p.key === t.parentKey);
+                return (
+                  <li key={t.key} className={nested ? "ml-3 border-l border-[rgba(23,43,77,0.10)] pl-2" : undefined}>
+                    <SidebarRow
+                      run={t}
+                      active={t.key === activeKey}
+                      onSelect={() => onSelect(t.key)}
+                      onClose={() => onClose(t.key)}
+                    />
+                  </li>
+                );
+              })}
             </ul>
           )}
         </nav>

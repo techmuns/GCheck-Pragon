@@ -12,7 +12,7 @@ import ProfileCard from "./ProfileCard";
 import DiligenceGrid, { diligenceStats } from "./DiligenceSection";
 import { RiskDial, RiskDrivers, NetworkContent, ScopeContent } from "./InstitutionalPanels";
 import CitationRef, { sourceUrls } from "./CitationRef";
-import { buildPrintBrief, formatGenerated, listConcerns } from "@/lib/printBrief";
+import { buildPrintBrief, formatGenerated, listConcerns, type Person } from "@/lib/printBrief";
 import { buildNetwork } from "@/lib/network";
 import { sourceTier } from "@/lib/risk";
 import { humanizeCaps } from "@/lib/text";
@@ -20,6 +20,9 @@ import { humanizeCaps } from "@/lib/text";
 interface Props {
   run: Run;
   onReset: () => void;
+  /** Screen these people, each as a pre-screen of their own. Absent when the
+   *  brief is rendered somewhere that cannot start runs (the print preview). */
+  onScreenPeople?: (people: Array<{ name: string; din?: string }>) => void;
 }
 
 // ── The pre-meeting brief ────────────────────────────────────────────────────
@@ -125,6 +128,85 @@ function Pair({
   );
 }
 
+/** Identity for selection — the DIN where the register gave one, because two
+ *  rows can carry the same name and mean different people. */
+function personKey(p: Person): string {
+  return p.din ? `din:${p.din}` : `name:${p.name.toLowerCase()}`;
+}
+
+/**
+ * Key people, each of whom can be sent for a pre-screen of their own.
+ *
+ * A board list answers "who are these people" and stops. The next question a
+ * partner asks is always about one of them in particular, and answering it
+ * meant retyping a name into the search box and losing the brief you were
+ * reading. Ticking them here runs the same director screen the search box
+ * runs — carrying the DIN where the register gave one, so the run is about
+ * that person and not about everyone who shares their name — and the results
+ * arrive under this brief in the rail rather than in place of it.
+ */
+function PeoplePicker({
+  people,
+  picked,
+  onToggle,
+  onRun,
+}: {
+  people: Person[];
+  picked: Set<string>;
+  onToggle: (id: string) => void;
+  onRun: () => void;
+}) {
+  const count = picked.size;
+  return (
+    <div>
+      <ul className="space-y-0.5">
+        {people.map((p) => {
+          const id = personKey(p);
+          const on = picked.has(id);
+          return (
+            <li key={id}>
+              <label
+                className={`flex cursor-pointer items-baseline gap-2.5 rounded-md px-1.5 py-1 transition ${
+                  on ? "bg-navy-primary/[0.06]" : "hover:bg-ice/70"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={on}
+                  onChange={() => onToggle(id)}
+                  className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[#27457E]"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] text-ink-primary">{p.name}</span>
+                  {(p.role || p.din) && (
+                    <span className="block truncate text-[11px] text-ink-secondary/80">
+                      {[p.role, p.din ? `DIN ${p.din}` : null].filter(Boolean).join(" · ")}
+                    </span>
+                  )}
+                </span>
+              </label>
+            </li>
+          );
+        })}
+      </ul>
+
+      <button
+        type="button"
+        onClick={onRun}
+        disabled={count === 0}
+        className="mt-2.5 w-full rounded-lg border border-[rgba(23,43,77,0.14)] bg-white px-3 py-1.5 text-[12.5px] font-semibold text-navy-primary transition enabled:hover:bg-ice disabled:opacity-45"
+      >
+        {count === 0
+          ? "Select people to pre-screen"
+          : `Pre-screen ${count} selected ${count === 1 ? "person" : "people"}`}
+      </button>
+      <p className="mt-1.5 text-[11px] leading-relaxed text-ink-secondary/75">
+        Each runs as its own director pre-screen and appears under this one on the left. This brief stays open.
+      </p>
+    </div>
+  );
+}
+
 function Stat({ value, label, tint }: { value: string | number; label: string; tint?: string }) {
   return (
     <div>
@@ -136,12 +218,17 @@ function Stat({ value, label, tint }: { value: string | number; label: string; t
   );
 }
 
-export default function BriefView({ run, onReset }: Props) {
+export default function BriefView({ run, onReset, onScreenPeople }: Props) {
   const brief = run.brief;
-  const [downloading, setDownloading] = useState(false);
+  // Which document is being produced, so only the button that was pressed
+  // shows the wait — a spinner on both reads as though both are running.
+  const [downloading, setDownloading] = useState<"detailed" | "onepager" | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [clarificationsOpen, setClarificationsOpen] = useState(false);
+  /** Key people ticked for a pre-screen of their own, keyed by DIN where the
+   *  register gave one and by name otherwise. */
+  const [picked, setPicked] = useState<Set<string>>(new Set());
 
   /**
    * Get the PDF out of an embedded page.
@@ -154,14 +241,16 @@ export default function BriefView({ run, onReset }: Props) {
    * opened during the click that asked for it and blocks one opened after a
    * network round trip has broken that chain.
    */
-  async function download() {
+  async function download(variant: "detailed" | "onepager") {
     if (downloading) return;
-    setDownloading(true);
+    setDownloading(variant);
     setDownloadError(null);
 
     const tab = window.open("", "_blank", "noopener,noreferrer");
     try {
-      const res = await fetch(apiUrl(`/api/research/${run.id}/pdf`));
+      const res = await fetch(
+        apiUrl(`/api/research/${run.id}/pdf${variant === "onepager" ? "?variant=onepager" : ""}`),
+      );
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error ?? `The server could not render the PDF (${res.status}).`);
@@ -172,7 +261,7 @@ export default function BriefView({ run, onReset }: Props) {
       } else {
         const a = document.createElement("a");
         a.href = url;
-        a.download = `Pre-Screen — ${run.subject.company}.pdf`;
+        a.download = `${variant === "onepager" ? "One-Pager" : "Pre-Screen"} — ${run.subject.company}.pdf`;
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -182,7 +271,7 @@ export default function BriefView({ run, onReset }: Props) {
       tab?.close();
       setDownloadError(e instanceof Error ? e.message : "Could not produce the PDF.");
     } finally {
-      setDownloading(false);
+      setDownloading(null);
     }
   }
 
@@ -193,6 +282,27 @@ export default function BriefView({ run, onReset }: Props) {
   const people = run.diligence ?? [];
   const board = diligenceStats(people);
   const isCompany = run.subject.type !== "director";
+
+  // The structured people — the same rows the print sheet uses, which unlike
+  // the prose list carry a DIN, and so can be screened as a specific person
+  // rather than as a name.
+  const peopleRows = printBrief?.people ?? [];
+
+  function togglePicked(id: string): void {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function runPicked(): void {
+    const chosen = peopleRows.filter((p) => picked.has(personKey(p)));
+    if (chosen.length === 0) return;
+    onScreenPeople?.(chosen.map((p) => ({ name: p.name, din: p.din })));
+    setPicked(new Set());
+  }
   const network = buildNetwork(run);
 
   // ── Reconciling the verdict with the numbers beneath it ────────────────────
@@ -261,13 +371,25 @@ export default function BriefView({ run, onReset }: Props) {
       <div className="no-print mb-5 flex items-center justify-between gap-3">
         <span className="eyebrow">Pre-meeting brief</span>
         <div className="flex items-center gap-2">
+          {/* Two documents off one brief. The detailed record is everything
+              the run produced; the one-pager is its executive sheet alone, for
+              the reader walking into the meeting who wants the answer rather
+              than the file behind it. */}
           <button
             type="button"
-            onClick={download}
-            disabled={downloading}
+            onClick={() => download("detailed")}
+            disabled={downloading !== null}
             className="rounded-lg border border-[rgba(23,43,77,0.14)] bg-white px-3.5 py-2 text-[12.5px] font-medium text-navy-primary transition hover:bg-ice disabled:opacity-60"
           >
-            {downloading ? "Preparing…" : "↓ Download"}
+            {downloading === "detailed" ? "Preparing…" : "↓ Detailed Research"}
+          </button>
+          <button
+            type="button"
+            onClick={() => download("onepager")}
+            disabled={downloading !== null}
+            className="rounded-lg border border-[rgba(23,43,77,0.14)] bg-white px-3.5 py-2 text-[12.5px] font-medium text-navy-primary transition hover:bg-ice disabled:opacity-60"
+          >
+            {downloading === "onepager" ? "Preparing…" : "↓ One Pager"}
           </button>
           <button
             type="button"
@@ -417,7 +539,28 @@ export default function BriefView({ run, onReset }: Props) {
             one reads as something failed to load. */}
         <Pair
           left={section("snapshot") ? { title: "Company record", body: listSection("snapshot") } : null}
-          right={section("management") ? { title: "Key people", body: listSection("management") } : null}
+          right={
+            // The picker replaces the plain list wherever we have the structured
+            // people (which carry the DIN) and somewhere to send them. The list
+            // remains the fallback: the print preview renders this same view
+            // with no way to start a run, and a dead checkbox is worse than a
+            // list that never offered one.
+            onScreenPeople && peopleRows.length > 0
+              ? {
+                  title: isCompany ? "Key people" : "Associated people",
+                  body: (
+                    <PeoplePicker
+                      people={peopleRows}
+                      picked={picked}
+                      onToggle={togglePicked}
+                      onRun={runPicked}
+                    />
+                  ),
+                }
+              : section("management")
+                ? { title: "Key people", body: listSection("management") }
+                : null
+          }
         />
         <Pair
           left={section("litigation") ? { title: "Court cases", body: listSection("litigation") } : null}

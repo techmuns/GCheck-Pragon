@@ -4,10 +4,12 @@ import { launchBrowser } from "@/lib/collectors/browser";
 
 export const dynamic = "force-dynamic";
 
-/** A filesystem-friendly base name for the downloaded file (no extension). */
-function fileName(company: string): string {
+/** A filesystem-friendly base name for the downloaded file (no extension).
+ *  The variant is in the name because both land in the same downloads folder,
+ *  and two files called the same thing are two files you have to open. */
+function fileName(company: string, onePager: boolean): string {
   const safe = (company || "").replace(/[^\p{L}\p{N}\-_. ]/gu, "").trim() || "Pre-Screen";
-  return `Pre-Screen — ${safe}`;
+  return `${onePager ? "One-Pager" : "Pre-Screen"} — ${safe}`;
 }
 
 // GET /api/research/:id/pdf — render the finished brief to a real PDF and hand
@@ -27,7 +29,13 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   // Drive our own server over loopback — avoids any external proxy/auth and
   // works the same in the all-in-one and hybrid (backend-serves-pages) deploys.
   const port = process.env.PORT ?? "3000";
-  const target = `http://127.0.0.1:${port}/print?id=${encodeURIComponent(params.id)}`;
+  // "onepager" exports the executive sheet alone; anything else is the full
+  // record. Both are the same print component over the same brief — the short
+  // one is a cut, not a second document, so it cannot drift from the long one.
+  const onePager = req.nextUrl.searchParams.get("variant") === "onepager";
+  const target =
+    `http://127.0.0.1:${port}/print?id=${encodeURIComponent(params.id)}` +
+    (onePager ? "&variant=onepager" : "");
 
   const browser = await launchBrowser();
   try {
@@ -49,7 +57,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       preferCSSPageSize: true,
     });
 
-    const name = `${fileName(run.subject.company)}.pdf`;
+    const name = `${fileName(run.subject.company, onePager)}.pdf`;
     const asciiName = name.replace(/[^\x20-\x7e]/g, "_");
     return new NextResponse(pdf, {
       status: 200,
