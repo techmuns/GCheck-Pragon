@@ -12,7 +12,7 @@ import ProfileCard from "./ProfileCard";
 import DiligenceGrid, { diligenceStats } from "./DiligenceSection";
 import { RiskDial, RiskDrivers, NetworkContent, ScopeContent } from "./InstitutionalPanels";
 import CitationRef, { sourceUrls } from "./CitationRef";
-import { buildPrintBrief, formatGenerated, listConcerns, type DirectorshipRow, type Person } from "@/lib/printBrief";
+import { buildPrintBrief, formatGenerated, listConcerns, type Person } from "@/lib/printBrief";
 import { buildNetwork } from "@/lib/network";
 import { sourceTier } from "@/lib/risk";
 import { humanizeCaps } from "@/lib/text";
@@ -166,97 +166,11 @@ function RunSelection({
   );
 }
 
-/**
- * Where the subject sits on the register.
- *
- * On a director screen this is the answer to the question the search asked, so
- * it is shown in full and open — not collapsed, and not held back to the
- * bottom of the page behind the evidence for everything else.
- *
- * Each entity can also be sent for a full company pre-screen. It is the same
- * move the board list offers in the other direction: a director brief tells
- * you which companies a person sits on, and the next question is always about
- * one of them. Selection is optional so the same list renders where nothing
- * can be started from it.
- */
-function DirectorIn({
-  rows,
-  picked,
-  onToggle,
-  onRun,
-}: {
-  rows: DirectorshipRow[];
-  picked?: Set<string>;
-  onToggle?: (id: string) => void;
-  onRun?: () => void;
-}) {
-  const flagged = rows.filter((r) => r.tone === "amber").length;
-  const selectable = Boolean(picked && onToggle && onRun);
-
-  return (
-    <div>
-      <p className="mb-2 text-[12.5px] text-ink-secondary">
-        {rows.length} {rows.length === 1 ? "entity" : "entities"} on the register
-        {flagged > 0 ? ` · ${flagged} not in good standing` : " · all in good standing"}
-      </p>
-      <ul className="space-y-0.5">
-        {rows.map((r, i) => {
-          const id = r.id || r.name;
-          const on = picked?.has(id) ?? false;
-          const body = (
-            <>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-ink-primary">{r.name}</span>
-                <span className="block truncate text-[11px] text-ink-secondary/75">
-                  {[r.id, r.kind === "llp" ? "LLP" : null, r.joinedOn ? `joined ${r.joinedOn}` : null]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </span>
-              </span>
-              <span
-                className="shrink-0 text-[11.5px] font-semibold"
-                style={{ color: r.tone === "amber" ? severityStyle.amber.ink : "#6B7A90" }}
-              >
-                {r.status ?? "—"}
-              </span>
-            </>
-          );
-
-          return (
-            <li key={`${id}-${i}`} className="border-b border-[rgba(23,43,77,0.05)] last:border-0">
-              {selectable ? (
-                <label
-                  className={`flex cursor-pointer items-baseline gap-2.5 rounded-md px-1.5 py-1 text-[12.5px] transition ${
-                    on ? "bg-navy-primary/[0.06]" : "hover:bg-ice/70"
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={on}
-                    onChange={() => onToggle!(id)}
-                    className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[#27457E]"
-                  />
-                  {body}
-                </label>
-              ) : (
-                <div className="flex items-baseline justify-between gap-3 py-1 text-[12.5px]">{body}</div>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-
-      {selectable && (
-        <RunSelection
-          count={picked!.size}
-          idle="Select companies to pre-screen"
-          action={(n) => `Pre-screen ${n} selected ${n === 1 ? "company" : "companies"}`}
-          note="Each runs as its own company pre-screen and appears under this one on the left. This brief stays open."
-          onRun={onRun!}
-        />
-      )}
-    </div>
-  );
+/** The entity a directorship line names. The line reads "<name> — <status>",
+ *  and it is the name the pre-screen needs; the status is the register's word
+ *  about it, not part of what it is called. */
+function entityOf(text: string): string {
+  return text.split(/\s+—\s+/)[0].trim();
 }
 
 /** Identity for selection — the DIN where the register gave one, because two
@@ -442,10 +356,8 @@ export default function BriefView({ run, onReset, onScreenPeople, onScreenCompan
   }
 
   function runPickedCompanies(): void {
-    const rows = printBrief?.directorships ?? [];
-    const chosen = rows.filter((r) => pickedCos.has(r.id || r.name));
-    if (chosen.length === 0) return;
-    onScreenCompanies?.(chosen.map((r) => ({ name: r.name })));
+    if (pickedCos.size === 0) return;
+    onScreenCompanies?.([...pickedCos].map((name) => ({ name })));
     setPickedCos(new Set());
   }
   const network = buildNetwork(run);
@@ -483,30 +395,72 @@ export default function BriefView({ run, onReset, onScreenPeople, onScreenCompan
     (f) => f.severity === "info" && f.text !== summary?.emptyText,
   );
 
-  const listSection = (id: string) => {
+  /**
+   * A section's findings as a list.
+   *
+   * `selectable` turns each line into a checkbox without otherwise changing it:
+   * same text, same citation, same spacing, with the severity dot swapped for
+   * the box. Used on the directorships list, where every line names a company
+   * that can be sent for a pre-screen of its own — so the list a reader already
+   * knows gains a control rather than being replaced by a second list showing
+   * them the same thing differently.
+   */
+  const listSection = (id: string, selectable = false) => {
     const s = section(id);
     if (!s || s.empty || s.findings.length === 0) return null;
+    const pick = selectable && Boolean(onScreenCompanies);
     return (
-      <ul className="space-y-1.5">
-        {s.findings.map((f, i) => {
-          const refs = f.sourceRefs ?? (f.sourceRef !== undefined ? [f.sourceRef] : []);
-          return (
-            <li key={i} className="flex items-start gap-2.5">
-              <span
-                className="mt-[7px] inline-block h-1.5 w-1.5 shrink-0 rounded-full"
-                style={{ backgroundColor: severityStyle[f.severity].dot }}
-                aria-hidden
-              />
+      <>
+        <ul className="space-y-1.5">
+          {s.findings.map((f, i) => {
+            const refs = f.sourceRefs ?? (f.sourceRef !== undefined ? [f.sourceRef] : []);
+            const label = humanizeCaps(f.text) || f.text;
+            const body = (
               <span className="text-[13px] leading-relaxed text-ink-primary">
-                {humanizeCaps(f.text) || f.text}
+                {label}
                 {refs.map((n) => (
                   <CitationRef key={n} n={n} url={urlByRef.get(n)} />
                 ))}
               </span>
-            </li>
-          );
-        })}
-      </ul>
+            );
+            if (!pick) {
+              return (
+                <li key={i} className="flex items-start gap-2.5">
+                  <span
+                    className="mt-[7px] inline-block h-1.5 w-1.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: severityStyle[f.severity].dot }}
+                    aria-hidden
+                  />
+                  {body}
+                </li>
+              );
+            }
+            const entity = entityOf(f.text);
+            return (
+              <li key={i}>
+                <label className="flex cursor-pointer items-start gap-2.5 rounded-md py-0.5 transition hover:bg-ice/60">
+                  <input
+                    type="checkbox"
+                    checked={pickedCos.has(entity)}
+                    onChange={() => toggleCompany(entity)}
+                    className="mt-[3px] h-3.5 w-3.5 shrink-0 accent-[#27457E]"
+                  />
+                  {body}
+                </label>
+              </li>
+            );
+          })}
+        </ul>
+        {pick && (
+          <RunSelection
+            count={pickedCos.size}
+            idle="Select companies to pre-screen"
+            action={(n) => `Pre-screen ${n} selected ${n === 1 ? "company" : "companies"}`}
+            note="Each runs as its own company pre-screen and appears under this one on the left. This brief stays open."
+            onRun={runPickedCompanies}
+          />
+        )}
+      </>
     );
   };
 
@@ -696,23 +650,11 @@ export default function BriefView({ run, onReset, onScreenPeople, onScreenCompan
             // subject's own name, so it listed the subject as their own
             // associate. The picker stays where it belongs: on a company
             // screen, over the board.
-            !isCompany && printBrief && printBrief.directorships.length > 0
+            isCompany && onScreenPeople && peopleRows.length > 0
               ? {
-                  title: "Director in",
+                  title: "Key people",
                   body: (
-                    <DirectorIn
-                      rows={printBrief.directorships}
-                      picked={onScreenCompanies ? pickedCos : undefined}
-                      onToggle={onScreenCompanies ? toggleCompany : undefined}
-                      onRun={onScreenCompanies ? runPickedCompanies : undefined}
-                    />
-                  ),
-                }
-              : isCompany && onScreenPeople && peopleRows.length > 0
-                ? {
-                    title: "Key people",
-                    body: (
-                      <PeoplePicker
+                    <PeoplePicker
                         people={peopleRows}
                         picked={picked}
                         onToggle={togglePicked}
@@ -720,9 +662,9 @@ export default function BriefView({ run, onReset, onScreenPeople, onScreenCompan
                       />
                     ),
                   }
-                : section("management")
-                  ? { title: "Key people", body: listSection("management") }
-                  : null
+              : section("management")
+                ? { title: "Key people", body: listSection("management") }
+                : null
           }
         />
         <Pair
@@ -731,7 +673,9 @@ export default function BriefView({ run, onReset, onScreenPeople, onScreenCompan
         />
 
 
-        {section("directorships") && <Section title="Other directorships">{listSection("directorships")}</Section>}
+        {section("directorships") && (
+          <Section title="Other directorships">{listSection("directorships", true)}</Section>
+        )}
         {section("filings") && <Section title="Filings & disclosures">{listSection("filings")}</Section>}
 
         {section("press") && (
