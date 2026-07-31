@@ -212,8 +212,58 @@ function groupByPhase(events: RunEvent[]): Array<{ phase: Phase; events: RunEven
     .filter((g) => g.events.length > 0);
 }
 
+/** A source that has stopped, however it stopped. */
+const SETTLED = new Set(["done", "skipped", "error", "locked"]);
+
+/** "1m 42s" / "42s" — the elapsed side, which is a fact. */
+function clock(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+}
+
+/**
+ * Roughly how much longer — in bands, never to the second.
+ *
+ * The projection reads a rate off how many sources have settled, which quietly
+ * assumes they queue. They do not; they fan out together, so the estimate runs
+ * long. That is the safe direction to be wrong in — a run that beats its
+ * estimate is a pleasant surprise and one that overruns it is a broken promise
+ * — but it is not a number to quote precisely, so it is not quoted precisely.
+ */
+function remaining(ms: number): string {
+  const s = ms / 1000;
+  if (s < 45) return "under a minute left";
+  if (s < 150) return "a minute or two left";
+  if (s < 300) return "a few minutes left";
+  return "several minutes left";
+}
+
 export default function ResearchDrawer({ events, progress, running }: Props) {
   const [open, setOpen] = useState(false);
+
+  // Ticks only while there is something to count. Set from an effect rather
+  // than at first render, so the server and the client agree on the markup.
+  const [now, setNow] = useState(0);
+  useEffect(() => {
+    setNow(Date.now());
+    if (!running) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [running]);
+
+  const timing = useMemo(() => {
+    const startedAt = events[0]?.at ? new Date(events[0].at).getTime() : 0;
+    if (!startedAt || !now) return "";
+    const elapsed = Math.max(0, now - startedAt);
+    if (!running) return `took ${clock(elapsed)}`;
+
+    const total = progress.length;
+    const settled = progress.filter((p) => SETTLED.has(p.status)).length;
+    if (total === 0 || settled === 0) return `${clock(elapsed)} elapsed`;
+    if (settled >= total) return `${clock(elapsed)} · writing it up`;
+    return `${clock(elapsed)} · ${remaining(elapsed * (total / settled) - elapsed)}`;
+  }, [events, progress, running, now]);
+
   const groups = useMemo(() => groupByPhase(events), [events]);
   const bodyRef = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
@@ -241,18 +291,24 @@ export default function ResearchDrawer({ events, progress, running }: Props) {
 
   return (
     <>
-      {/* Trigger — fixed to the right edge, so it is reachable from anywhere on
-          a run that scrolls. */}
+      {/* Trigger — top right, where a status readout belongs, and carrying the
+          two numbers a reader waiting on a run actually wants: how much has
+          happened, and how much longer. */}
       <button
         type="button"
         onClick={() => setOpen(true)}
         aria-expanded={open}
-        className="no-print fixed right-0 top-1/2 z-30 -translate-y-1/2 rounded-l-xl border border-r-0 border-[rgba(23,43,77,0.14)] bg-white/95 px-3 py-4 text-[12px] font-semibold text-navy-primary shadow-soft backdrop-blur-sm transition hover:bg-ice"
+        className="no-print fixed right-4 top-4 z-30 rounded-xl border border-[rgba(23,43,77,0.14)] bg-white/95 px-3.5 py-2 text-left shadow-soft backdrop-blur-sm transition hover:bg-ice"
       >
-        <span className="flex flex-col items-center gap-2">
-          <span aria-hidden>{running ? "◍" : "☰"}</span>
-          <span style={{ writingMode: "vertical-rl" }}>View the research</span>
-          <span className="tabular text-[10px] font-normal text-ink-secondary/80">{events.length}</span>
+        <span className="flex items-center gap-2 text-[12.5px] font-semibold text-navy-primary">
+          <span className={running ? "scan-orb" : undefined} aria-hidden>
+            {running ? "◍" : "☰"}
+          </span>
+          View the research
+        </span>
+        <span className="mt-0.5 block text-[11px] font-normal text-ink-secondary">
+          <span className="tabular">{events.length}</span> steps
+          {timing && <> · {timing}</>}
         </span>
       </button>
 
@@ -275,8 +331,10 @@ export default function ResearchDrawer({ events, progress, running }: Props) {
         <header className="flex items-baseline justify-between gap-3 border-b border-soft-border px-4 py-3">
           <div>
             <div className="eyebrow">The research</div>
+            {/* Repeated here because opening the panel puts the trigger behind
+                the scrim, and the wait is the thing the reader came to check. */}
             <div className="mt-0.5 text-[12px] text-ink-secondary">
-              {running ? "Still working — this updates live" : "Every step, in the order it happened"}
+              {timing || (running ? "Still working — this updates live" : "Every step, in the order it happened")}
             </div>
           </div>
           <button
