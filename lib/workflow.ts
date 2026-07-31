@@ -43,6 +43,18 @@ const DEADLINE_OVERRIDES: Record<string, number> = {
  *  worth waiting a little for, never worth stalling the brief over. */
 const IDENTIFY_DEADLINE_MS = 40000;
 
+/**
+ * The hard deadline one source runs under.
+ *
+ * Exported because the client counts a wait down against these. Read through
+ * this rather than copied: a second table on the client would be a second
+ * place for SOURCE_DEADLINE_SECONDS to be ignored, and the countdown would
+ * quietly stop describing the run it is counting.
+ */
+export function deadlineFor(sourceId: string): number {
+  return DEADLINE_OVERRIDES[sourceId] ?? SOURCE_DEADLINE_MS;
+}
+
 export async function runWorkflow(runId: string): Promise<void> {
   // Everything below runs detached from the request that started it, so an
   // escaping throw would surface as an unhandled rejection and — worse — leave

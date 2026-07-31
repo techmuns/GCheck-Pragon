@@ -222,20 +222,44 @@ function clock(ms: number): string {
 }
 
 /**
- * Roughly how much longer — in bands, never to the second.
+ * How much longer the run can take, counted against what will actually
+ * happen to it.
  *
- * The projection reads a rate off how many sources have settled, which quietly
- * assumes they queue. They do not; they fan out together, so the estimate runs
- * long. That is the safe direction to be wrong in — a run that beats its
- * estimate is a pleasant surprise and one that overruns it is a broken promise
- * — but it is not a number to quote precisely, so it is not quoted precisely.
+ * This used to read a rate off how many sources had settled, which assumes
+ * they queue — they fan out together, so the number was a guess dressed as an
+ * estimate. Every source instead runs under a hard deadline the workflow
+ * enforces and now carries on its progress row, and the run ends when the last
+ * unfinished one either answers or is cut off. So the wait is the largest
+ * remaining budget among the sources still working: a real bound, not a
+ * projection.
+ *
+ * It is an upper bound, and sources usually answer well inside it, so the
+ * clock tends to arrive early. That is the right direction to be wrong in and
+ * the reason it is labelled as a ceiling rather than a prediction.
  */
-function remaining(ms: number): string {
-  const s = ms / 1000;
-  if (s < 45) return "under a minute left";
-  if (s < 150) return "a minute or two left";
-  if (s < 300) return "a few minutes left";
-  return "several minutes left";
+function remainingMs(
+  progress: SourceProgress[],
+  startedAt: Map<string, number>,
+  runStart: number,
+  now: number,
+): number | null {
+  let worst = 0;
+  let known = false;
+  for (const p of progress) {
+    if (SETTLED.has(p.status)) continue;
+    const budget = p.budgetMs;
+    // A run started before budgets were carried has none. Unknown is reported
+    // as unknown — a missing budget read as a zero would put "writing it up"
+    // on a run with four sources still working.
+    if (!budget) continue;
+    known = true;
+    // A pending source has not started its clock yet, so it still owes its
+    // whole budget from now; a running one owes the rest of its own.
+    const from = p.status === "running" ? (startedAt.get(p.sourceId) ?? runStart) : now;
+    worst = Math.max(worst, budget - (now - from));
+  }
+  if (!known) return progress.some((p) => !SETTLED.has(p.status)) ? null : 0;
+  return Math.max(0, worst);
 }
 
 export default function ResearchDrawer({ events, progress, running }: Props) {
@@ -252,16 +276,22 @@ export default function ResearchDrawer({ events, progress, running }: Props) {
   }, [running]);
 
   const timing = useMemo(() => {
-    const startedAt = events[0]?.at ? new Date(events[0].at).getTime() : 0;
-    if (!startedAt || !now) return "";
-    const elapsed = Math.max(0, now - startedAt);
+    const runStart = events[0]?.at ? new Date(events[0].at).getTime() : 0;
+    if (!runStart || !now) return "";
+    const elapsed = Math.max(0, now - runStart);
     if (!running) return `took ${clock(elapsed)}`;
 
-    const total = progress.length;
-    const settled = progress.filter((p) => SETTLED.has(p.status)).length;
-    if (total === 0 || settled === 0) return `${clock(elapsed)} elapsed`;
-    if (settled >= total) return `${clock(elapsed)} · writing it up`;
-    return `${clock(elapsed)} · ${remaining(elapsed * (total / settled) - elapsed)}`;
+    // When each source opened its account, so a countdown is against that
+    // source's own clock rather than the run's.
+    const startedAt = new Map<string, number>();
+    for (const e of events) {
+      if (e.sourceId && !startedAt.has(e.sourceId)) startedAt.set(e.sourceId, new Date(e.at).getTime());
+    }
+
+    const left = remainingMs(progress, startedAt, runStart, now);
+    if (left === null) return `${clock(elapsed)} elapsed`;
+    if (left <= 0) return `${clock(elapsed)} · writing it up`;
+    return `${clock(elapsed)} · up to ${clock(left)} left`;
   }, [events, progress, running, now]);
 
   const groups = useMemo(() => groupByPhase(events), [events]);

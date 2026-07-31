@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getConfig, createRun } from "@/lib/store";
-import { runWorkflow } from "@/lib/workflow";
+import { deadlineFor, runWorkflow } from "@/lib/workflow";
 import { parseDirectorInput } from "@/lib/directorId";
 import type { SourceProgress, Subject } from "@/lib/types";
 
@@ -44,7 +44,15 @@ export async function POST(req: NextRequest) {
 
   const progressSeed: SourceProgress[] = config.sources
     .filter((s) => s.enabled)
-    .map((s) => ({ sourceId: s.id, name: s.name, kind: s.kind, status: "pending" as const }));
+    .map((s) => ({
+      sourceId: s.id,
+      name: s.name,
+      kind: s.kind,
+      status: "pending" as const,
+      // Carried so the client can count the wait down against the deadline
+      // this source will actually be held to.
+      budgetMs: deadlineFor(s.id),
+    }));
 
   const run = createRun(subject, progressSeed);
 

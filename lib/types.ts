@@ -64,6 +64,10 @@ export interface SourceProgress {
   hits?: number;
   /** Honest reason a source was skipped, errored, or is locked. */
   note?: string;
+  /** The hard deadline this source runs under, in ms — the same number the
+   *  workflow enforces, carried to the client so a wait can be counted down
+   *  against what will actually happen rather than guessed from a rate. */
+  budgetMs?: number;
 }
 
 /** A single finding surfaced in the brief. */
