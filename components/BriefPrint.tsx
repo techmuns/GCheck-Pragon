@@ -67,7 +67,7 @@ function PrintDoc({ brief }: { brief: PrintBrief }) {
         <SummaryStrip brief={brief} />
         {/* Portrait is ~90mm narrower than landscape, so the key–value snapshot
             runs full width as a band rather than crowding a column. */}
-        <Snapshot fields={brief.snapshot} />
+        <Snapshot fields={brief.snapshot} isDirector={brief.isDirector} />
 
         <div className="pb-body">
           {/* Left: the analysis. Right: the record it rests on. The itemised
@@ -577,10 +577,14 @@ function PositiveSignals({ items, extra }: { items: PositiveRow[]; extra: number
 
 // ── Right column ───────────────────────────────────────────────────────────────
 
-function Snapshot({ fields }: { fields: PrintBrief["snapshot"] }) {
+// A person has no CIN, an incorporation date or a share structure, so on a
+// director run this panel carries the registry identity instead — and must say
+// so, because a person's name over the words "Company Snapshot" reads as a
+// claim that the registration below belongs to them.
+function Snapshot({ fields, isDirector }: { fields: PrintBrief["snapshot"]; isDirector: boolean }) {
   if (fields.length === 0) return null;
   return (
-    <Section title="Company Snapshot" className="pb-band">
+    <Section title={isDirector ? "Registry Identity" : "Company Snapshot"} className="pb-band">
       <dl className="pb-snap">
         {fields.map((f, i) => (
           <div className="pb-snap-item" key={i}>

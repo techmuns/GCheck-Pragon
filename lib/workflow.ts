@@ -151,23 +151,42 @@ async function execute(runId: string): Promise<void> {
   // which `record` cannot guarantee because it appends in completion order.
   updateRun(runId, { collected: results });
 
+  // The identity lookup above is time boxed; the registry collector is not. So
+  // a lookup that misses its deadline can be followed, seconds later, by the
+  // collector resolving the very same record — often instantly, off the cache
+  // the abandoned lookup had already warmed. The run then holds a DIN that the
+  // subject never received, and the brief goes on to declare that identity
+  // could not be established directly above its own citation of that person's
+  // registry record.
+  //
+  // Anchors arriving this late are no use to the sweeps, which have run. They
+  // are not too late for the brief, which is written next.
+  const resolved = reconcileIdentity(subject, results);
+  if (resolved !== subject) {
+    updateRun(runId, { subject: resolved });
+    appendEvent(runId, {
+      level: "step",
+      text: `Identity settled from the register after the sweeps — DIN ${resolved.din}`,
+    });
+  }
+
   // Synthesise the brief (OpenAI when configured, deterministic fallback else).
   // Note this takes the RESOLVED subject, not the one the run started with: the
   // identity settled above is exactly what the brief needs to say who it covers.
   try {
     appendEvent(runId, { level: "step", text: "Writing the brief" });
-    const brief = await synthesizeBrief(subject, results, config);
+    const brief = await synthesizeBrief(resolved, results, config);
 
     // Company mode: the company brief is only half the job. Publish it now — so
     // the reader has it in seconds, not minutes — then screen the board one
     // director at a time, streaming each verdict onto the run as it lands. The
     // whole thing is wrapped: a diligence failure never unships the brief that
     // already went out.
-    if (diligenceEnabled(subject)) {
+    if (diligenceEnabled(resolved)) {
       updateRun(runId, { brief });
       appendEvent(runId, { level: "step", text: "Screening the board — running deep diligence on each director" });
       try {
-        await runBoardDiligence(subject, results, config, {
+        await runBoardDiligence(resolved, results, config, {
           emit: (text) => appendEvent(runId, { level: "step", text }),
           onUpdate: (people) => updateRun(runId, { diligence: people }),
         });
@@ -251,6 +270,42 @@ async function identify(runId: string, subject: Subject): Promise<Subject> {
   } catch {
     return subject;
   }
+}
+
+/**
+ * Adopt an identity the registry collector resolved but the subject never got.
+ *
+ * Purely additive: a subject that already carries a DIN is returned untouched,
+ * so a slower source can never overwrite an identity the lookup had settled.
+ * Returns the same object reference when nothing changed, which is what the
+ * caller tests to decide whether anything is worth reporting.
+ */
+function reconcileIdentity(subject: Subject, results: CollectorResult[]): Subject {
+  if (subject.type !== "director" || subject.din) return subject;
+
+  // Best register first: the MCA record is keyed by DIN, the aggregator is not.
+  for (const sourceId of ["indiafilings", "registry"]) {
+    const hits = results.find((r) => r.sourceId === sourceId)?.hits ?? [];
+    const identity = hits.find((h) => h.extra?.category === "identity" && h.extra?.din);
+    const din = String(identity?.extra?.din ?? "").trim();
+    if (!din) continue;
+
+    const anchors = hits
+      .filter((h) => h.extra?.category === "directorship")
+      .map((h) => String(h.extra?.company ?? "").trim())
+      .filter(Boolean);
+
+    return {
+      ...subject,
+      // The register's spelling of the name wins, for the same reason it does
+      // in `identify` — it is the one that matches the record being cited.
+      company: String(identity?.extra?.name ?? "").trim() || subject.company,
+      din,
+      anchors: anchors.length > 0 ? anchors : subject.anchors,
+    };
+  }
+
+  return subject;
 }
 
 /** Resolve with the collector, or reject once the deadline passes. The

@@ -891,12 +891,27 @@ function buildDevelopments(bySource: SourceIndex, citations: Citation[]): Develo
   return out.sort((a, b) => toneRank[b.tone] - toneRank[a.tone]);
 }
 
-// ── Company snapshot (available fields only, CIN-derived) ────────────────────
+// ── Subject snapshot (available fields only) ─────────────────────────────────
 
+/**
+ * The identity panel, for whichever kind of subject this run has.
+ *
+ * A director run used to be handed the first CIN found anywhere in the
+ * collected data — which is a company the person sits on, not the person — and
+ * printed it under the heading "Company Snapshot" directly beneath their name.
+ * A reader has every reason to take a CIN printed under a person's name as
+ * that person's registration, and it never was one.
+ *
+ * So the panel now answers the question the run actually asked: for a company,
+ * the company's registration; for a director, the registry identity that
+ * settles WHICH person of that name this brief covers.
+ */
 function buildSnapshot(run: Run, cin?: string): SnapshotField[] {
   // The subject name is already the header title, so it is not repeated here —
   // the snapshot carries only source-backed identity facts.
   const fields: SnapshotField[] = [];
+
+  if (run.subject.type === "director") return directorSnapshot(run);
 
   if (cin) {
     fields.push({ label: "CIN", value: cin });
@@ -910,6 +925,49 @@ function buildSnapshot(run: Run, cin?: string): SnapshotField[] {
   }
 
   return fields;
+}
+
+/**
+ * A director subject's registry identity: the DIN, its standing on the
+ * register, and how many entities the register has against it.
+ *
+ * Read from the registry collector's own identity hit rather than from
+ * `subject.din`, because the two can disagree — the pre-fan-out lookup is time
+ * boxed and the collector is not, so a run can carry a DIN the subject never
+ * received. Falling back to `subject.din` covers the reverse case.
+ */
+function directorSnapshot(run: Run): SnapshotField[] {
+  const identity = registryIdentityHit(run.collected ?? []);
+  const fields: SnapshotField[] = [];
+
+  const din = str(identity?.extra?.din) || run.subject.din;
+  if (din) fields.push({ label: "DIN", value: din });
+
+  const status = str(identity?.extra?.dinStatus);
+  if (status) fields.push({ label: "DIN status", value: humanizeCaps(status) });
+
+  const approved = str(identity?.extra?.approvedOn);
+  if (approved) fields.push({ label: "On register since", value: approved });
+
+  const entities = (run.collected ?? [])
+    .flatMap((c) => c.hits)
+    .filter((h) => h.extra?.category === "directorship").length;
+  if (entities > 0) fields.push({ label: "Entities on record", value: String(entities) });
+
+  return fields;
+}
+
+/** The sources that publish a registry identity, best first. */
+const REGISTRY_IDS = ["indiafilings", "registry"] as const;
+
+/** The registry collector's record of WHO the subject is, if it resolved one. */
+function registryIdentityHit(collected: Run["collected"]): RawHit | undefined {
+  for (const c of collected ?? []) {
+    if (!REGISTRY_IDS.includes(c.sourceId as (typeof REGISTRY_IDS)[number])) continue;
+    const hit = c.hits.find((h) => h.extra?.category === "identity" && str(h.extra?.din));
+    if (hit) return hit;
+  }
+  return undefined;
 }
 
 // ── Key people ────────────────────────────────────────────────────────────────
@@ -1328,25 +1386,31 @@ function caseStatus(title: string): string {
 
 // ── Source quality & research gaps ────────────────────────────────────────────
 
-// Which coverage bucket each configured source belongs to.
-const SOURCE_BUCKET: Record<string, string> = {
-  filings: "Official / regulatory",
-  indiafilings: "Company registry",
-  registry: "Company registry",
-  wikidata: "Company registry",
-  indiankanoon: "Court records",
-  google: "Established news",
-  news: "Established news",
-  cibil: "Official / regulatory",
-  privatecircle: "Company registry",
-};
+// The buckets ARE the authority tiers from `risk.ts`, in descending rank, plus
+// one overlay: a source that ran on the keyless fallback engine is counted as
+// unverified rather than at its nominal tier.
+//
+// This panel used to keep a second, private id → bucket map of its own, which
+// drifted from the tiers the citation list and the scope table were already
+// using. Two faults came out of that drift, both visible on the same page:
+//
+//   • The same MCA registry read as "Official register" beside every citation
+//     and "Company registry" here, so a run whose sources were mostly official
+//     could report "Official / regulatory — 0" directly under six citations
+//     labelled OFFICIAL REGISTER.
+//   • `profile` was missing from the map altogether, so a source that had
+//     completed was silently dropped and the buckets summed to one less than
+//     the "N of M sources completed" stated beside them.
+//
+// One taxonomy, read from one place, cannot disagree with itself.
+const UNVERIFIED_BUCKET = "Low-confidence / unverified";
 
 const BUCKET_ORDER = [
-  "Official / regulatory",
-  "Company registry",
-  "Court records",
-  "Established news",
-  "Low-confidence / unverified",
+  "Official register",
+  "Court record",
+  "Reference / profile",
+  "Press",
+  UNVERIFIED_BUCKET,
 ] as const;
 
 function buildSourceQuality(run: Run): SourceQualityRow[] {
@@ -1357,15 +1421,18 @@ function buildSourceQuality(run: Run): SourceQualityRow[] {
     const note = (p.note ?? "").toLowerCase();
     // A keyless fallback engine ran but its results are not high-confidence.
     if (note.includes("keyless fallback")) {
-      counts["Low-confidence / unverified"] += 1;
+      counts[UNVERIFIED_BUCKET] += 1;
       continue;
     }
-    const bucket = SOURCE_BUCKET[p.sourceId];
-    if (bucket) counts[bucket] += 1;
+    const { label } = sourceTier(p.sourceId);
+    // A source we cannot place on the tier ladder is counted as unverified
+    // rather than dropped: an uncounted source reads as one that never ran,
+    // which is the more misleading of the two.
+    counts[label in counts ? label : UNVERIFIED_BUCKET] += 1;
   }
 
   const toneFor = (bucket: string, n: number): Tone => {
-    if (bucket === "Low-confidence / unverified") return n > 0 ? "amber" : "neutral";
+    if (bucket === UNVERIFIED_BUCKET) return n > 0 ? "amber" : "neutral";
     return n > 0 ? "green" : "neutral";
   };
 
