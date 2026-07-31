@@ -138,9 +138,59 @@ function ReportContinuation({ brief }: { brief: PrintBrief }) {
       <RiskBlock risk={brief.risk} />
       {brief.diligence.length > 0 && <DiligenceBlock people={brief.diligence} />}
       {brief.network && <NetworkBlock network={brief.network} />}
+      <DirectorshipsBlock rows={brief.directorships} />
       <ScopeBlock scope={brief.scope} generatedAt={brief.generatedAt} />
       <ClarificationsBlock rows={brief.clarifications} />
     </div>
+  );
+}
+
+// The registry footprint, in full. Lives in the continuation rather than the
+// executive sheet: eight entities is a table, and the sheet's job is the answer,
+// not the file behind it. The one-pager drops the continuation entirely, which
+// is the right cut — a reader who asked for one page did not ask for this.
+function DirectorshipsBlock({ rows }: { rows: PrintBrief["directorships"] }) {
+  if (rows.length === 0) return null;
+  const flagged = rows.filter((r) => r.tone === "amber").length;
+  return (
+    <section className="pb-flow-section">
+      <div className="pb-flow-head">
+        Registry Footprint
+        <span className="pb-flow-head-meta">
+          {rows.length} {rows.length === 1 ? "entity" : "entities"}
+          {flagged > 0 ? ` · ${flagged} not in good standing` : ""}
+        </span>
+      </div>
+      <table className="pb-dir-table">
+        <thead>
+          <tr>
+            <th>Identifier</th>
+            <th>Entity</th>
+            <th>Type</th>
+            <th>Joined</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={`${r.id}-${i}`}>
+              <td className="pb-dir-id">{r.id || "—"}</td>
+              <td>
+                {r.name}
+                <Ref n={r.sourceRef} />
+              </td>
+              <td>{r.kind === "llp" ? "LLP" : "Company"}</td>
+              {/* Blank where the run had no budget to open that company's page.
+                  The register publishes the joining date on the company's board
+                  table, not on the person's — so this is genuinely unknown here
+                  rather than missing, and is left blank instead of guessed. */}
+              <td className="pb-dir-date">{r.joinedOn || "—"}</td>
+              <td className={`pb-dir-status pb-fg-${r.tone}`}>{r.status || "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
   );
 }
 

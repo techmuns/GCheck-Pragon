@@ -152,6 +152,30 @@ export interface Person {
   sourceRefs?: number[];
 }
 
+/**
+ * One entity the register holds against the subject's DIN.
+ *
+ * The fields are what the register actually publishes, and no more. It lists a
+ * director's entities as identifier, name and status — there is no designation
+ * on the page, and no record of directorships already ended, so neither is
+ * offered here. The joining date comes from the other side: the company's own
+ * board table carries a begin date, so it is known for the entities whose pages
+ * the run had budget to open, and absent for the rest. Absent is shown as
+ * absent rather than filled in.
+ */
+export interface DirectorshipRow {
+  /** CIN for a company, LLPIN for an LLP. */
+  id: string;
+  name: string;
+  /** "Active", "Strike Off", … in the register's own words. */
+  status?: string;
+  kind: "company" | "llp";
+  /** When the subject joined this board, where the company page was read. */
+  joinedOn?: string;
+  tone: Tone;
+  sourceRef?: number;
+}
+
 export interface CaseRow {
   date?: string;
   name: string;
@@ -261,6 +285,8 @@ export interface PrintBrief {
   positives: PositiveRow[];
   extraPositives: number;
   news: NewsRow[];
+  /** Every entity on the subject's DIN — the registry footprint as a table. */
+  directorships: DirectorshipRow[];
   sourceQuality: SourceQualityRow[];
   researchGaps: string[];
   /** What was searched and produced nothing, and what came up and was set
@@ -361,6 +387,7 @@ export function buildPrintBrief(run: Run, generatedAt: string): PrintBrief | nul
     positives: positivesAll.slice(0, CAPS.positives),
     extraPositives: Math.max(0, positivesAll.length - CAPS.positives),
     news: buildNewsRows(bySource, brief.citations),
+    directorships: buildDirectorships(bySource, brief.citations),
     sourceQuality: buildSourceQuality(run),
     researchGaps: buildResearchGaps(run, cin, peopleAll.length),
     clarifications: buildClarifications(run),
@@ -1318,6 +1345,52 @@ function governanceConcern(f: Finding, hit: RawHit, subject: Run["subject"]): Co
  * where the article was actually opened and read, and the search snippet where
  * it was not. A row with neither says so rather than pretending.
  */
+/** A registered entity not in good standing reads differently from an active
+ *  one, and the difference is the whole reason to print the status column. */
+const ADVERSE_ENTITY_STATUS = /strike|liquidat|dissolv|defunct|amalgamat|dormant/i;
+
+/**
+ * Every entity on the subject's DIN, worst standing first.
+ *
+ * The board list was already collected and only ever surfaced as prose. What a
+ * reader wants from it is the shape of the footprint — how many entities, which
+ * are not in good standing, and how long the subject has been on each — and
+ * that is a table, not a sentence.
+ */
+function buildDirectorships(bySource: SourceIndex, citations: Citation[]): DirectorshipRow[] {
+  const refByUrl = new Map(citations.filter((c) => c.url).map((c) => [c.url as string, c.ref]));
+  const rows: DirectorshipRow[] = [];
+  const seen = new Set<string>();
+
+  for (const sourceId of REGISTRY_IDS) {
+    const source = bySource[sourceId];
+    if (source?.status !== "done") continue;
+    for (const h of source.hits) {
+      if (h.extra?.category !== "directorship") continue;
+      const id = str(h.extra?.cin) ?? "";
+      const name = str(h.extra?.company) ?? "";
+      if (!name || seen.has(id || name)) continue;
+      seen.add(id || name);
+
+      const status = str(h.extra?.status);
+      rows.push({
+        id,
+        name,
+        status,
+        kind: h.extra?.entityKind === "llp" ? "llp" : "company",
+        joinedOn: str(h.extra?.joinedOn),
+        tone: status && ADVERSE_ENTITY_STATUS.test(status) ? "amber" : "neutral",
+        sourceRef: h.url ? refByUrl.get(h.url) : undefined,
+      });
+    }
+  }
+
+  // Anything not in good standing first — it is the only row on this table a
+  // reader must not miss — then alphabetically, so the list is scannable.
+  const rank = (r: DirectorshipRow) => (r.tone === "amber" ? 0 : 1);
+  return rows.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+}
+
 /** Keywords that describe a matter no reader should have to find further down
  *  the page. Everything else is worth a flag, not the top of the table. */
 const HARD_KEYWORDS = new Set(["fraud", "cbi", "eow", "criminal", "wilful", "defaulter"]);

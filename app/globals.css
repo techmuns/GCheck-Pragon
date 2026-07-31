@@ -1031,6 +1031,16 @@ body.pb-preview > .pb-root {
 .pb-scope-tier { margin-left: 5pt; font-size: 6.5pt; text-transform: uppercase; letter-spacing: 0.04em; color: var(--meta); }
 .pb-scope-status { font-weight: 700; }
 
+/* Registry footprint — every entity on the DIN. Full width; the identifier
+   column is the widest fixed thing on the page, so it sets the rhythm. */
+.pb-dir-table { width: 100%; border-collapse: collapse; font-size: 7.6pt; }
+.pb-dir-table th { padding: 2pt 6pt 2pt 0; text-align: left; font-size: 6.5pt; text-transform: uppercase; letter-spacing: 0.05em; color: var(--meta); border-bottom: 0.5pt solid var(--rule); }
+.pb-dir-table td { padding: 2.2pt 6pt 2.2pt 0; vertical-align: top; border-bottom: 0.4pt solid var(--rule); color: var(--ink); break-inside: avoid; }
+.pb-dir-table tr:last-child td { border-bottom: 0; }
+.pb-dir-id { font-variant-numeric: tabular-nums; letter-spacing: -0.01em; color: var(--meta); white-space: nowrap; }
+.pb-dir-date { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pb-dir-status { font-weight: 600; white-space: nowrap; }
+
 /* Considered & not counted — one row per source, each able to carry the items
    it set aside. Single column, unlike the scope list: these rows have a nested
    list under them and would break badly across a column boundary. */

@@ -226,6 +226,7 @@ export default function BriefView({ run, onReset, onScreenPeople }: Props) {
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [clarificationsOpen, setClarificationsOpen] = useState(false);
+  const [footprintOpen, setFootprintOpen] = useState(false);
   /** Key people ticked for a pre-screen of their own, keyed by DIN where the
    *  register gave one and by name otherwise. */
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -517,6 +518,70 @@ export default function BriefView({ run, onReset, onScreenPeople }: Props) {
             }
           >
             <DiligenceGrid people={people} running={run.status === "running"} />
+          </Section>
+        )}
+
+        {/* The registry footprint. Collapsed: the count and the flagged count
+            are the finding, and the eight rows behind them are the evidence for
+            it — which the reader wants only once the count has made them ask. */}
+        {(printBrief?.directorships.length ?? 0) > 0 && (
+          <Section
+            title="Registry footprint"
+            count={printBrief!.directorships.length}
+            meta={
+              <button
+                type="button"
+                onClick={() => setFootprintOpen((o) => !o)}
+                aria-expanded={footprintOpen}
+                className="text-[11.5px] font-semibold text-navy-primary/70 transition hover:text-navy-primary"
+              >
+                {footprintOpen ? "Hide" : "Show all"}
+              </button>
+            }
+          >
+            {(() => {
+              const rows = printBrief!.directorships;
+              const flagged = rows.filter((r) => r.tone === "amber");
+              // Collapsed, the panel still names anything not in good standing:
+              // hiding that behind a click would be hiding the one row on this
+              // table that changes what a reader does next.
+              const shown = footprintOpen ? rows : flagged;
+              return (
+                <>
+                  <p className="mb-2 text-[12.5px] text-ink-secondary">
+                    {rows.length} {rows.length === 1 ? "entity" : "entities"} on the register
+                    {flagged.length > 0
+                      ? ` · ${flagged.length} not in good standing`
+                      : " · all in good standing"}
+                  </p>
+                  {shown.length > 0 && (
+                    <ul className="space-y-0.5">
+                      {shown.map((r, i) => (
+                        <li
+                          key={`${r.id}-${i}`}
+                          className="flex items-baseline justify-between gap-3 border-b border-[rgba(23,43,77,0.05)] py-1 text-[12.5px] last:border-0"
+                        >
+                          <span className="min-w-0">
+                            <span className="block truncate text-ink-primary">{r.name}</span>
+                            <span className="block truncate text-[11px] text-ink-secondary/75">
+                              {[r.id, r.kind === "llp" ? "LLP" : null, r.joinedOn ? `joined ${r.joinedOn}` : null]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </span>
+                          </span>
+                          <span
+                            className="shrink-0 text-[11.5px] font-semibold"
+                            style={{ color: r.tone === "amber" ? severityStyle.amber.ink : "#6B7A90" }}
+                          >
+                            {r.status ?? "—"}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              );
+            })()}
           </Section>
         )}
 
