@@ -10,7 +10,10 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "check:registry": "node scripts/check-indiafilings.mjs"
+    "check:registry": "node scripts/check-indiafilings.mjs",
+    "check:keywords": "tsx scripts/check-keywords.mts",
+    "check:attribution": "tsx scripts/check-attribution.mts",
+    "test": "npm run check:keywords && npm run check:attribution"
   },
   "dependencies": {
     "next": "14.2.5",
@@ -28,6 +31,7 @@
     "eslint-config-next": "^14.2.5",
     "postcss": "8.4.39",
     "tailwindcss": "3.4.6",
+    "tsx": "^4.23.1",
     "typescript": "5.5.3"
   }
 }
