@@ -435,17 +435,27 @@ export default function BriefView({ run, onReset, onScreenPeople, onScreenCompan
                 </li>
               );
             }
+            // Selectable rows keep the bullet and the reading line exactly as
+            // the plain ones have them, and put the control at the end. A
+            // checkbox in the bullet's place swaps the thing that marks a row
+            // for the thing that acts on it, so the list stops looking like the
+            // rest of the document the moment it becomes useful.
             const entity = entityOf(f.text);
             return (
               <li key={i}>
-                <label className="flex cursor-pointer items-start gap-2.5 rounded-md py-0.5 transition hover:bg-ice/60">
+                <label className="flex cursor-pointer items-start gap-2.5 rounded-md py-0.5 pr-1 transition hover:bg-ice/60">
+                  <span
+                    className="mt-[7px] inline-block h-1.5 w-1.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: severityStyle[f.severity].dot }}
+                    aria-hidden
+                  />
+                  <span className="min-w-0 flex-1">{body}</span>
                   <input
                     type="checkbox"
                     checked={pickedCos.has(entity)}
                     onChange={() => toggleCompany(entity)}
-                    className="mt-[3px] h-3.5 w-3.5 shrink-0 accent-[#27457E]"
+                    className="mt-[5px] h-3.5 w-3.5 shrink-0 accent-[#27457E]"
                   />
-                  {body}
                 </label>
               </li>
             );
@@ -655,16 +665,24 @@ export default function BriefView({ run, onReset, onScreenPeople, onScreenCompan
                   title: "Key people",
                   body: (
                     <PeoplePicker
-                        people={peopleRows}
-                        picked={picked}
-                        onToggle={togglePicked}
-                        onRun={runPicked}
-                      />
-                    ),
-                  }
-              : section("management")
-                ? { title: "Key people", body: listSection("management") }
-                : null
+                      people={peopleRows}
+                      picked={picked}
+                      onToggle={togglePicked}
+                      onRun={runPicked}
+                    />
+                  ),
+                }
+              : // A director screen has no "key people" — the section was
+                // filling with the co-directors of every board the run read,
+                // and with the subject themselves at the top of them. Where
+                // this person actually sits is the answer to the search, so it
+                // takes the slot, and each company can be sent for a screen of
+                // its own from the row it is named on.
+                !isCompany && section("directorships")
+                ? { title: "Director in these companies", body: listSection("directorships", true) }
+                : section("management")
+                  ? { title: "Key people", body: listSection("management") }
+                  : null
           }
         />
         <Pair
@@ -673,7 +691,11 @@ export default function BriefView({ run, onReset, onScreenPeople, onScreenCompan
         />
 
 
-        {section("directorships") && (
+        {/* Company runs only. On a director run these are the subject's own
+            directorships, and they are already the panel above — printing them
+            twice under a heading that calls them "other" would be two answers
+            to one question, disagreeing about whose companies they are. */}
+        {isCompany && section("directorships") && (
           <Section title="Other directorships">{listSection("directorships", true)}</Section>
         )}
         {section("filings") && <Section title="Filings & disclosures">{listSection("filings")}</Section>}
