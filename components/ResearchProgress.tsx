@@ -200,7 +200,7 @@ export default function ResearchProgress({ subject, progress, events = [] }: Pro
           under the source rows buried the rows themselves, and the reader who
           wants the detail wants it grouped by what it establishes, not by the
           order the queries fired. */}
-      <ResearchDrawer events={events} running={resolved < total} />
+      <ResearchDrawer events={events} progress={progress} running={resolved < total} />
 
       <p className="mt-4 text-center text-[12px] text-ink-secondary/80">
         {resolved >= total && total > 0

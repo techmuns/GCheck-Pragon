@@ -1034,6 +1034,137 @@ body.pb-preview > .pb-root {
 .pb-scope-tier { margin-left: 5pt; font-size: 6.5pt; text-transform: uppercase; letter-spacing: 0.04em; color: var(--meta); }
 .pb-scope-status { font-weight: 700; }
 
+/* ── The research map ─────────────────────────────────────────────────────
+   A run is a walk between sources, and it reads as one: a rail the work
+   travels down, a mark per stop, and colour carrying the outcome. Motion is
+   reserved for the stop that is actually working — everything animating at
+   once says no more than nothing animating, and costs the eye the one place
+   it should be looking. */
+
+.rd-map { list-style: none; margin: 0; padding: 0; }
+
+.rd-step {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.3rem 0 0.3rem 1.35rem;
+  min-height: 1.6rem;
+}
+
+/* The rail. Drawn per step and joined by overlap, so a step can fill its own
+   segment without any step needing to know about its neighbours. */
+.rd-step::before {
+  content: "";
+  position: absolute;
+  left: 0.36rem;
+  top: 0;
+  bottom: -0.3rem;
+  width: 1.5px;
+  background: rgba(23, 43, 77, 0.10);
+}
+.rd-step:last-child::before { bottom: 50%; }
+
+/* The travelled portion — filled behind the work, empty ahead of it. */
+.rd-step[data-walked="true"]::after {
+  content: "";
+  position: absolute;
+  left: 0.36rem;
+  top: 0;
+  bottom: -0.3rem;
+  width: 1.5px;
+  background: linear-gradient(180deg, #27457E, #168E8E);
+  animation: rdFill 420ms ease-out both;
+}
+.rd-step:last-child[data-walked="true"]::after { bottom: 50%; }
+
+@keyframes rdFill { from { transform: scaleY(0); transform-origin: top; } to { transform: scaleY(1); } }
+
+.rd-mark {
+  position: absolute;
+  left: 0;
+  top: 0.42rem;
+  display: grid;
+  place-items: center;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 999px;
+  font-size: 0.5rem;
+  font-weight: 800;
+  line-height: 1;
+  color: #fff;
+  background: #C2CAD6;
+}
+
+.rd-step[data-state="hit"] .rd-mark { background: #2F855A; }
+.rd-step[data-state="empty"] .rd-mark { background: #9AA6B6; }
+.rd-step[data-state="error"] .rd-mark { background: #C75D54; }
+.rd-step[data-state="locked"] .rd-mark { background: #B68B3A; }
+.rd-step[data-state="pending"] .rd-mark { background: #DCE2EA; }
+
+/* The stop currently being worked. A halo rather than a colour change: the
+   reader should be able to find "where is it now" without reading a legend. */
+.rd-step[data-state="active"] .rd-mark {
+  background: #168E8E;
+  animation: rdHalo 1.6s ease-out infinite;
+}
+@keyframes rdHalo {
+  0%   { box-shadow: 0 0 0 0 rgba(22, 142, 142, 0.45); }
+  70%  { box-shadow: 0 0 0 0.42rem rgba(22, 142, 142, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(22, 142, 142, 0); }
+}
+
+/* Something arriving at the active stop — the "travelling to a site" beat. */
+.rd-travel {
+  position: absolute;
+  left: 0.3rem;
+  width: 0.28rem;
+  height: 0.28rem;
+  border-radius: 999px;
+  background: #168E8E;
+  animation: rdTravel 1.4s cubic-bezier(0.5, 0, 0.4, 1) infinite;
+}
+@keyframes rdTravel {
+  0%   { top: -0.5rem; opacity: 0; }
+  20%  { opacity: 1; }
+  80%  { opacity: 1; }
+  100% { top: 0.42rem; opacity: 0; }
+}
+
+/* A find. Pops once, on arrival, and then holds — a tick that keeps moving
+   stops meaning "done" and starts meaning "busy". */
+.rd-step[data-state="hit"] .rd-mark span { animation: rdCheck 320ms cubic-bezier(0.2, 1.5, 0.4, 1) both; }
+@keyframes rdCheck {
+  from { transform: scale(0) rotate(-30deg); opacity: 0; }
+  to   { transform: scale(1) rotate(0); opacity: 1; }
+}
+
+.rd-name { flex: 1 1 auto; min-width: 0; font-size: 0.76rem; line-height: 1.3; color: #26303F; }
+.rd-step[data-state="pending"] .rd-name { color: #8894A6; }
+.rd-step[data-state="active"] .rd-name { font-weight: 600; color: #172B4D; }
+.rd-count { flex: none; font-size: 0.66rem; font-variant-numeric: tabular-nums; color: #6B7A90; }
+.rd-step[data-state="hit"] .rd-count { color: #2F855A; font-weight: 600; }
+/* The site being read right now, under the active stop. */
+.rd-host { display: block; font-size: 0.63rem; color: #7C8AA0; }
+
+/* Each step arrives rather than appearing. Only newly mounted lines animate —
+   the list only ever appends, so the ones already read stay still. Short and
+   small: a run emits a line a second, and anything longer would still be
+   moving when the next one lands. */
+.rd-line { animation: rdLine 220ms ease-out both; }
+@keyframes rdLine {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rd-step[data-state="active"] .rd-mark,
+  .rd-step[data-walked="true"]::after,
+  .rd-step[data-state="hit"] .rd-mark span,
+  .rd-line { animation: none; }
+  .rd-travel { display: none; }
+}
+
 /* Registry footprint — every entity on the DIN. Full width; the identifier
    column is the widest fixed thing on the page, so it sets the rhythm. */
 .pb-dir-table { width: 100%; border-collapse: collapse; font-size: 7.6pt; }

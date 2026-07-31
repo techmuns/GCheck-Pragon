@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { RunEvent, RunEventLevel } from "@/lib/types";
+import type { RunEvent, RunEventLevel, SourceProgress } from "@/lib/types";
 
 // ── The research, as reasoning rather than as a log ─────────────────────────
 // The activity list said what the run executed, in the order it executed it:
@@ -23,8 +23,95 @@ import type { RunEvent, RunEventLevel } from "@/lib/types";
 
 interface Props {
   events: RunEvent[];
+  /** Every source the run planned, with where each has got to. */
+  progress: SourceProgress[];
   /** Shown on the trigger while the run is still working. */
   running?: boolean;
+}
+
+/** What a stop on the map is doing, which is not quite its status: a source
+ *  that finished and found nothing reads differently from one that finished
+ *  and found eight things, and the same word covers both. */
+type Stop = "pending" | "active" | "hit" | "empty" | "error" | "locked";
+
+function stopOf(p: SourceProgress): Stop {
+  switch (p.status) {
+    case "running":
+      return "active";
+    case "error":
+      return "error";
+    case "locked":
+      return "locked";
+    case "skipped":
+      return "empty";
+    case "done":
+      return (p.hits ?? 0) > 0 ? "hit" : "empty";
+    default:
+      return "pending";
+  }
+}
+
+const MARK: Record<Stop, string> = {
+  pending: "",
+  active: "",
+  hit: "✓",
+  empty: "–",
+  error: "!",
+  locked: "🔒",
+};
+
+/**
+ * The run as a walk between sources.
+ *
+ * The list of steps below says what happened. This says where the work is —
+ * which stop is being worked now, which are behind it, and which of those
+ * actually turned anything up. It is the difference between reading a
+ * transcript and watching someone work, and it costs one row per source.
+ */
+function SourceMap({ progress, events }: { progress: SourceProgress[]; events: RunEvent[] }) {
+  if (progress.length === 0) return null;
+
+  // The page the active source is on right now — the "travelling to a site"
+  // beat, taken from the newest event that named one.
+  const hostBySource = new Map<string, string>();
+  for (const e of events) {
+    if (e.sourceId && e.url) hostBySource.set(e.sourceId, hostOf(e.url));
+  }
+
+  return (
+    <ol className="rd-map">
+      {progress.map((p) => {
+        const stop = stopOf(p);
+        const settled = stop !== "pending";
+        const host = stop === "active" ? hostBySource.get(p.sourceId) : undefined;
+        return (
+          <li key={p.sourceId} className="rd-step" data-state={stop} data-walked={settled}>
+            {stop === "active" && <span className="rd-travel" aria-hidden />}
+            <span className="rd-mark" aria-hidden>
+              <span>{MARK[stop]}</span>
+            </span>
+            <span className="rd-name">
+              {p.name}
+              {host && <span className="rd-host">reading {host}</span>}
+            </span>
+            <span className="rd-count">
+              {stop === "hit"
+                ? `${p.hits} found`
+                : stop === "empty"
+                  ? "nothing"
+                  : stop === "active"
+                    ? "working"
+                    : stop === "error"
+                      ? "unreachable"
+                      : stop === "locked"
+                        ? "upgrade"
+                        : ""}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
+  );
 }
 
 interface Phase {
@@ -125,7 +212,7 @@ function groupByPhase(events: RunEvent[]): Array<{ phase: Phase; events: RunEven
     .filter((g) => g.events.length > 0);
 }
 
-export default function ResearchDrawer({ events, running }: Props) {
+export default function ResearchDrawer({ events, progress, running }: Props) {
   const [open, setOpen] = useState(false);
   const groups = useMemo(() => groupByPhase(events), [events]);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -210,13 +297,23 @@ export default function ResearchDrawer({ events, running }: Props) {
           }}
           className="min-h-0 flex-1 overflow-y-auto px-4 py-3"
         >
+          {/* Where the work is, before what it did. A reader opening this
+              mid-run wants the position first; the transcript is what they
+              read once they have it. */}
+          <section className="mb-5">
+            <h4 className="font-display text-[13.5px] leading-tight text-navy-deep">Where the work is</h4>
+            <div className="mt-2">
+              <SourceMap progress={progress} events={events} />
+            </div>
+          </section>
+
           {groups.map(({ phase, events: rows }) => (
             <section key={phase.id} className="mb-5 last:mb-1">
               <h4 className="font-display text-[13.5px] leading-tight text-navy-deep">{phase.title}</h4>
               <p className="mt-1 text-[12px] leading-relaxed text-ink-secondary">{phase.lead}</p>
               <ol className="mt-2 space-y-0.5 border-l border-[rgba(23,43,77,0.10)] pl-2.5">
                 {rows.map((e, i) => (
-                  <li key={i} className="flex items-start gap-1.5 text-[11px] leading-relaxed">
+                  <li key={i} className="rd-line flex items-start gap-1.5 text-[11px] leading-relaxed">
                     <span
                       className="shrink-0 font-semibold"
                       style={{ color: COLOUR[e.level] ?? COLOUR.step }}
