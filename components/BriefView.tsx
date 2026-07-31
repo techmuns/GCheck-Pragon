@@ -23,6 +23,9 @@ interface Props {
   /** Screen these people, each as a pre-screen of their own. Absent when the
    *  brief is rendered somewhere that cannot start runs (the print preview). */
   onScreenPeople?: (people: Array<{ name: string; din?: string }>) => void;
+  /** Screen these companies, each as a pre-screen of its own — the same move
+   *  in the other direction, off a director's own directorships. */
+  onScreenCompanies?: (companies: Array<{ name: string }>) => void;
 }
 
 // ── The pre-meeting brief ────────────────────────────────────────────────────
@@ -129,14 +132,67 @@ function Pair({
 }
 
 /**
+ * The footer both pickers share: what is selected, and the button that runs it.
+ *
+ * One component because the two lists differ only in what they hold. A second
+ * copy of this would be a second place for the wording and the disabled state
+ * to drift apart, on controls that sit a few centimetres from each other.
+ */
+function RunSelection({
+  count,
+  idle,
+  action,
+  note,
+  onRun,
+}: {
+  count: number;
+  idle: string;
+  action: (n: number) => string;
+  note: string;
+  onRun: () => void;
+}) {
+  return (
+    <>
+      <button
+        type="button"
+        onClick={onRun}
+        disabled={count === 0}
+        className="mt-2.5 w-full rounded-lg border border-[rgba(23,43,77,0.14)] bg-white px-3 py-1.5 text-[12.5px] font-semibold text-navy-primary transition enabled:hover:bg-ice disabled:opacity-45"
+      >
+        {count === 0 ? idle : action(count)}
+      </button>
+      <p className="mt-1.5 text-[11px] leading-relaxed text-ink-secondary/75">{note}</p>
+    </>
+  );
+}
+
+/**
  * Where the subject sits on the register.
  *
  * On a director screen this is the answer to the question the search asked, so
  * it is shown in full and open — not collapsed, and not held back to the
  * bottom of the page behind the evidence for everything else.
+ *
+ * Each entity can also be sent for a full company pre-screen. It is the same
+ * move the board list offers in the other direction: a director brief tells
+ * you which companies a person sits on, and the next question is always about
+ * one of them. Selection is optional so the same list renders where nothing
+ * can be started from it.
  */
-function DirectorIn({ rows }: { rows: DirectorshipRow[] }) {
+function DirectorIn({
+  rows,
+  picked,
+  onToggle,
+  onRun,
+}: {
+  rows: DirectorshipRow[];
+  picked?: Set<string>;
+  onToggle?: (id: string) => void;
+  onRun?: () => void;
+}) {
   const flagged = rows.filter((r) => r.tone === "amber").length;
+  const selectable = Boolean(picked && onToggle && onRun);
+
   return (
     <div>
       <p className="mb-2 text-[12.5px] text-ink-secondary">
@@ -144,28 +200,61 @@ function DirectorIn({ rows }: { rows: DirectorshipRow[] }) {
         {flagged > 0 ? ` · ${flagged} not in good standing` : " · all in good standing"}
       </p>
       <ul className="space-y-0.5">
-        {rows.map((r, i) => (
-          <li
-            key={`${r.id}-${i}`}
-            className="flex items-baseline justify-between gap-3 border-b border-[rgba(23,43,77,0.05)] py-1 text-[12.5px] last:border-0"
-          >
-            <span className="min-w-0">
-              <span className="block truncate text-ink-primary">{r.name}</span>
-              <span className="block truncate text-[11px] text-ink-secondary/75">
-                {[r.id, r.kind === "llp" ? "LLP" : null, r.joinedOn ? `joined ${r.joinedOn}` : null]
-                  .filter(Boolean)
-                  .join(" · ")}
+        {rows.map((r, i) => {
+          const id = r.id || r.name;
+          const on = picked?.has(id) ?? false;
+          const body = (
+            <>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-ink-primary">{r.name}</span>
+                <span className="block truncate text-[11px] text-ink-secondary/75">
+                  {[r.id, r.kind === "llp" ? "LLP" : null, r.joinedOn ? `joined ${r.joinedOn}` : null]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
               </span>
-            </span>
-            <span
-              className="shrink-0 text-[11.5px] font-semibold"
-              style={{ color: r.tone === "amber" ? severityStyle.amber.ink : "#6B7A90" }}
-            >
-              {r.status ?? "—"}
-            </span>
-          </li>
-        ))}
+              <span
+                className="shrink-0 text-[11.5px] font-semibold"
+                style={{ color: r.tone === "amber" ? severityStyle.amber.ink : "#6B7A90" }}
+              >
+                {r.status ?? "—"}
+              </span>
+            </>
+          );
+
+          return (
+            <li key={`${id}-${i}`} className="border-b border-[rgba(23,43,77,0.05)] last:border-0">
+              {selectable ? (
+                <label
+                  className={`flex cursor-pointer items-baseline gap-2.5 rounded-md px-1.5 py-1 text-[12.5px] transition ${
+                    on ? "bg-navy-primary/[0.06]" : "hover:bg-ice/70"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    onChange={() => onToggle!(id)}
+                    className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[#27457E]"
+                  />
+                  {body}
+                </label>
+              ) : (
+                <div className="flex items-baseline justify-between gap-3 py-1 text-[12.5px]">{body}</div>
+              )}
+            </li>
+          );
+        })}
       </ul>
+
+      {selectable && (
+        <RunSelection
+          count={picked!.size}
+          idle="Select companies to pre-screen"
+          action={(n) => `Pre-screen ${n} selected ${n === 1 ? "company" : "companies"}`}
+          note="Each runs as its own company pre-screen and appears under this one on the left. This brief stays open."
+          onRun={onRun!}
+        />
+      )}
     </div>
   );
 }
@@ -232,19 +321,13 @@ function PeoplePicker({
         })}
       </ul>
 
-      <button
-        type="button"
-        onClick={onRun}
-        disabled={count === 0}
-        className="mt-2.5 w-full rounded-lg border border-[rgba(23,43,77,0.14)] bg-white px-3 py-1.5 text-[12.5px] font-semibold text-navy-primary transition enabled:hover:bg-ice disabled:opacity-45"
-      >
-        {count === 0
-          ? "Select people to pre-screen"
-          : `Pre-screen ${count} selected ${count === 1 ? "person" : "people"}`}
-      </button>
-      <p className="mt-1.5 text-[11px] leading-relaxed text-ink-secondary/75">
-        Each runs as its own director pre-screen and appears under this one on the left. This brief stays open.
-      </p>
+      <RunSelection
+        count={count}
+        idle="Select people to pre-screen"
+        action={(n) => `Pre-screen ${n} selected ${n === 1 ? "person" : "people"}`}
+        note="Each runs as its own director pre-screen and appears under this one on the left. This brief stays open."
+        onRun={onRun}
+      />
     </div>
   );
 }
@@ -260,7 +343,7 @@ function Stat({ value, label, tint }: { value: string | number; label: string; t
   );
 }
 
-export default function BriefView({ run, onReset, onScreenPeople }: Props) {
+export default function BriefView({ run, onReset, onScreenPeople, onScreenCompanies }: Props) {
   const brief = run.brief;
   // Which document is being produced, so only the button that was pressed
   // shows the wait — a spinner on both reads as though both are running.
@@ -271,6 +354,9 @@ export default function BriefView({ run, onReset, onScreenPeople }: Props) {
   /** Key people ticked for a pre-screen of their own, keyed by DIN where the
    *  register gave one and by name otherwise. */
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  /** Entities ticked off a director's own directorships, keyed by CIN where the
+   *  register gave one and by name otherwise. */
+  const [pickedCos, setPickedCos] = useState<Set<string>>(new Set());
 
   /**
    * Get the PDF out of an embedded page.
@@ -344,6 +430,23 @@ export default function BriefView({ run, onReset, onScreenPeople }: Props) {
     if (chosen.length === 0) return;
     onScreenPeople?.(chosen.map((p) => ({ name: p.name, din: p.din })));
     setPicked(new Set());
+  }
+
+  function toggleCompany(id: string): void {
+    setPickedCos((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function runPickedCompanies(): void {
+    const rows = printBrief?.directorships ?? [];
+    const chosen = rows.filter((r) => pickedCos.has(r.id || r.name));
+    if (chosen.length === 0) return;
+    onScreenCompanies?.(chosen.map((r) => ({ name: r.name })));
+    setPickedCos(new Set());
   }
   const network = buildNetwork(run);
 
@@ -596,7 +699,14 @@ export default function BriefView({ run, onReset, onScreenPeople }: Props) {
             !isCompany && printBrief && printBrief.directorships.length > 0
               ? {
                   title: "Director in",
-                  body: <DirectorIn rows={printBrief.directorships} />,
+                  body: (
+                    <DirectorIn
+                      rows={printBrief.directorships}
+                      picked={onScreenCompanies ? pickedCos : undefined}
+                      onToggle={onScreenCompanies ? toggleCompany : undefined}
+                      onRun={onScreenCompanies ? runPickedCompanies : undefined}
+                    />
+                  ),
                 }
               : isCompany && onScreenPeople && peopleRows.length > 0
                 ? {

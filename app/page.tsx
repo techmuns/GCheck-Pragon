@@ -96,6 +96,19 @@ export default function Home() {
                 });
               }
             }}
+            onScreenCompanies={(companies) => {
+              // The same move off a director's own directorships: a full
+              // company pre-screen each, hung under the brief they came from.
+              // No ticker — the register does not carry one, and inventing one
+              // would point the filings source at the wrong listed entity.
+              for (const c of companies) {
+                start(c.name, [], "company", undefined, {
+                  parentKey: activeKey ?? undefined,
+                  keepFocus: true,
+                  skipHistory: true,
+                });
+              }
+            }}
           />
         )}
 
