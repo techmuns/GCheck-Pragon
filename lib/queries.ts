@@ -50,10 +50,42 @@ export function entityQueries(subject: Subject): GeneratedQuery[] {
   }));
 }
 
-/** Detect which of the keyword set appear in a piece of text. */
+/**
+ * Detect which of the keyword set appear in a piece of text — whole words only.
+ *
+ * This was a bare substring test, which asks a much looser question than the
+ * caller means by it: "legal" matched *illegal* and *paralegal*, "court"
+ * matched *courtesy* and *courted*, "civil" matched *civilian*, "police"
+ * matched *policed*. Each of those became a red-flag keyword hit, and the brief
+ * printed "Adverse: court" over an article whose only offence was the word
+ * "courtesy". In a governance report that is not a near miss — it is a false
+ * statement about a person.
+ *
+ * A plural still counts — "defaults" is the same finding as "default". Verb
+ * endings deliberately do not: the same rule that would catch "defaulted" also
+ * catches "courted" for "court" and "policed" for "police", and a false adverse
+ * label on a person costs more than a missed word form. Where a form genuinely
+ * matters, it belongs in the keyword list, which the admin panel already makes
+ * editable — that is a decision for the operator, not a guess made here.
+ */
 export function matchKeywords(text: string, keywords: string[]): string[] {
-  const lower = text.toLowerCase();
-  return keywords.filter((kw) => lower.includes(kw.toLowerCase()));
+  return keywords.filter((kw) => keywordPattern(kw).test(text));
+}
+
+/** Compiled whole-word matchers, kept because the sweep tests the same dozen
+ *  keywords against every result it reads. */
+const KEYWORD_PATTERNS = new Map<string, RegExp>();
+
+function keywordPattern(keyword: string): RegExp {
+  const key = keyword.toLowerCase().trim();
+  const cached = KEYWORD_PATTERNS.get(key);
+  if (cached) return cached;
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // No /g: a global regex carries lastIndex between calls, and this one is
+  // reused across every hit in the sweep.
+  const re = new RegExp(`\\b${escaped}(?:e?s)?\\b`, "i");
+  KEYWORD_PATTERNS.set(key, re);
+  return re;
 }
 
 // ── Entity relevance ───────────────────────────────────────────────────────

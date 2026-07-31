@@ -763,9 +763,9 @@ function extractWho(statement: string, hit: RawHit | undefined, subject: Run["su
   const entity = hit?.entity;
 
   // A named promoter beats everything — it says exactly whose matter this is.
-  const promoter = subject.promoters.find(
-    (p) => (entity && norm(entity) === norm(p)) || combined.includes(norm(p)),
-  );
+  // Read from the matter's own text, never from which query found it: see the
+  // note on `namesSubject` below for why those are not the same question.
+  const promoter = subject.promoters.find((p) => combined.includes(norm(p)));
   if (promoter) return `${promoter}, promoter`;
 
   // The record may name a promoter without naming which one ("CBI names the
@@ -774,15 +774,41 @@ function extractWho(statement: string, hit: RawHit | undefined, subject: Run["su
     return "A promoter / director";
   }
 
-  const namesSubject =
-    (entity && norm(entity).includes(shortSubject)) ||
-    (shortSubject.length > 3 && combined.includes(shortSubject));
+  // Whose matter this is can only be read from the matter itself.
+  //
+  // `hit.entity` records which entity's QUERY produced the hit, not who the
+  // hit concerns — and those come apart precisely where it matters most. A
+  // director sweep searches the person, the search engine returns cases their
+  // COMPANY is party to, and every one of them arrives stamped with the
+  // director's name. Trusting that stamp is how "Reliance Jio Infocomm Limited
+  // vs State Of Kerala" came to be reported as the individual's own exposure,
+  // in a brief that then priced it into his risk score.
+  const namesSubject = shortSubject.length > 3 && combined.includes(shortSubject);
+
+  // The sweep already grades whether a director hit could be tied to this
+  // person or only to their name. A hit it graded "unverified" is the namesake
+  // it was warning about, so it cannot be attributed to the subject here.
+  const gradedAway = isDirector && hit?.confidence === "unverified";
+
   // The subject's name is already the page title — repeating it in every card
   // costs a line and tells the reader nothing. What matters is whether the
   // matter attaches to the subject itself or to someone around it.
-  if (namesSubject) return isDirector ? "The individual" : "The company itself";
+  if (namesSubject && !gradedAway) return isDirector ? "The individual" : "The company itself";
+
+  // Not the subject's own matter. A case title names its parties, and naming
+  // the real one is both true and more useful to the reader than falling back
+  // to whichever query happened to surface it.
+  const party = leadParty(hit?.title);
+  if (party) return shorten(party, 30);
 
   return entity ? shorten(entity, 30) : undefined;
+}
+
+/** The first-named party of a case title, when the title reads like one —
+ *  "X Ltd vs Union Of India" is X's matter, whoever searched for it. */
+function leadParty(title: string | undefined): string | undefined {
+  const party = title?.match(/^(.{3,80}?)\s+(?:vs\.?|versus|v\.)\s+/i)?.[1]?.trim();
+  return party && party.length >= 3 ? party : undefined;
 }
 
 function extractFacts(
@@ -875,12 +901,19 @@ function buildDevelopments(bySource: SourceIndex, citations: Citation[]): Develo
       if (seen.has(key)) continue;
       seen.add(key);
       const kws = h.matchedKeywords ?? [];
-      const hard = kws.some((k) => ["fraud", "cbi", "eow", "criminal", "wilful", "defaulter"].includes(k.toLowerCase()));
+      // "Adverse" is a claim about the subject, so it may only be made where
+      // the item was actually tied to them. On a director run the sweep grades
+      // that for us: an "unverified" hit matched the name and nothing else, and
+      // may be about a different person of that name entirely. Calling it
+      // adverse would put a stranger's court matter on this person's page, so
+      // it is reported as a mention — which is all we know it to be.
+      const attributed = h.confidence !== "unverified";
+      const hard = attributed && kws.some((k) => HARD_KEYWORDS.has(k.toLowerCase()));
       out.push({
         date: normaliseDate(h.date),
         headline: trimToPhrase(stripQuotes(h.title), 90),
-        status: kws.length > 0 ? `Adverse: ${kws[0]}` : "Coverage",
-        tone: hard ? "red" : kws.length > 0 ? "amber" : "neutral",
+        status: kws.length === 0 ? "Coverage" : attributed ? `Adverse: ${kws[0]}` : `Mentions: ${kws[0]}`,
+        tone: hard ? "red" : kws.length > 0 && attributed ? "amber" : "neutral",
         sourceRef: h.url ? refByUrl.get(h.url) : undefined,
       });
     }
@@ -1263,6 +1296,10 @@ function governanceConcern(f: Finding, hit: RawHit, subject: Run["subject"]): Co
  * where the article was actually opened and read, and the search snippet where
  * it was not. A row with neither says so rather than pretending.
  */
+/** Keywords that describe a matter no reader should have to find further down
+ *  the page. Everything else is worth a flag, not the top of the table. */
+const HARD_KEYWORDS = new Set(["fraud", "cbi", "eow", "criminal", "wilful", "defaulter"]);
+
 function buildNewsRows(bySource: SourceIndex, citations: Citation[]): NewsRow[] {
   const refByUrl = new Map<string, number>();
   for (const c of citations) if (c.url) refByUrl.set(c.url, c.ref);
