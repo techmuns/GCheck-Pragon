@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import type { RunEvent, SourceProgress, Subject } from "@/lib/types";
-import ActivityLog from "./ActivityLog";
+import ResearchDrawer from "./ResearchDrawer";
 
 interface Props {
   subject: Subject;
@@ -196,12 +196,16 @@ export default function ResearchProgress({ subject, progress, events = [] }: Pro
         })}
       </ul>
 
-      <ActivityLog events={events} />
+      {/* The full research reads in its own panel now. Ninety-odd log lines
+          under the source rows buried the rows themselves, and the reader who
+          wants the detail wants it grouped by what it establishes, not by the
+          order the queries fired. */}
+      <ResearchDrawer events={events} running={resolved < total} />
 
       <p className="mt-4 text-center text-[12px] text-ink-secondary/80">
         {resolved >= total && total > 0
           ? "Almost there — writing it up."
-          : "This one runs deep, so give it a few minutes. Everything it checks is listed above as it happens."}
+          : "This one runs deep, so give it a few minutes. Open “View the research” on the right to follow every step."}
       </p>
     </div>
   );

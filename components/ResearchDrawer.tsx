@@ -1,0 +1,248 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { RunEvent, RunEventLevel } from "@/lib/types";
+
+// ── The research, as reasoning rather than as a log ─────────────────────────
+// The activity list said what the run executed, in the order it executed it:
+// ninety-six lines of queries, fetches and cache hits, flat, under the source
+// rows. Everything true, nothing legible. A reader watching a pre-screen wants
+// to know what is being established and why, and only then what was run to
+// establish it.
+//
+// So the same events are grouped into the phases of the work and given a
+// written lead — what this phase is for — with the executed steps underneath as
+// the evidence for the claim. The narration is written, not generated: it says
+// what the phase does, which is fixed, and never what the phase found, which is
+// not. A model narrating a run in flight can assert something the assembled
+// brief then contradicts, and the contradiction lands on the same screen.
+//
+// It sits in a drawer because it is the answer to "what are you actually
+// doing", which is a question the reader asks sometimes, not a thing they need
+// held open in front of them for the whole run.
+
+interface Props {
+  events: RunEvent[];
+  /** Shown on the trigger while the run is still working. */
+  running?: boolean;
+}
+
+interface Phase {
+  id: string;
+  title: string;
+  /** What this phase is establishing — present tense, and true before the
+   *  phase has returned anything, because that is when it is read. */
+  lead: string;
+  sources: string[];
+}
+
+// Ordered as the work actually proceeds: who this is, then what they are
+// attached to, then what is on record against either.
+const PHASES: Phase[] = [
+  {
+    id: "identity",
+    title: "Settling who this is",
+    lead: "Matching the name against the MCA register to establish which registered director it belongs to, and which entities are filed against that DIN. Every later search is anchored to this record rather than to the spelling of a name.",
+    sources: ["indiafilings", "registry"],
+  },
+  {
+    id: "profile",
+    title: "Background and public profile",
+    lead: "Reading public profiles for who this person or company is — the role, the business behind it, and the placing facts a partner needs before the meeting.",
+    sources: ["profile", "wikidata"],
+  },
+  {
+    id: "litigation",
+    title: "Judicial and regulatory record",
+    lead: "Searching judicial databases for proceedings naming the subject or the companies they sit on, and separating matters that attach to the person from those that attach to an entity.",
+    sources: ["indiankanoon"],
+  },
+  {
+    id: "press",
+    title: "Press and adverse media",
+    lead: "Sweeping search and news archives against the red-flag keyword set, then opening the articles worth reading — a headline says a matter exists, only the body says which side of it the subject was on.",
+    sources: ["google", "news"],
+  },
+  {
+    id: "filings",
+    title: "Filings and disclosures",
+    lead: "Reading exchange filings, annual reports and announcements for the listed entities involved.",
+    sources: ["filings"],
+  },
+  {
+    id: "defaults",
+    title: "Credit and default registries",
+    lead: "Checking suit-filed and wilful-defaulter registries for the subject and their primary operating entities.",
+    sources: ["cibil", "privatecircle"],
+  },
+];
+
+const RUN_PHASE: Phase = {
+  id: "run",
+  title: "Planning and write-up",
+  lead: "Settling the subject, then assembling what came back into one document — ranked by severity, every finding tied to the source it was read from.",
+  sources: [],
+};
+
+const PHASE_BY_SOURCE = new Map<string, string>(
+  PHASES.flatMap((p) => p.sources.map((s) => [s, p.id] as const)),
+);
+
+const GLYPH: Record<RunEventLevel, string> = {
+  step: "•",
+  query: "→",
+  fetch: "↓",
+  cache: "≡",
+  skip: "–",
+  warn: "!",
+};
+
+const COLOUR: Record<RunEventLevel, string> = {
+  step: "#27457E",
+  query: "#168E8E",
+  fetch: "#5A6C8C",
+  cache: "#9AA6B6",
+  skip: "#B68B3A",
+  warn: "#C75D54",
+};
+
+/** Group the run's events under the phase each belongs to, phases in the order
+ *  the work reaches them. Sources fan out concurrently, so events interleave —
+ *  grouping is by phase, never by contiguity, or every phase would appear a
+ *  dozen times. */
+function groupByPhase(events: RunEvent[]): Array<{ phase: Phase; events: RunEvent[] }> {
+  const byId = new Map<string, RunEvent[]>();
+  for (const e of events) {
+    const id = (e.sourceId && PHASE_BY_SOURCE.get(e.sourceId)) ?? RUN_PHASE.id;
+    const list = byId.get(id);
+    if (list) list.push(e);
+    else byId.set(id, [e]);
+  }
+  // Run-level steps first — they are the frame the rest sits in — then the
+  // phases that actually produced events, in their declared order.
+  return [RUN_PHASE, ...PHASES]
+    .map((phase) => ({ phase, events: byId.get(phase.id) ?? [] }))
+    .filter((g) => g.events.length > 0);
+}
+
+export default function ResearchDrawer({ events, running }: Props) {
+  const [open, setOpen] = useState(false);
+  const groups = useMemo(() => groupByPhase(events), [events]);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const pinned = useRef(true);
+
+  // Follow the newest line, but only while the reader is still at the bottom —
+  // a panel that yanks you back down mid-sentence is worse than one that never
+  // scrolls at all.
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el || !open || !pinned.current) return;
+    el.scrollTop = el.scrollHeight;
+  }, [events, open]);
+
+  // Escape closes it, like every other overlay a reader has ever used.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  if (events.length === 0) return null;
+
+  return (
+    <>
+      {/* Trigger — fixed to the right edge, so it is reachable from anywhere on
+          a run that scrolls. */}
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-expanded={open}
+        className="no-print fixed right-0 top-1/2 z-30 -translate-y-1/2 rounded-l-xl border border-r-0 border-[rgba(23,43,77,0.14)] bg-white/95 px-3 py-4 text-[12px] font-semibold text-navy-primary shadow-soft backdrop-blur-sm transition hover:bg-ice"
+      >
+        <span className="flex flex-col items-center gap-2">
+          <span aria-hidden>{running ? "◍" : "☰"}</span>
+          <span style={{ writingMode: "vertical-rl" }}>View the research</span>
+          <span className="tabular text-[10px] font-normal text-ink-secondary/80">{events.length}</span>
+        </span>
+      </button>
+
+      {/* Scrim. Click-away closes; it also dims the page enough that the panel
+          reads as a layer rather than a column. */}
+      {open && (
+        <div
+          className="no-print fixed inset-0 z-40 bg-navy-deep/15 backdrop-blur-[1px]"
+          onClick={() => setOpen(false)}
+          aria-hidden
+        />
+      )}
+
+      <aside
+        aria-hidden={!open}
+        className={`no-print fixed inset-y-0 right-0 z-50 flex w-full max-w-[26rem] flex-col border-l border-soft-border bg-white shadow-xl transition-transform duration-200 ${
+          open ? "translate-x-0" : "pointer-events-none translate-x-full"
+        }`}
+      >
+        <header className="flex items-baseline justify-between gap-3 border-b border-soft-border px-4 py-3">
+          <div>
+            <div className="eyebrow">The research</div>
+            <div className="mt-0.5 text-[12px] text-ink-secondary">
+              {running ? "Still working — this updates live" : "Every step, in the order it happened"}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            aria-label="Close"
+            className="shrink-0 rounded-md px-2 py-1 text-[15px] leading-none text-ink-secondary/60 transition hover:bg-ice hover:text-ink-secondary"
+          >
+            ✕
+          </button>
+        </header>
+
+        <div
+          ref={bodyRef}
+          onScroll={() => {
+            const el = bodyRef.current;
+            if (el) pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 32;
+          }}
+          className="min-h-0 flex-1 overflow-y-auto px-4 py-3"
+        >
+          {groups.map(({ phase, events: rows }) => (
+            <section key={phase.id} className="mb-5 last:mb-1">
+              <h4 className="font-display text-[13.5px] leading-tight text-navy-deep">{phase.title}</h4>
+              <p className="mt-1 text-[12px] leading-relaxed text-ink-secondary">{phase.lead}</p>
+              <ol className="mt-2 space-y-0.5 border-l border-[rgba(23,43,77,0.10)] pl-2.5">
+                {rows.map((e, i) => (
+                  <li key={i} className="flex items-start gap-1.5 text-[11px] leading-relaxed">
+                    <span
+                      className="shrink-0 font-semibold"
+                      style={{ color: COLOUR[e.level] ?? COLOUR.step }}
+                      aria-hidden
+                    >
+                      {GLYPH[e.level] ?? GLYPH.step}
+                    </span>
+                    <span className="min-w-0 text-ink-primary/85">
+                      {e.text}
+                      {e.url && <span className="ml-1.5 text-ink-secondary/65">{hostOf(e.url)}</span>}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          ))}
+        </div>
+      </aside>
+    </>
+  );
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
