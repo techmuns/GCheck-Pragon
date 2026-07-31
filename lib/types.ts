@@ -193,6 +193,24 @@ export interface RawHit {
   extra?: Record<string, unknown>;
 }
 
+/**
+ * Something a sweep found and deliberately did not use.
+ *
+ * A relevance filter that silently drops what it rejects leaves the reader
+ * unable to tell a search that found nothing from one that found things and
+ * discarded them — and those are very different statements about a subject.
+ * Keeping a bounded sample, with the reason, is what lets the brief say "this
+ * came up and here is why it is not held against them" instead of saying
+ * nothing and hoping the reader assumes it was checked.
+ */
+export interface ExcludedItem {
+  /** The item as the source titled it. */
+  title: string;
+  url?: string;
+  /** Why it was set aside, in the reader's language, not the filter's. */
+  reason: string;
+}
+
 /** The outcome of running one collector. */
 export interface CollectorResult {
   sourceId: string;
@@ -204,6 +222,8 @@ export interface CollectorResult {
   hits: RawHit[];
   /** The queries this collector actually ran (for transparency). */
   queries?: string[];
+  /** A sample of what the sweep found and set aside, and why. */
+  excluded?: ExcludedItem[];
 }
 
 // ── Board diligence (company mode) ───────────────────────────────────────────

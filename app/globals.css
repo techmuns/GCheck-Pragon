@@ -1030,6 +1030,19 @@ body.pb-preview > .pb-root {
 .pb-scope-name { color: var(--ink); }
 .pb-scope-tier { margin-left: 5pt; font-size: 6.5pt; text-transform: uppercase; letter-spacing: 0.04em; color: var(--meta); }
 .pb-scope-status { font-weight: 700; }
+
+/* Considered & not counted — one row per source, each able to carry the items
+   it set aside. Single column, unlike the scope list: these rows have a nested
+   list under them and would break badly across a column boundary. */
+.pb-clar-list { list-style: none; margin: 0; padding: 0; }
+.pb-clar-row { padding: 2.5pt 0; break-inside: avoid; border-top: 0.4pt solid var(--rule); }
+.pb-clar-row:first-child { border-top: 0; }
+.pb-clar-head { display: flex; align-items: baseline; gap: 6pt; font-size: 8pt; }
+.pb-clar-text { color: var(--meta); }
+.pb-clar-items { list-style: none; margin: 1.5pt 0 0; padding: 0 0 0 9pt; }
+.pb-clar-items li { display: flex; align-items: baseline; justify-content: space-between; gap: 8pt; padding: 0.8pt 0; font-size: 7.4pt; break-inside: avoid; }
+.pb-clar-title { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pb-clar-reason { flex: none; color: var(--meta); font-style: italic; }
 .pb-source-tier { margin-left: 4pt; font-size: 6pt; text-transform: uppercase; letter-spacing: 0.05em; color: var(--meta); }
 
 /* ── Print media: page geometry + hide the app chrome ─────────────────────── */

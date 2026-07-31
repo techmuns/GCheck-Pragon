@@ -13,7 +13,8 @@
     "check:registry": "node scripts/check-indiafilings.mjs",
     "check:keywords": "tsx scripts/check-keywords.mts",
     "check:attribution": "tsx scripts/check-attribution.mts",
-    "test": "npm run check:keywords && npm run check:attribution"
+    "check:clarifications": "tsx scripts/check-clarifications.mts",
+    "test": "npm run check:keywords && npm run check:attribution && npm run check:clarifications"
   },
   "dependencies": {
     "next": "14.2.5",

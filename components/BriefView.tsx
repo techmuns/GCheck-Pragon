@@ -141,6 +141,7 @@ export default function BriefView({ run, onReset }: Props) {
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [clarificationsOpen, setClarificationsOpen] = useState(false);
 
   /**
    * Get the PDF out of an embedded page.
@@ -439,6 +440,68 @@ export default function BriefView({ run, onReset }: Props) {
         <Section title="Scope & limitations">
           <ScopeContent run={run} />
         </Section>
+
+        {/* What was reached, read, and deliberately not counted. Collapsed by
+            default: it is the answer to a question, not something the reader is
+            looking for on the way in — but a page that never offers the answer
+            leaves every quiet section ambiguous. */}
+        {(printBrief?.clarifications.length ?? 0) > 0 && (
+          <section className="mt-6 rounded-lg bg-surface-band/70 p-4">
+            <button
+              type="button"
+              onClick={() => setClarificationsOpen((o) => !o)}
+              aria-expanded={clarificationsOpen}
+              className="flex w-full items-center justify-between text-left"
+            >
+              <span className="eyebrow">
+                Considered &amp; not counted · {printBrief!.clarifications.length}
+              </span>
+              <span
+                className={`text-[11px] text-ink-secondary/60 transition ${clarificationsOpen ? "rotate-180" : ""}`}
+                aria-hidden
+              >
+                ▾
+              </span>
+            </button>
+            <div className={clarificationsOpen ? "mt-2.5 space-y-2.5" : "hidden"}>
+              <p className="text-[12px] leading-relaxed text-ink-secondary">
+                Searches that returned nothing, and material that surfaced under the subject&apos;s name
+                and was set aside — so a quiet section reads as checked rather than skipped.
+              </p>
+              {printBrief!.clarifications.map((c, i) => (
+                <div key={i} className="border-t border-[rgba(23,43,77,0.06)] pt-2 first:border-0 first:pt-0">
+                  <div className="text-[12.5px] text-ink-primary">
+                    <span className="font-medium">{c.source}</span>{" "}
+                    <span className="text-ink-secondary">{c.text}</span>
+                  </div>
+                  {c.items.length > 0 && (
+                    <ul className="mt-1 space-y-0.5 pl-3">
+                      {c.items.map((it, j) => (
+                        <li key={j} className="flex items-baseline justify-between gap-3 text-[11.5px]">
+                          <span className="min-w-0 truncate text-ink-primary/85">
+                            {it.url ? (
+                              <a
+                                href={it.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="underline-offset-2 hover:text-royal hover:underline"
+                              >
+                                {it.title}
+                              </a>
+                            ) : (
+                              it.title
+                            )}
+                          </span>
+                          <span className="shrink-0 italic text-ink-secondary/75">{it.reason}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* Sources */}
         {brief.citations.length > 0 && (

@@ -1,4 +1,4 @@
-import type { Citation, Finding, PersonDiligence, RawHit, RenderedSection, Run, Severity } from "./types";
+import type { Citation, ExcludedItem, Finding, PersonDiligence, RawHit, RenderedSection, Run, Severity } from "./types";
 import { canonicalUrl } from "./collectors/types";
 import { compareByHierarchy, seniorRole } from "./hierarchy";
 import { nameFromTitle, samePerson, uniqueRefs } from "./people";
@@ -263,6 +263,9 @@ export interface PrintBrief {
   news: NewsRow[];
   sourceQuality: SourceQualityRow[];
   researchGaps: string[];
+  /** What was searched and produced nothing, and what came up and was set
+   *  aside — the record that a quiet section was checked rather than skipped. */
+  clarifications: PrintClarification[];
   sources: SourceRef[];
   extraSources: number;
   /** ref → URL for EVERY citation, not just the ones the footer lists. Lets an
@@ -270,6 +273,24 @@ export interface PrintBrief {
    *  scroll to the appendix to follow a claim. */
   sourceUrls: Record<number, string>;
   disclaimer: string;
+}
+
+/**
+ * One line of the "considered and not counted" record.
+ *
+ * A brief that reports only what it found cannot be told apart from one that
+ * did not look. Worse, a filter that silently discards what it rejects leaves
+ * every quiet section ambiguous: a subject with no court cases and a subject
+ * whose four court cases all belonged to someone else read identically. This
+ * is the other half of the finding — what was searched, what came back, and
+ * what was deliberately not held against the subject.
+ */
+export interface PrintClarification {
+  source: string;
+  /** What the sweep did and what came of it, in one line. */
+  text: string;
+  /** The items it named and set aside, with the reason for each. */
+  items: ExcludedItem[];
 }
 
 const DISCLAIMER =
@@ -342,6 +363,7 @@ export function buildPrintBrief(run: Run, generatedAt: string): PrintBrief | nul
     news: buildNewsRows(bySource, brief.citations),
     sourceQuality: buildSourceQuality(run),
     researchGaps: buildResearchGaps(run, cin, peopleAll.length),
+    clarifications: buildClarifications(run),
     sources: sourcesAll.slice(0, CAPS.sources),
     extraSources: Math.max(0, sourcesAll.length - CAPS.sources),
     sourceUrls: Object.fromEntries(
@@ -1474,6 +1496,43 @@ function buildSourceQuality(run: Run): SourceQualityRow[] {
   };
 
   return BUCKET_ORDER.map((b) => ({ label: b, count: counts[b], tone: toneFor(b, counts[b]) }));
+}
+
+/**
+ * What each source searched, and what it set aside.
+ *
+ * Two kinds of line, because there are two kinds of silence worth explaining:
+ * a source that ran and genuinely found nothing, and a source that found
+ * things and rejected them as belonging to someone else. Only the second can
+ * name items, and naming them is the point — "4 results set aside" is a
+ * number, whereas the titles are something the reader can check.
+ */
+function buildClarifications(run: Run): PrintClarification[] {
+  const out: PrintClarification[] = [];
+
+  for (const c of run.collected ?? []) {
+    if (c.status !== "done") continue;
+    const items = c.excluded ?? [];
+    const searched = c.queries?.length ?? 0;
+
+    if (c.hits.length === 0) {
+      out.push({
+        source: c.sourceName,
+        text: searched > 0
+          ? `${searched} search${searched === 1 ? "" : "es"} run — nothing on record.`
+          : "Searched — nothing on record.",
+        items,
+      });
+    } else if (items.length > 0) {
+      out.push({
+        source: c.sourceName,
+        text: `${c.hits.length} result${c.hits.length === 1 ? "" : "s"} kept. Also came up, and not counted against the subject:`,
+        items,
+      });
+    }
+  }
+
+  return out;
 }
 
 function buildResearchGaps(run: Run, cin: string | undefined, peopleCount: number): string[] {

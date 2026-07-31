@@ -1,4 +1,4 @@
-import type { CollectorResult, RawHit, Subject } from "../types";
+import type { CollectorResult, ExcludedItem, RawHit, Subject } from "../types";
 import {
   anchorsOf,
   entitiesOf,
@@ -9,7 +9,7 @@ import {
   type Entity,
 } from "../queries";
 import { env } from "./env";
-import { fetchWithTimeout, stripHtml, type Collector } from "./types";
+import { fetchWithTimeout, noteExcluded, stripHtml, type Collector } from "./types";
 import { cached } from "../searchCache";
 
 // ── Google / News collector ────────────────────────────────────────────────
@@ -80,8 +80,11 @@ export const googleCollector: Collector = async ({ subject, keywords, emit }) =>
   let anyError: string | undefined;
   // Results the engine returned that don't actually name the searched entity
   // (e.g. sibling brands like Reliance Digital vs Reliance Power) — dropped so
-  // findings aren't misattributed. Counted for an honest note.
+  // findings aren't misattributed. Counted for an honest note, and a sample is
+  // kept so the brief can name what it looked at and set aside rather than
+  // leaving the reader to wonder whether it was looked at.
   let offTarget = 0;
+  const excluded: ExcludedItem[] = [];
 
   // Once a director subject has been resolved to an identity, hits are graded
   // rather than merely name-filtered — see `subjectConfidence`.
@@ -122,6 +125,11 @@ export const googleCollector: Collector = async ({ subject, keywords, emit }) =>
         // the name: filings and orders often identify a person by id alone.
         if (!entityMentioned(haystack, e.name) && confidence !== "confirmed") {
           offTarget += 1;
+          noteExcluded(excluded, {
+            title: r.title,
+            url: r.url,
+            reason: `Does not name ${e.name} — a different entity`,
+          });
           continue;
         }
         collect(byKey, {
@@ -173,6 +181,7 @@ export const googleCollector: Collector = async ({ subject, keywords, emit }) =>
     note,
     hits,
     queries: ranQueries,
+    excluded,
   };
 };
 

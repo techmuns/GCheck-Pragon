@@ -116,7 +116,44 @@ function ReportContinuation({ brief }: { brief: PrintBrief }) {
       {brief.diligence.length > 0 && <DiligenceBlock people={brief.diligence} />}
       {brief.network && <NetworkBlock network={brief.network} />}
       <ScopeBlock scope={brief.scope} generatedAt={brief.generatedAt} />
+      <ClarificationsBlock rows={brief.clarifications} />
     </div>
+  );
+}
+
+// What the run looked at and did not count. Sits after Scope because it answers
+// the question Scope raises: a source listed as "Covered" that produced nothing
+// on the page is otherwise indistinguishable from one that was never reached.
+function ClarificationsBlock({ rows }: { rows: PrintBrief["clarifications"] }) {
+  if (rows.length === 0) return null;
+  return (
+    <section className="pb-flow-section">
+      <div className="pb-flow-head">Considered &amp; Not Counted</div>
+      <p className="pb-scope-statement">
+        Searches that returned nothing, and material that surfaced under the subject&apos;s name and was
+        set aside — so a quiet section reads as checked rather than skipped.
+      </p>
+      <ul className="pb-clar-list">
+        {rows.map((r, i) => (
+          <li key={i} className="pb-clar-row">
+            <div className="pb-clar-head">
+              <span className="pb-scope-name">{r.source}</span>
+              <span className="pb-clar-text">{r.text}</span>
+            </div>
+            {r.items.length > 0 && (
+              <ul className="pb-clar-items">
+                {r.items.map((it, j) => (
+                  <li key={j}>
+                    <span className="pb-clar-title">{it.title}</span>
+                    <span className="pb-clar-reason">{it.reason}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

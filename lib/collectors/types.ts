@@ -1,4 +1,4 @@
-import type { CollectorResult, RunEventLevel, Subject } from "../types";
+import type { CollectorResult, ExcludedItem, RunEventLevel, Subject } from "../types";
 
 // ── Collector contract ─────────────────────────────────────────────────────
 // Every source implements a Collector: given the subject + enabled keywords, it
@@ -20,6 +20,28 @@ export interface CollectorContext {
 }
 
 export type Collector = (ctx: CollectorContext) => Promise<CollectorResult>;
+
+// ── What a sweep chose not to use ──────────────────────────────────────────
+// A relevance filter that drops what it rejects leaves the reader unable to
+// tell a search that found nothing from one that found things and set them
+// aside — and about a person those are very different statements. Keeping a
+// bounded sample, with the reason, is what lets the brief say "this came up,
+// and here is why it is not held against them".
+
+/** How many set-aside items one source keeps. Enough to show what was
+ *  considered; few enough that the record cannot become a second report. */
+export const MAX_EXCLUDED = 6;
+
+/** Record an item the sweep deliberately did not use, while there is room. */
+export function noteExcluded(
+  into: ExcludedItem[],
+  item: { title?: string; url?: string; reason: string },
+): void {
+  const title = item.title?.trim();
+  if (!title || into.length >= MAX_EXCLUDED) return;
+  if (into.some((e) => e.title === title)) return;
+  into.push({ title, url: item.url, reason: item.reason });
+}
 
 // ── Shared HTTP helper ─────────────────────────────────────────────────────
 // A fetch with a hard timeout and a browser-like UA, so a slow or hanging

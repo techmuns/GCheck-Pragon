@@ -1,7 +1,7 @@
-import type { CollectorResult, RawHit, Subject } from "../types";
+import type { CollectorResult, ExcludedItem, RawHit, Subject } from "../types";
 import { allAnchorsOf, entitiesOf, entityMentioned, gradesIdentity, matchKeywords, subjectConfidence } from "../queries";
 import { env, hasReader, maxArticleReads } from "./env";
-import { canonicalUrl, fetchWithTimeout, stripHtml, type Collector, type CollectorContext } from "./types";
+import { canonicalUrl, fetchWithTimeout, noteExcluded, stripHtml, type Collector, type CollectorContext } from "./types";
 import { EmptyAnswer, describe, extractRows, sleep, withRetry, type Backend, type WebResult } from "./google";
 import { readArticles } from "./reader";
 import { extractInsights, readerTask } from "../insights";
@@ -57,6 +57,9 @@ export const newsCollector: Collector = async (ctx) => {
   let failure: string | undefined;
   let succeeded = 0;
   let offTarget = 0;
+  // A sample of the stories set aside, so the brief can say what came up under
+  // the name and why it was not counted against the subject.
+  const excluded: ExcludedItem[] = [];
 
   for (let i = 0; i < plan.length; i++) {
     const step = plan[i];
@@ -78,6 +81,11 @@ export const newsCollector: Collector = async (ctx) => {
         // worse than no story at all.
         if (!entityMentioned(haystack, step.entity) && confidence !== "confirmed") {
           offTarget += 1;
+          noteExcluded(excluded, {
+            title: r.title,
+            url: r.url,
+            reason: `Does not name ${step.entity} — a different entity`,
+          });
           continue;
         }
 
@@ -123,7 +131,7 @@ export const newsCollector: Collector = async (ctx) => {
     `. ${read.note}` +
     (failure ? ` Some searches failed: ${failure}` : "");
 
-  return { ...base, status: "done", note, hits, queries: [...ran, ...read.urls] };
+  return { ...base, status: "done", note, hits, queries: [...ran, ...read.urls], excluded };
 };
 
 // ── Reading the ones that matter ────────────────────────────────────────────

@@ -1,8 +1,8 @@
-import type { CollectorResult, RawHit, Subject } from "../types";
+import type { CollectorResult, ExcludedItem, RawHit, Subject } from "../types";
 import { anchorsOf, entitiesOf, entityMentioned, gradesIdentity, subjectConfidence } from "../queries";
 import { env } from "./env";
 import { searchWeb, withRetry } from "./google";
-import { fetchWithTimeout, stripHtml, type Collector } from "./types";
+import { fetchWithTimeout, noteExcluded, stripHtml, type Collector } from "./types";
 import { cached } from "../searchCache";
 
 // ── Indian Kanoon collector ────────────────────────────────────────────────
@@ -64,6 +64,9 @@ export const indianKanoonCollector: Collector = async ({ subject, emit }) => {
   const servedBy = new Set<string>();
   let anyAnswered = false;
   let offTarget = 0;
+  // A sample of the cases set aside, so the brief can name what it read and
+  // dismissed rather than leaving a bare count the reader cannot check.
+  const excluded: ExcludedItem[] = [];
 
   // A director subject resolved to an identity gets its litigation graded, so a
   // namesake's case can be shown without being charged to this person.
@@ -101,6 +104,11 @@ export const indianKanoonCollector: Collector = async ({ subject, emit }) => {
         // carrying the subject's DIN or company identifies them without it.
         if (!entityMentioned(c.title, e.name) && confidence !== "confirmed") {
           offTarget += 1;
+          noteExcluded(excluded, {
+            title: c.title,
+            url: c.url,
+            reason: `Case names a different party, not ${e.name}`,
+          });
           continue;
         }
         const key = c.url ?? c.title;
@@ -141,6 +149,7 @@ export const indianKanoonCollector: Collector = async ({ subject, emit }) => {
     note: [servedNote, filterNote, gradeNote, degradeNote].filter(Boolean).join(" ") || undefined,
     hits,
     queries: ranQueries,
+    excluded,
   };
 };
 
