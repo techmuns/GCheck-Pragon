@@ -101,7 +101,18 @@ function PrintDoc({ brief, variant }: { brief: PrintBrief; variant: PrintVariant
           </div>
 
           <div className="pb-col pb-col-right">
-            <KeyPeople people={brief.people} extra={brief.extraPeople} isDirector={brief.isDirector} />
+            {/* On a director screen the first thing a reader wants is where
+                this person actually sits. The slot used to carry a board list,
+                which on a director run is a roster of other people's
+                colleagues — and, worse, was fed from rows stamped with the
+                subject's own name, so it listed the subject as their own
+                associate. Their directorships are the answer to the question
+                the search asked. */}
+            {brief.isDirector ? (
+              <DirectorIn rows={brief.directorships} />
+            ) : (
+              <KeyPeople people={brief.people} extra={brief.extraPeople} isDirector={false} />
+            )}
             <Cases cases={brief.cases} extra={brief.extraCases} />
             <RecentDevelopments items={brief.developments} extra={brief.extraDevelopments} />
             <PositiveSignals items={brief.positives} extra={brief.extraPositives} />
@@ -703,6 +714,51 @@ function Snapshot({ fields, isDirector }: { fields: PrintBrief["snapshot"]; isDi
           </div>
         ))}
       </dl>
+    </Section>
+  );
+}
+
+/**
+ * Where the subject is on the register — the headline answer of a director
+ * screen, on the executive sheet rather than buried in the continuation.
+ *
+ * Capped so it cannot crowd the concerns beside it; the full list, with CINs
+ * and joining dates, is the Registry Footprint table further on.
+ */
+function DirectorIn({ rows }: { rows: PrintBrief["directorships"] }) {
+  if (rows.length === 0) return null;
+  const shown = rows.slice(0, 6);
+  const extra = rows.length - shown.length;
+  const flagged = rows.filter((r) => r.tone === "amber").length;
+  return (
+    <Section
+      title="Director In"
+      meta={
+        flagged > 0
+          ? `${rows.length} · ${flagged} not in good standing`
+          : `${rows.length} ${rows.length === 1 ? "entity" : "entities"}`
+      }
+    >
+      <table className="pb-table">
+        <colgroup>
+          <col style={{ width: "62%" }} />
+          <col style={{ width: "16%" }} />
+          <col style={{ width: "22%" }} />
+        </colgroup>
+        <tbody>
+          {shown.map((r, i) => (
+            <tr key={`${r.id}-${i}`}>
+              <td className="pb-clip">
+                <span className="pb-person-name">{r.name}</span>
+                <Ref n={r.sourceRef} />
+              </td>
+              <td className="pb-clip">{r.kind === "llp" ? "LLP" : "Company"}</td>
+              <td className={`pb-clip pb-fg-${r.tone}`}>{r.status ?? "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {extra > 0 && <p className="pb-more">+{extra} more in the registry footprint below</p>}
     </Section>
   );
 }

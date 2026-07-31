@@ -12,7 +12,7 @@ import ProfileCard from "./ProfileCard";
 import DiligenceGrid, { diligenceStats } from "./DiligenceSection";
 import { RiskDial, RiskDrivers, NetworkContent, ScopeContent } from "./InstitutionalPanels";
 import CitationRef, { sourceUrls } from "./CitationRef";
-import { buildPrintBrief, formatGenerated, listConcerns, type Person } from "@/lib/printBrief";
+import { buildPrintBrief, formatGenerated, listConcerns, type DirectorshipRow, type Person } from "@/lib/printBrief";
 import { buildNetwork } from "@/lib/network";
 import { sourceTier } from "@/lib/risk";
 import { humanizeCaps } from "@/lib/text";
@@ -128,6 +128,48 @@ function Pair({
   );
 }
 
+/**
+ * Where the subject sits on the register.
+ *
+ * On a director screen this is the answer to the question the search asked, so
+ * it is shown in full and open — not collapsed, and not held back to the
+ * bottom of the page behind the evidence for everything else.
+ */
+function DirectorIn({ rows }: { rows: DirectorshipRow[] }) {
+  const flagged = rows.filter((r) => r.tone === "amber").length;
+  return (
+    <div>
+      <p className="mb-2 text-[12.5px] text-ink-secondary">
+        {rows.length} {rows.length === 1 ? "entity" : "entities"} on the register
+        {flagged > 0 ? ` · ${flagged} not in good standing` : " · all in good standing"}
+      </p>
+      <ul className="space-y-0.5">
+        {rows.map((r, i) => (
+          <li
+            key={`${r.id}-${i}`}
+            className="flex items-baseline justify-between gap-3 border-b border-[rgba(23,43,77,0.05)] py-1 text-[12.5px] last:border-0"
+          >
+            <span className="min-w-0">
+              <span className="block truncate text-ink-primary">{r.name}</span>
+              <span className="block truncate text-[11px] text-ink-secondary/75">
+                {[r.id, r.kind === "llp" ? "LLP" : null, r.joinedOn ? `joined ${r.joinedOn}` : null]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
+            </span>
+            <span
+              className="shrink-0 text-[11.5px] font-semibold"
+              style={{ color: r.tone === "amber" ? severityStyle.amber.ink : "#6B7A90" }}
+            >
+              {r.status ?? "—"}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /** Identity for selection — the DIN where the register gave one, because two
  *  rows can carry the same name and mean different people. */
 function personKey(p: Person): string {
@@ -226,7 +268,6 @@ export default function BriefView({ run, onReset, onScreenPeople }: Props) {
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [clarificationsOpen, setClarificationsOpen] = useState(false);
-  const [footprintOpen, setFootprintOpen] = useState(false);
   /** Key people ticked for a pre-screen of their own, keyed by DIN where the
    *  register gave one and by name otherwise. */
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -521,70 +562,6 @@ export default function BriefView({ run, onReset, onScreenPeople }: Props) {
           </Section>
         )}
 
-        {/* The registry footprint. Collapsed: the count and the flagged count
-            are the finding, and the eight rows behind them are the evidence for
-            it — which the reader wants only once the count has made them ask. */}
-        {(printBrief?.directorships.length ?? 0) > 0 && (
-          <Section
-            title="Registry footprint"
-            count={printBrief!.directorships.length}
-            meta={
-              <button
-                type="button"
-                onClick={() => setFootprintOpen((o) => !o)}
-                aria-expanded={footprintOpen}
-                className="text-[11.5px] font-semibold text-navy-primary/70 transition hover:text-navy-primary"
-              >
-                {footprintOpen ? "Hide" : "Show all"}
-              </button>
-            }
-          >
-            {(() => {
-              const rows = printBrief!.directorships;
-              const flagged = rows.filter((r) => r.tone === "amber");
-              // Collapsed, the panel still names anything not in good standing:
-              // hiding that behind a click would be hiding the one row on this
-              // table that changes what a reader does next.
-              const shown = footprintOpen ? rows : flagged;
-              return (
-                <>
-                  <p className="mb-2 text-[12.5px] text-ink-secondary">
-                    {rows.length} {rows.length === 1 ? "entity" : "entities"} on the register
-                    {flagged.length > 0
-                      ? ` · ${flagged.length} not in good standing`
-                      : " · all in good standing"}
-                  </p>
-                  {shown.length > 0 && (
-                    <ul className="space-y-0.5">
-                      {shown.map((r, i) => (
-                        <li
-                          key={`${r.id}-${i}`}
-                          className="flex items-baseline justify-between gap-3 border-b border-[rgba(23,43,77,0.05)] py-1 text-[12.5px] last:border-0"
-                        >
-                          <span className="min-w-0">
-                            <span className="block truncate text-ink-primary">{r.name}</span>
-                            <span className="block truncate text-[11px] text-ink-secondary/75">
-                              {[r.id, r.kind === "llp" ? "LLP" : null, r.joinedOn ? `joined ${r.joinedOn}` : null]
-                                .filter(Boolean)
-                                .join(" · ")}
-                            </span>
-                          </span>
-                          <span
-                            className="shrink-0 text-[11.5px] font-semibold"
-                            style={{ color: r.tone === "amber" ? severityStyle.amber.ink : "#6B7A90" }}
-                          >
-                            {r.status ?? "—"}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </>
-              );
-            })()}
-          </Section>
-        )}
-
         {network && network.interlocks.length > 0 && (
           <Section title="Related-party network" count={network.interlocks.length}>
             <NetworkContent run={run} />
@@ -610,21 +587,32 @@ export default function BriefView({ run, onReset, onScreenPeople }: Props) {
             // remains the fallback: the print preview renders this same view
             // with no way to start a run, and a dead checkbox is worse than a
             // list that never offered one.
-            onScreenPeople && peopleRows.length > 0
+            // A director screen answers "where does this person sit" here. The
+            // slot used to hold a board list, which on a director run is other
+            // people's colleagues — and was fed from rows carrying the
+            // subject's own name, so it listed the subject as their own
+            // associate. The picker stays where it belongs: on a company
+            // screen, over the board.
+            !isCompany && printBrief && printBrief.directorships.length > 0
               ? {
-                  title: isCompany ? "Key people" : "Associated people",
-                  body: (
-                    <PeoplePicker
-                      people={peopleRows}
-                      picked={picked}
-                      onToggle={togglePicked}
-                      onRun={runPicked}
-                    />
-                  ),
+                  title: "Director in",
+                  body: <DirectorIn rows={printBrief.directorships} />,
                 }
-              : section("management")
-                ? { title: "Key people", body: listSection("management") }
-                : null
+              : isCompany && onScreenPeople && peopleRows.length > 0
+                ? {
+                    title: "Key people",
+                    body: (
+                      <PeoplePicker
+                        people={peopleRows}
+                        picked={picked}
+                        onToggle={togglePicked}
+                        onRun={runPicked}
+                      />
+                    ),
+                  }
+                : section("management")
+                  ? { title: "Key people", body: listSection("management") }
+                  : null
           }
         />
         <Pair

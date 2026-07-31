@@ -802,6 +802,9 @@ body.pb-preview > .pb-root {
 .pb-table tr:last-child td { border-bottom: 0; }
 .pb-table .pb-num { text-align: right; white-space: nowrap; }
 .pb-person-name { font-weight: 600; }
+/* "+n more" under a capped table — a pointer to where the rest lives, so a cap
+   never reads as the whole list. */
+.pb-more { margin: 1.5pt 0 0; font-size: 6.8pt; color: var(--meta); }
 .pb-flag {
   display: inline-block;
   font-size: 6.2pt;

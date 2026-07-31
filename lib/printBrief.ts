@@ -1088,6 +1088,12 @@ function buildPeople(
   const registry = bySource["registry"];
   if (registry?.status === "done") {
     for (const h of registry.hits) {
+      // Only rows that describe a PERSON on a board. A directorship row
+      // describes an entity, and carries the subject's own name in `name` —
+      // read as a person it put the subject into their own list of associated
+      // people, which is how a director brief came to name one person: the one
+      // it was about.
+      if (h.extra?.category !== "director") continue;
       const name = str(h.extra?.name) ?? nameFromTitle(h.title);
       if (!name) continue;
       const tenure = str(h.extra?.tenure);
