@@ -1,17 +1,23 @@
 import OpenAI from "openai";
 import type { AppConfig, Run, Severity, Subject, CollectorResult, Finding } from "./types";
-import { env, hasOpenAI } from "./collectors/env";
+import { env, llmProviderChain, type LlmProvider } from "./collectors/env";
 import { assembleBrief } from "./assemble";
+import { requestSummaryFromClaude } from "./synthesize-bedrock";
 
 // ── AI synthesis (hybrid) ──────────────────────────────────────────────────
 // The deterministic assembler fills every section reliably (each case under
 // Litigation, each article under Press, locked sources as Upgrade, real
-// citations). OpenAI then rewrites ONLY the Red-Flag Summary + headline over
+// citations). The model then rewrites ONLY the Red-Flag Summary + headline over
 // those same citations — the analytical distillation a partner reads first.
 //
 // Guardrails: the model may cite only refs that already exist; the verdict is
 // recomputed from findings; any failure falls back to the pure deterministic
 // brief, so a brief always ships.
+//
+// Providers are tried in order — Claude via Bedrock first, OpenAI as an
+// automatic fallback (see llmProviderChain). Only the network call differs:
+// buildSummaryPrompt and applySummary below are shared by every provider, so
+// the two paths cannot drift apart as the prompt is improved.
 
 const VALID_SEVERITIES: Severity[] = ["red", "amber", "clear", "info"];
 const RANK: Record<Severity, number> = { red: 3, amber: 2, clear: 1, info: 0 };
@@ -39,33 +45,55 @@ export async function synthesizeBrief(
   // Deterministic brief — all sections + citations, always correct.
   const det = assembleBrief(subject, collected, config);
 
-  if (!hasOpenAI()) {
+  // One prompt, built once, sent to whichever provider answers. Building it
+  // reads collected hits, so a malformed hit must not error the run — like
+  // every other failure here, it falls back to the deterministic brief.
+  let prompt: SummaryPrompt;
+  try {
+    prompt = buildSummaryPrompt(det, subject, collected);
+  } catch (err) {
+    console.error("[synthesize] prompt build failed, using deterministic brief:", err);
     return { ...det, synthesizedBy: "rules" };
   }
 
-  try {
-    const enhanced = await enhanceRedFlagSummary(det, subject, collected);
-    return { ...enhanced, synthesizedBy: "ai" };
-  } catch (err) {
-    console.error("[synthesize] OpenAI enhancement failed, using deterministic brief:", err);
-    return { ...det, synthesizedBy: "rules" };
+  for (const provider of llmProviderChain()) {
+    try {
+      const parsed = await requestSummary(provider, prompt);
+      return { ...applySummary(det, parsed), synthesizedBy: "ai" };
+    } catch (err) {
+      // Try the next provider; the loop ends on the deterministic brief.
+      console.error(`[synthesize] ${provider} enhancement failed:`, err);
+    }
   }
+
+  return { ...det, synthesizedBy: "rules" };
 }
 
-// Ask OpenAI to write the Red-Flag Summary + headline over the deterministic
-// brief's citations, then splice it back in.
-async function enhanceRedFlagSummary(
+function requestSummary(provider: LlmProvider, prompt: SummaryPrompt): Promise<SummaryPayload> {
+  return provider === "bedrock"
+    ? requestSummaryFromClaude({ ...prompt, schema: summarySchema() })
+    : requestSummaryFromOpenAI(prompt);
+}
+
+// ── The prompt — shared by every provider ──────────────────────────────────
+// Ask the model to write the Red-Flag Summary + headline over the
+// deterministic brief's citations. Nothing here is provider-specific.
+
+interface SummaryPrompt {
+  system: string;
+  user: string;
+}
+
+interface SummaryPayload {
+  headline: string;
+  findings: ModelFinding[];
+}
+
+function buildSummaryPrompt(
   det: NonNullable<Run["brief"]>,
   subject: Subject,
   collected: CollectorResult[],
-): Promise<NonNullable<Run["brief"]>> {
-  // The SDK defaults to a 10-minute timeout and two retries — half an hour in
-  // the worst case, during which the run sits at "running" and the user watches
-  // a spinner. A brief that falls back to the deterministic summary in 40s beats
-  // an AI one that may never arrive.
-  const client = new OpenAI({ apiKey: env.openaiApiKey, timeout: 40_000, maxRetries: 1 });
-  const validRefs = new Set(det.citations.map((c) => c.ref));
-
+): SummaryPrompt {
   // Evidence that matched the subject's NAME but could not be tied to their
   // identity (their DIN, or a company they sit on). The deterministic sections
   // already demote these; the distinction has to survive into the prompt too,
@@ -135,6 +163,18 @@ async function enhanceRedFlagSummary(
     evidenceLines || "(no evidence gathered)",
   ].join("\n");
 
+  return { system, user };
+}
+
+// ── OpenAI transport (fallback provider) ───────────────────────────────────
+
+async function requestSummaryFromOpenAI({ system, user }: SummaryPrompt): Promise<SummaryPayload> {
+  // The SDK defaults to a 10-minute timeout and two retries — half an hour in
+  // the worst case, during which the run sits at "running" and the user watches
+  // a spinner. A brief that falls back to the deterministic summary in 40s beats
+  // an AI one that may never arrive.
+  const client = new OpenAI({ apiKey: env.openaiApiKey, timeout: 40_000, maxRetries: 1 });
+
   const completion = await client.chat.completions.create({
     model: env.openaiModel,
     temperature: 0.2,
@@ -150,7 +190,16 @@ async function enhanceRedFlagSummary(
 
   const raw = completion.choices[0]?.message?.content;
   if (!raw) throw new Error("Empty completion");
-  const parsed = JSON.parse(raw) as { headline: string; findings: ModelFinding[] };
+  return JSON.parse(raw) as SummaryPayload;
+}
+
+// ── Validation + splice — shared by every provider ─────────────────────────
+
+function applySummary(
+  det: NonNullable<Run["brief"]>,
+  parsed: SummaryPayload,
+): NonNullable<Run["brief"]> {
+  const validRefs = new Set(det.citations.map((c) => c.ref));
 
   // Validate the model's findings — drop invented refs, coerce severities.
   // `clear` is dropped outright: rule 5 forbids it, and this is the backstop

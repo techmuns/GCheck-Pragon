@@ -59,15 +59,37 @@ export const env = {
   cibilUsername: process.env.CIBIL_USERNAME,
   cibilPassword: process.env.CIBIL_PASSWORD,
 
-  // OpenAI — narrative synthesis (Phase 3). Without a key, the deterministic
-  // assembler is used instead.
+  // OpenAI — narrative synthesis. Now the *fallback* provider: used when
+  // Bedrock has no key, or when a Bedrock call fails. Without either key the
+  // deterministic assembler is used instead.
   openaiApiKey: process.env.OPENAI_API_KEY,
   openaiModel: process.env.OPENAI_MODEL || "gpt-4o-mini",
+
+  // Claude via Amazon Bedrock — the primary narrative-synthesis backend.
+  // BEDROCK_API_KEY is a Bedrock API bearer token (not an api.anthropic.com
+  // key); TEMP_CLAUDE_TOKEN is the older name, still accepted. Region and the
+  // model fallback chain are read directly by lib/bedrock.mjs — repeated here
+  // only so admin/health surfaces can report them.
+  bedrockApiKey: process.env.BEDROCK_API_KEY || process.env.TEMP_CLAUDE_TOKEN,
+  bedrockRegion: process.env.BEDROCK_REGION || process.env.CLAUDE_BEDROCK_REGION || "us-east-1",
+
+  // Optional explicit provider override. Unset (the default) means "pick by
+  // which key is present, Bedrock first". Set LLM_PROVIDER=openai to put
+  // OpenAI back in front.
+  llmProvider: (process.env.LLM_PROVIDER || "").trim().toLowerCase(),
 };
 
 export function hasOpenAI(): boolean {
   return Boolean(env.openaiApiKey);
 }
+
+export function hasBedrockKey(): boolean {
+  return Boolean(env.bedrockApiKey);
+}
+
+// Provider order (Bedrock first, OpenAI as automatic fallback) is defined once
+// in ../llm-provider.mjs so scripts/llm-healthcheck.mjs shares the exact rule.
+export { llmProviderChain, type LlmProvider } from "../llm-provider.mjs";
 
 /** Can an article be opened at all? With neither credential the brief is built
  *  from headlines, and says so rather than pretending it read anything. */

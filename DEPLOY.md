@@ -83,8 +83,12 @@ All optional — every source degrades honestly if its key/login is absent.
 
 | Var | Enables |
 |-----|---------|
-| `OPENAI_API_KEY` | AI-written brief (rules-based fallback without it) |
-| `OPENAI_MODEL` | model override (default `gpt-4o-mini`) |
+| `BEDROCK_API_KEY` | AI-written brief via Claude on Amazon Bedrock (**primary**) |
+| `BEDROCK_REGION` | Bedrock region (default `us-east-1`) |
+| `BEDROCK_MODEL_IDS` | comma-separated model fallback chain (default Opus 5 → Opus 4.8 → Sonnet 5) |
+| `OPENAI_API_KEY` | AI-written brief via OpenAI (**automatic fallback**) |
+| `OPENAI_MODEL` | OpenAI model override (default `gpt-4o-mini`) |
+| `LLM_PROVIDER` | set to `openai` to put OpenAI back in front (unset = Bedrock first) |
 | `MUNSHOT_TOKEN` | Munshot web search, the news deep dive, **and** the article reader. **Expires** — see the note below |
 | `FIRECRAWL_API_KEY` | fallback article reader, for publishers Muns can't open and for when the Munshot token expires |
 | `SERPAPI_KEY` **or** `GOOGLE_API_KEY` + `GOOGLE_CX` | richer Google results, and the news sweep's fallback engine (keyless fallback for web only) |
@@ -113,6 +117,59 @@ A common and costly mix-up, because all three places are called "secrets":
 | **GitHub → Settings → Secrets** | GitHub Actions runners only | deploy tokens for a workflow. **Not** the running app — nothing here is visible to the server at request time |
 | **Cloudflare Pages → Variables** | the Pages *build*, and Pages Functions at runtime | `NEXT_PUBLIC_API_BASE` (build-time). This repo ships no Functions, so a runtime secret here has nothing to read it |
 | **Your Node host** (Render/Railway/Fly/container) | the running server process | **everything in the table above** — this is the only place they do anything |
+
+## Narrative synthesis: Claude (Bedrock) → OpenAI → rules
+
+The brief's Red-Flag Summary is written by an LLM. Providers are tried in
+order, and if all of them fail the deterministic brief still ships:
+
+1. **Claude via Amazon Bedrock** — primary. Needs `BEDROCK_API_KEY`.
+2. **OpenAI** — automatic fallback. Needs `OPENAI_API_KEY`.
+3. **Rules-based assembler** — no key needed, always works.
+
+Set `LLM_PROVIDER=openai` to put OpenAI back in front; leave it unset for the
+default order above.
+
+Both providers send the **same prompt** and run the **same validation** —
+`buildSummaryPrompt` and `applySummary` in `lib/synthesize.ts`. Only the
+network call differs, so improving the prompt improves both paths at once and
+they cannot drift apart. `lib/synthesize-bedrock.ts` holds no prompt text.
+
+### How the Bedrock call is made
+
+- `POST https://bedrock-mantle.{region}.api.aws/anthropic/v1/messages`
+- The API key is a **bearer token in the `x-api-key` header** (not
+  `Authorization`), plus `anthropic-version: 2023-06-01`. **No AWS SDK and no
+  SigV4 signing.**
+- Model IDs carry an `anthropic.` prefix. Opus 5 is granted per-account on
+  Bedrock, so the chain falls through Opus 5 → Opus 4.8 → Sonnet 5 and pins
+  the first model that answers.
+- Responses are **streamed** (SSE), so long outputs don't trip request
+  timeouts.
+- No `temperature`/`top_p`/`top_k` is ever sent — sampling params are rejected
+  with a 400 on Opus 5 / 4.8 / 4.7.
+
+### Preflight before spending anything
+
+```bash
+npm run healthcheck:llm     # one cheap call; prints the provider + model that answered
+npm run test:llm            # offline transport tests against a local stub — no key, no cost
+```
+
+`test:llm` runs in `checks.yml` on every push. The live check is
+`llm-preflight.yml` (manual + weekly). Any step that calls the LLM must pass
+the secret through its own `env:` block — a repository secret is not visible
+to a step otherwise:
+
+```yaml
+env:
+  BEDROCK_API_KEY: ${{ secrets.BEDROCK_API_KEY }}
+```
+
+> ⚠️ **The LLM runs on the Node backend, not on Cloudflare Pages.** In the
+> hybrid deploy, `npm run build:static` strips the API routes out, so a
+> `BEDROCK_API_KEY` set in Cloudflare Pages is never read. Set it on the
+> backend host (Render / container / VM).
 
 ## Note on persistence
 
