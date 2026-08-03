@@ -1,0 +1,57 @@
+name: LLM Preflight
+
+# One cheap live structured call that prints which provider and model answered.
+# Run it before anything expensive or metered, so a bad key costs seconds
+# instead of a whole research run.
+#
+# The offline transport tests (stub server, no credential) live in checks.yml
+# and run on every push — this workflow is only the part that needs a real key.
+#
+# BEDROCK_API_KEY exists as a repository secret, but a step cannot read it
+# until the workflow passes it through an `env:` block — that is what the
+# `env:` entries below do. Add the same block to any future step that calls
+# the LLM.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly, so an expired or revoked key is found before a client run needs it.
+    - cron: "0 6 * * 1"
+
+jobs:
+  preflight:
+    name: Live preflight (one cheap call)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      - name: Check the LLM key and print which model answered
+        env:
+          # ── Required for any step that calls the LLM ──────────────────────
+          BEDROCK_API_KEY: ${{ secrets.BEDROCK_API_KEY }}
+          BEDROCK_REGION: ${{ vars.BEDROCK_REGION || 'us-east-1' }}
+          # Optional comma-separated override of the model fallback chain.
+          BEDROCK_MODEL_IDS: ${{ vars.BEDROCK_MODEL_IDS }}
+          # Fallback provider — only used if Bedrock fails.
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+          # Leave unset for "Bedrock first"; set to openai to flip the order.
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
+        run: npm run healthcheck:llm
+
+  # Expensive or metered work goes here, gated on the preflight above:
+  #
+  #   research-run:
+  #     needs: preflight
+  #     runs-on: ubuntu-latest
+  #     steps:
+  #       - ...
+  #         env:
+  #           BEDROCK_API_KEY: ${{ secrets.BEDROCK_API_KEY }}
+  #           BEDROCK_REGION: ${{ vars.BEDROCK_REGION || 'us-east-1' }}
+  #           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

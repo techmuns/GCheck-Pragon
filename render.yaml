@@ -11,7 +11,25 @@ services:
     healthCheckPath: /
     autoDeploy: true
     envVars:
-      # Set this in the Render dashboard to enable the AI-written brief.
+      # ── Narrative synthesis: Claude via Amazon Bedrock (primary) ──────────
+      # BEDROCK_API_KEY is a Bedrock API bearer token (NOT an
+      # api.anthropic.com key). Set it in the Render dashboard.
+      - key: BEDROCK_API_KEY
+        sync: false
+      - key: BEDROCK_REGION
+        value: us-east-1
+      # Model fallback chain, tried in order — Bedrock grants Opus 5 access
+      # per-account, so a 403 on the first entry is expected and handled.
+      # Leave unset to use this same built-in default.
+      - key: BEDROCK_MODEL_IDS
+        value: anthropic.claude-opus-5,anthropic.claude-opus-4-8,anthropic.claude-sonnet-5
+      # Provider order override. Leave UNSET for "Bedrock first, OpenAI as
+      # fallback"; set to "openai" to put OpenAI back in front.
+      # - key: LLM_PROVIDER
+      #   value: openai
+
+      # ── OpenAI (automatic fallback) ──────────────────────────────────────
+      # Used when Bedrock has no key or a Bedrock call fails.
       - key: OPENAI_API_KEY
         sync: false
       - key: OPENAI_MODEL
