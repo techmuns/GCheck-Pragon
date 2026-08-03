@@ -33,6 +33,19 @@ export const env = {
   // assembler is used instead.
   openaiApiKey: process.env.OPENAI_API_KEY,
   openaiModel: process.env.OPENAI_MODEL || "gpt-4o-mini",
+
+  // Narrative-synthesis provider toggle. "openai" (default) leaves every
+  // existing deployment unchanged; "claude" switches to the Bedrock path in
+  // ./synthesize-bedrock.ts instead.
+  llmProvider: process.env.LLM_PROVIDER || "openai",
+
+  // Claude via AWS Bedrock — alternate narrative-synthesis backend, used only
+  // when LLM_PROVIDER=claude. TEMP_CLAUDE_TOKEN is a Bedrock API bearer key
+  // (not an api.anthropic.com key).
+  claudeBedrockApiKey: process.env.TEMP_CLAUDE_TOKEN,
+  claudeBedrockRegion: process.env.CLAUDE_BEDROCK_REGION || "us-east-1",
+  claudeBedrockModelId:
+    process.env.CLAUDE_BEDROCK_MODEL_ID || "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
 };
 
 export function hasOpenAI(): boolean {
