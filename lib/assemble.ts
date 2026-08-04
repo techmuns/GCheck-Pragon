@@ -450,19 +450,23 @@ function profileSection(id: string, title: string, ctx: Ctx): RenderedSection {
   return { id, title, findings };
 }
 
-// Company snapshot — identity of the subject as it appears on the public
-// registry record: the CIN and a link to the record itself. Directors surface
-// under Key People, so they are deliberately not repeated here. Honest states
-// when the registry record could not be found.
+// Company snapshot — a corporate-parameter block for the subject, built from the
+// registry's master data (authoritative) and Wikidata's profile facts (which
+// still reach when the registry's host blocks a datacenter IP). Every line is
+// cited to the source it was read from; a field only appears when a source
+// actually carried it, and nothing is invented. Directors surface under Key
+// People, so they are deliberately not repeated here.
 function snapshotSection(id: string, title: string, ctx: Ctx): RenderedSection {
-  const c = identitySource(ctx) ?? registryResults(ctx)[0];
-  if (!c) return { id, title, findings: [], empty: true };
+  const registry =
+    identitySource(ctx) ?? registryResults(ctx).find((c) => c.status === "done") ?? registryResults(ctx)[0];
+
   // Director mode: the "snapshot" is the person's own registry identity — the
   // name as the register spells it, and the DIN that makes it unambiguous.
   if (ctx.subject.type === "director") {
+    if (!registry) return { id, title, findings: [], empty: true };
     const identity = identityHit(ctx);
     if (!identity) {
-      return { id, title, findings: [{ severity: "info", text: c.note ?? "No registry record found." }], empty: true };
+      return { id, title, findings: [{ severity: "info", text: registry.note ?? "No registry record found." }], empty: true };
     }
     const name = typeof identity.extra?.name === "string" ? identity.extra.name : ctx.subject.company;
     const din = typeof identity.extra?.din === "string" ? identity.extra.din : undefined;
@@ -470,29 +474,83 @@ function snapshotSection(id: string, title: string, ctx: Ctx): RenderedSection {
       id,
       title,
       findings: [
-        { severity: "info", text: name, sourceRef: ctx.cite(c.sourceName, name, identity.url) },
-        ...(din ? [{ severity: "info" as Severity, text: `DIN ${din}`, sourceRef: ctx.cite(c.sourceName, `DIN ${din}`, identity.url) }] : []),
+        { severity: "info", text: name, sourceRef: ctx.cite(registry.sourceName, name, identity.url) },
+        ...(din ? [{ severity: "info" as Severity, text: `DIN ${din}`, sourceRef: ctx.cite(registry.sourceName, `DIN ${din}`, identity.url) }] : []),
       ],
     };
   }
-  if (c.status === "skipped") return { id, title, findings: [{ severity: "info", text: c.note ?? "Registry not run." }], empty: true };
-  if (c.status === "error") return { id, title, findings: [{ severity: "info", text: `Registry unavailable — ${c.note ?? "unknown error"}` }], empty: true };
 
-  // Any registry hit carries the record's CIN and URL; one is enough to identify
-  // the company. Master data beyond that isn't free, so we don't pretend to it.
-  const record = c.hits.find((h) => h.extra?.cin) ?? c.hits[0];
-  if (!record) {
-    return { id, title, findings: [{ severity: "info", text: c.note ?? "No registry record found." }], empty: true };
+  // The registry's company record: the dedicated master-data hit if the collector
+  // emitted one, else any hit carrying a CIN, else the first hit.
+  const master =
+    registry?.status === "done"
+      ? registry.hits.find((h) => h.extra?.category === "company-master") ??
+        registry.hits.find((h) => h.extra?.cin) ??
+        registry.hits[0]
+      : undefined;
+
+  const wikidata = ctx.byId["wikidata"];
+  const wdFacts =
+    wikidata?.status === "done" ? wikidata.hits.filter((h) => h.extra?.category === "company-fact") : [];
+
+  const findings: Finding[] = [];
+  const shown = new Set<string>();
+  const add = (label: string, value: unknown, sourceName: string, url?: string) => {
+    const v = strField(value);
+    if (!v || shown.has(label.toLowerCase())) return;
+    shown.add(label.toLowerCase());
+    findings.push({
+      severity: "info",
+      text: `${label}: ${v}`,
+      sourceRef: url ? ctx.cite(sourceName, `${label}: ${v}`, url) : undefined,
+    });
+  };
+
+  // Company name leads, cited to whichever source identified the entity.
+  const nameUrl = master?.url ?? wdFacts[0]?.url;
+  const nameSource = master ? registry!.sourceName : wikidata?.sourceName;
+  if (master || wdFacts.length > 0) {
+    findings.push({
+      severity: "info",
+      text: ctx.subject.company,
+      sourceRef: nameUrl && nameSource ? ctx.cite(nameSource, ctx.subject.company, nameUrl) : undefined,
+    });
   }
 
-  const findings: Finding[] = [
-    { severity: "info", text: ctx.subject.company, sourceRef: ctx.cite(c.sourceName, ctx.subject.company, record.url) },
-  ];
-  const cin = record.extra?.cin;
-  if (typeof cin === "string" && cin) {
-    findings.push({ severity: "info", text: `CIN ${cin}`, sourceRef: ctx.cite(c.sourceName, `CIN ${cin}`, record.url) });
+  // Registry master data — the authoritative corporate parameters, when read.
+  if (master) {
+    const src = registry!.sourceName;
+    const url = master.url;
+    const e = master.extra ?? {};
+    add("CIN", e.cin, src, url);
+    add("Incorporated", e.incorporatedOn, src, url);
+    add("Registrar", e.roc, src, url);
+    add("Status", e.status, src, url);
+    add("Listing", e.listing, src, url);
+    add("Authorised capital", e.authorisedCapital, src, url);
+    add("Paid-up capital", e.paidUpCapital, src, url);
+    add("Registered address", e.address, src, url);
+    add("Last AGM", e.lastAgm, src, url);
   }
-  return { id, title, findings };
+
+  // Wikidata facts — add the dimensions the register does not publish (HQ,
+  // industry, parent group, website) and fill the ones it left blank. A fact
+  // whose dimension the registry already gave is skipped, not repeated.
+  const alias: Record<string, string> = { founded: "incorporated", "listed on": "listing" };
+  for (const h of wdFacts) {
+    const label = strField(h.extra?.label);
+    const value = strField(h.extra?.value);
+    if (!label || !value) continue;
+    if (shown.has(label.toLowerCase()) || shown.has(alias[label.toLowerCase()] ?? " ")) continue;
+    add(label, value, wikidata!.sourceName, h.url);
+  }
+
+  if (findings.length > 0) return { id, title, findings };
+
+  // Nothing carried a snapshot — say why, honestly, and let the section hide.
+  if (registry?.status === "skipped") return { id, title, findings: [{ severity: "info", text: registry.note ?? "Registry not run." }], empty: true };
+  if (registry?.status === "error") return { id, title, findings: [{ severity: "info", text: `Registry unavailable — ${registry.note ?? "unknown error"}` }], empty: true };
+  return { id, title, findings: [{ severity: "info", text: registry?.note ?? "No registry record found." }], empty: true };
 }
 
 /** One person in the Key People list, before they are ranked and cited. */
@@ -554,7 +612,12 @@ function managementSection(id: string, title: string, ctx: Ctx): RenderedSection
     const rows = registry.hits.filter((h) =>
       ctx.subject.type === "director"
         ? h.extra?.category === "identity" || h.extra?.category === "director"
-        : h.extra?.category !== "directorship" && h.extra?.category !== "governance",
+        : h.extra?.category !== "directorship" &&
+          h.extra?.category !== "governance" &&
+          // Company master-data and profile facts describe the entity, not a
+          // person — they belong in the Company Snapshot, never Key People.
+          h.extra?.category !== "company-master" &&
+          h.extra?.category !== "company-fact",
     );
     for (const d of rows) {
       addPerson(people, {
@@ -576,6 +639,9 @@ function managementSection(id: string, title: string, ctx: Ctx): RenderedSection
   const wikidata = ctx.byId["wikidata"];
   if (wikidata?.status === "done" && ctx.subject.type !== "director") {
     for (const h of wikidata.hits) {
+      // Only the officer/board rows are people; the company-fact rows (founded,
+      // HQ, industry…) are for the snapshot and must not become "Key People".
+      if (h.extra?.category !== "leadership") continue;
       // Wikidata company hits read "Name — Role"; the ladder needs the role.
       addPerson(people, {
         name: nameFromTitle(h.title),
@@ -677,6 +743,7 @@ function directorshipsSection(id: string, title: string, ctx: Ctx): RenderedSect
   const wikidata = ctx.byId["wikidata"];
   if (wikidata?.status === "done" && ctx.subject.type === "director") {
     for (const h of wikidata.hits) {
+      if (h.extra?.category !== "leadership") continue;
       findings.push({ severity: "info", text: h.title, sourceRef: ctx.cite(wikidata.sourceName, h.title, h.url) });
     }
   }

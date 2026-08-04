@@ -639,19 +639,42 @@ async function companyRun(
     };
   }
 
-  const hits: RawHit[] = record.directors.map((d) => ({
-    title: `${d.name}${d.din ? ` — DIN ${d.din}` : ""}`,
-    url: record.url,
-    entity: record.name,
-    extra: {
-      category: "director",
-      name: d.name,
-      din: d.din,
-      company: record.name,
-      cin: record.cin,
-      tenure: d.since,
+  // The company's own master data leads — a corporate-parameter record for the
+  // Company Snapshot (incorporation, RoC, capital, listing, address). parseCompanyPage
+  // already reads these; emitting them here is what carries them into the brief
+  // instead of discarding everything but the board.
+  const hits: RawHit[] = [
+    {
+      title: `${record.name} — registry record`,
+      url: record.url,
+      entity: record.name,
+      extra: {
+        category: "company-master",
+        cin: record.cin,
+        status: record.status,
+        roc: record.roc,
+        incorporatedOn: record.incorporatedOn,
+        address: record.address,
+        authorisedCapital: record.authorisedCapital,
+        paidUpCapital: record.paidUpCapital,
+        listing: record.listing,
+        lastAgm: record.lastAgm,
+      },
     },
-  }));
+    ...record.directors.map((d) => ({
+      title: `${d.name}${d.din ? ` — DIN ${d.din}` : ""}`,
+      url: record.url,
+      entity: record.name,
+      extra: {
+        category: "director",
+        name: d.name,
+        din: d.din,
+        company: record.name,
+        cin: record.cin,
+        tenure: d.since,
+      },
+    })),
+  ];
 
   if (record.status && ADVERSE_STATUS.test(record.status)) {
     hits.push({
