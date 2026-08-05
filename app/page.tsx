@@ -165,17 +165,30 @@ export default function Home() {
   const showHistory = idle && !showPast && view === "history";
   const showForm = idle && !showPast && view === "search";
   const showPrep = active !== null && active.phase !== "error" && !ready;
-  // The brief appears the moment it lands, even while a company's board is still
-  // being screened — the diligence streams into it live, so there is no reason to
-  // hold the whole page on a spinner until the last director is done.
   const hasBrief = active?.run?.brief != null;
+  // ── One final answer, not a moving one ───────────────────────────────────
+  // The brief used to appear the moment it landed, while the board was still
+  // being screened, on the reasoning that the diligence streams in live and
+  // there was no point holding the page on a spinner.
+  //
+  // That reasoning does not survive the score. A run showed 45/100 and climbed
+  // to 80 as directors resolved — so the number a reader saw depended on when
+  // they happened to look, and anyone who read, screenshotted or acted on the
+  // early figure was acting on a governance verdict that was not yet true. A
+  // pre-screen is read once and quoted in a meeting; it has to be settled
+  // before it is shown. The walk-through stays up until the run is complete.
+  const complete = active?.phase === "done";
   // Work the reader has watched happen is handed over, not swapped: the walk
   // closing straight into the report mid-blink gave no moment to change what
   // they were reading for. One beat sits between them, once per run.
   const handedOff = activeKey ? Boolean(handed[activeKey]) : false;
-  const showHandoff = active !== null && ready && hasBrief && active.phase !== "error" && !handedOff;
-  const showBrief = active !== null && ready && hasBrief && active.phase !== "error" && handedOff;
-  const showProgress = active !== null && ready && active.phase === "running" && !hasBrief;
+  const showHandoff = active !== null && ready && complete && hasBrief && !handedOff;
+  const showBrief = active !== null && ready && complete && hasBrief && handedOff;
+  // Everything that is not yet a settled answer belongs on the walk-through —
+  // including a run that finished without a brief, which would otherwise leave
+  // the page blank.
+  const showProgress =
+    active !== null && ready && (active.phase === "running" || (complete && !hasBrief));
   const showError = active !== null && active.phase === "error";
 
   // When the form stands alone (no runs yet), the content column centres itself;

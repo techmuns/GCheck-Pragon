@@ -6,6 +6,7 @@ import { buildProfile } from "./profileView";
 import { humanizeCaps } from "./text";
 import { assessRisk, buildScope, riskMethodology, sourceTier, type Band, type RiskContribution } from "./risk";
 import { buildNetwork } from "./network";
+import { prettyDate } from "./courtCases";
 
 // ── Print-brief derivation ──────────────────────────────────────────────────
 // Turns a finished Run into the fixed, decision-grade shape the one-page A4
@@ -1518,12 +1519,16 @@ function buildCases(bySource: SourceIndex, citations: Citation[]): CaseRow[] {
         ? parties.find((p) => !p.toLowerCase().endsWith(`(${side})`))?.replace(/\s*\([a-z]+\)$/i, "")
         : undefined;
       const bench = Array.isArray(h.extra?.bench) ? (h.extra?.bench as string[]) : [];
+      const decided = str(h.extra?.decidedOn);
       out.push({
         // The judgment's own date beats one parsed out of a cause-list title.
         date: str(h.extra?.decidedOn) ?? date,
         name: shorten(name, 48),
         authority: authority ? shorten(authority, 30) : undefined,
-        status: caseStatus(h.title),
+        // The judgment's own words beat a guess made from the title: a matter
+        // the document says was decided is not "live", and calling it live is
+        // the kind of error that gets repeated out loud in a meeting.
+        status: decided ? `Decided ${prettyDate(decided) ?? decided}` : caseStatus(h.title),
         tone: "amber",
         sourceRef: h.url ? refByUrl.get(h.url) : undefined,
         side,
