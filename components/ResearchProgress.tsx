@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import type { RunEvent, SourceProgress, Subject } from "@/lib/types";
+import type { PersonDiligence, RunEvent, SourceProgress, Subject } from "@/lib/types";
 import ResearchDrawer from "./ResearchDrawer";
 
 interface Props {
@@ -9,6 +9,8 @@ interface Props {
   progress: SourceProgress[];
   /** The run's activity log, newest last. */
   events?: RunEvent[];
+  /** Per-director verdicts, streamed onto the run as each screen lands. */
+  diligence?: PersonDiligence[];
 }
 
 const STATUS_LABEL: Record<SourceProgress["status"], string> = {
@@ -61,7 +63,7 @@ const VISITING: Record<string, string> = {
 
 const RESOLVED = new Set(["done", "skipped", "error", "locked"]);
 
-export default function ResearchProgress({ subject, progress, events = [] }: Props) {
+export default function ResearchProgress({ subject, progress, events = [], diligence = [] }: Props) {
   const total = progress.length;
 
   const resolved = progress.filter((p) => RESOLVED.has(p.status)).length;
@@ -196,6 +198,48 @@ export default function ResearchProgress({ subject, progress, events = [] }: Pro
         })}
       </ul>
 
+      {/* Board diligence, person by person — the phase that used to be a
+          silent multi-minute wait. The people stream onto the run as each
+          screen lands, so this list is live off the same poll as everything
+          else: who is queued, who is being checked right now, and what each
+          verdict came back as. */}
+      {diligence.length > 0 && (
+        <div className="mt-6">
+          <div className="mb-2 flex items-baseline justify-between">
+            <span className="text-[13px] font-semibold text-navy-deep">Screening the board</span>
+            <span className="tabular text-[12px] text-ink-secondary">
+              {diligence.filter((p) => p.status === "done" || p.status === "error").length}/{diligence.length} done
+            </span>
+          </div>
+          <ul className="space-y-1">
+            {diligence.map((p) => (
+              <li
+                key={p.id}
+                className="flex items-center justify-between gap-3 rounded-lg border border-[rgba(23,43,77,0.10)] bg-white/70 px-3 py-1.5"
+              >
+                <span className="min-w-0 truncate text-[12.5px] text-ink-primary">
+                  {p.name}
+                  {p.role && <span className="ml-1.5 text-[11px] text-ink-secondary">· {p.role}</span>}
+                </span>
+                <span className="shrink-0 text-[11px] font-semibold">
+                  {p.status === "pending" && <span className="text-ink-secondary/60">Queued</span>}
+                  {p.status === "running" && <span className="text-[#B7791F]">Checking…</span>}
+                  {p.status === "error" && <span className="text-ink-secondary">Couldn’t complete</span>}
+                  {p.status === "done" &&
+                    (p.verdict === "red" ? (
+                      <span className="text-[#C75D54]">Red flag</span>
+                    ) : p.verdict === "amber" ? (
+                      <span className="text-[#B7791F]">{p.concerns.length} to review</span>
+                    ) : (
+                      <span className="text-[#2F855A]">Clear</span>
+                    ))}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* The full research reads in its own panel now. Ninety-odd log lines
           under the source rows buried the rows themselves, and the reader who
           wants the detail wants it grouped by what it establishes, not by the
@@ -204,7 +248,9 @@ export default function ResearchProgress({ subject, progress, events = [] }: Pro
 
       <p className="mt-4 text-center text-[12px] text-ink-secondary/80">
         {resolved >= total && total > 0
-          ? "Almost there — writing it up."
+          ? diligence.length > 0 && diligence.some((p) => p.status === "pending" || p.status === "running")
+            ? "Sources are in — screening the board director by director. The report follows once every verdict is settled, so the score you get is final."
+            : "Almost there — writing it up."
           : "This one runs deep, so give it a few minutes. Open “View the research” on the right to follow every step."}
       </p>
     </div>

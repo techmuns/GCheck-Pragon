@@ -213,10 +213,34 @@ function titleCase(s: string): string {
   return s.trim();
 }
 
+/**
+ * Cut the page down to the judgment.
+ *
+ * The text that reaches this parser is rarely the judgment alone: Indian
+ * Kanoon wraps it in site navigation, related-case links and premium-service
+ * banners, and a text extractor keeps all of it. The parser scans bounded
+ * windows from the top — bounded on purpose, so a stray "HON'BLE" in a related
+ * case cannot join the bench — which means noise ABOVE the judgment pushes the
+ * cause title out of the window and the whole parse quietly finds nothing.
+ * That, not the layout of judgments, is what broke on real pages.
+ *
+ * Courts open with "IN THE <COURT>", so the document starts at the first line
+ * that says so, and everything above it is dropped.
+ */
+export function judgmentBody(text: string): string {
+  const ls = text.replace(/\r/g, "\n").split("\n");
+  for (let i = 0; i < ls.length; i++) {
+    if (/^\W{0,8}IN THE\b.*\b(COURT|TRIBUNAL|COMMISSION|FORUM)\b/i.test(ls[i].trim())) {
+      return ls.slice(i).join("\n");
+    }
+  }
+  return text;
+}
+
 /** Everything the judgment states about itself. Fields it does not carry are
  *  simply absent — nothing here is inferred. */
 export function parseJudgment(text: string): JudgmentFacts {
-  const ls = lines(text);
+  const ls = lines(judgmentBody(text));
   return {
     court: readCourt(ls),
     caseNumber: readCaseNumber(ls),

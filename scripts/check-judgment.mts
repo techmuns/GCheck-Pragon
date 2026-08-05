@@ -182,6 +182,39 @@ check("a defending side is reported as one", () => {
   assert.equal(isDefendingSide(side), true);
 });
 
+check("finds the judgment beneath a site's own page furniture", () => {
+  // What a text extractor actually returns for an Indian Kanoon page: site
+  // navigation, premium banners and related-case links ABOVE the judgment. The
+  // parser scans bounded windows from the top, so on a real run this noise
+  // pushed the cause title out of every window and all five reads yielded
+  // nothing — the document has to be cut down to where the court begins.
+  const NOISY =
+    [
+      "Indian Kanoon - Search engine for Indian Law",
+      "Premium Members Advanced Search Disclaimer Mobile View",
+      "Try out our Premium Member Services -- Free for one month.",
+      "Cites 18 docs - [View All]",
+      "The Trade Marks Act, 1999",
+      "Section 29 in The Trade Marks Act",
+      "Puma Se vs Indiamart Intermesh Ltd on 3 January, 2024",
+      "User Queries", "trademark", "intermediary", "e-commerce",
+      "Take notes as you read a judgment and organise your reading lists",
+      "Delhi High Court",
+    ].join("\n") +
+    "\n" +
+    INDIAMART_PUMA;
+  const f = parseJudgment(NOISY);
+  assert.match(String(f.court), /High Court of Delhi/i);
+  assert.equal(f.decidedOn, "2025-06-02");
+  const side = sideOf(f, "IndiaMART InterMESH", entityMentioned);
+  assert.equal(side, "appellant");
+  // The related-case link above the judgment names the parties the other way
+  // round — slicing to the judgment is also what keeps it from being read as
+  // part of the cause title.
+  const appellants = f.parties.filter((p) => p.side === "appellant");
+  assert.equal(appellants.length, 1);
+});
+
 check("a page that is not a judgment yields nothing rather than nonsense", () => {
   const f = parseJudgment("This page could not be loaded. Please try again later.");
   assert.equal(f.court, undefined);

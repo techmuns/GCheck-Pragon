@@ -164,6 +164,13 @@ const PHASES: Phase[] = [
   },
 ];
 
+const DILIGENCE_PHASE: Phase = {
+  id: "diligence",
+  title: "Board diligence",
+  lead: "Screening each director individually — registry standing, red-flag sweep and litigation — anchored to their DIN so a namesake's record is never charged to them.",
+  sources: ["diligence"],
+};
+
 const RUN_PHASE: Phase = {
   id: "run",
   title: "Planning and write-up",
@@ -172,7 +179,7 @@ const RUN_PHASE: Phase = {
 };
 
 const PHASE_BY_SOURCE = new Map<string, string>(
-  PHASES.flatMap((p) => p.sources.map((s) => [s, p.id] as const)),
+  [...PHASES, DILIGENCE_PHASE].flatMap((p) => p.sources.map((s) => [s, p.id] as const)),
 );
 
 const GLYPH: Record<RunEventLevel, string> = {
@@ -207,7 +214,7 @@ function groupByPhase(events: RunEvent[]): Array<{ phase: Phase; events: RunEven
   }
   // Run-level steps first — they are the frame the rest sits in — then the
   // phases that actually produced events, in their declared order.
-  return [RUN_PHASE, ...PHASES]
+  return [RUN_PHASE, ...PHASES, DILIGENCE_PHASE]
     .map((phase) => ({ phase, events: byId.get(phase.id) ?? [] }))
     .filter((g) => g.events.length > 0);
 }

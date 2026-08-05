@@ -166,6 +166,82 @@ export const indianKanoonCollector: Collector = async ({ subject, emit }) => {
   };
 };
 
+/** The Indian Kanoon document id inside a /doc/<id>/ URL. */
+export function kanoonDocId(url: string): string | undefined {
+  return /indiankanoon\.org\/doc(?:fragment)?\/(\d+)/i.exec(url)?.[1];
+}
+
+/**
+ * Open one judgment, by whichever door answers first.
+ *
+ * The general article reader was the only route here, and on a real run all
+ * five reads came back unusable — Indian Kanoon actively blocks automated
+ * readers. So the chain now leads with the OFFICIAL Indian Kanoon API when a
+ * token is configured (the same INDIANKANOON_API_TOKEN the search rung already
+ * uses; its /doc/ endpoint serves the judgment itself), then a plain page
+ * fetch, and only then the reader chain. Every failure is named, because "could
+ * not be opened" with no reason burned a whole run's worth of debugging time.
+ */
+async function fetchJudgmentText(
+  url: string,
+  emit?: (text: string, meta?: { url?: string; level?: "step" | "skip" | "warn" }) => void,
+): Promise<{ text?: string; via?: string; fail?: string }> {
+  const fails: string[] = [];
+  const docId = kanoonDocId(url);
+
+  // 1. The official API — authoritative, and immune to scraper-blocking.
+  if (docId && env.indianKanoonToken) {
+    try {
+      const res = await fetchWithTimeout(`https://api.indiankanoon.org/doc/${docId}/`, {
+        method: "POST",
+        timeoutMs: 20000,
+        headers: { Authorization: `Token ${env.indianKanoonToken}` },
+      });
+      if (!res.ok) throw new Error(`API ${res.status}`);
+      const data = await res.json();
+      const text = stripHtml(String(data.doc ?? ""));
+      if (text.length > 200) {
+        emit?.(`Read the judgment via the Indian Kanoon API`, { url, level: "step" });
+        return { text, via: "the Indian Kanoon API" };
+      }
+      fails.push("API answered without a document");
+    } catch (err) {
+      fails.push(`Indian Kanoon API: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  } else if (docId && !env.indianKanoonToken) {
+    fails.push("no INDIANKANOON_API_TOKEN set (the official API is the reliable route)");
+  }
+
+  // 2. The page itself. Works from some networks; costs one GET to find out.
+  try {
+    const res = await fetchWithTimeout(url, { timeoutMs: 15000, headers: { accept: "text/html" } });
+    if (!res.ok) throw new Error(`page ${res.status}`);
+    const text = stripHtml(await res.text());
+    if (text.length > 200) return { text, via: "the public page" };
+    fails.push("page answered empty");
+  } catch (err) {
+    fails.push(`public page: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // 3. The general article-reader chain (Munshot reader → Firecrawl).
+  if (hasReader()) {
+    try {
+      const articles = await readArticles(
+        [url],
+        "Return the judgment verbatim, including the cause title, the parties and the sides they appear on, the coram, the case number and the date.",
+        (text, meta) => emit?.(text, { url: meta?.url, level: meta?.level === "warn" ? "warn" : "step" }),
+      );
+      const text = articles[0]?.text;
+      if (text && text.length > 200) return { text, via: "the article reader" };
+      fails.push("article reader returned nothing usable");
+    } catch (err) {
+      fails.push(`article reader: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  return { fail: fails.join("; ") };
+}
+
 /** How many judgments one run may open. Each costs a reader call, so this is
  *  the cost dial on the source — the cases are already ranked by relevance, so
  *  the ones read are the ones a partner is most likely to raise. */
@@ -191,34 +267,29 @@ async function enrichWithJudgments(
   subject: Subject,
   emit?: (text: string, meta?: { url?: string; level?: "step" | "skip" | "warn" }) => void,
 ): Promise<number> {
-  if (!hasReader()) return 0;
   const targets = hits.filter((h) => h.url).slice(0, maxJudgmentReads());
   if (targets.length === 0) return 0;
 
   emit?.(`Opening ${targets.length} judgment(s) for the facts behind the cause title`);
 
-  let articles: Awaited<ReturnType<typeof readArticles>> = [];
-  try {
-    articles = await readArticles(
-      targets.map((h) => h.url as string),
-      "Return the judgment verbatim, including the cause title, the parties and the sides they appear on, the coram, the case number and the date.",
-      // The reader logs at its own levels ("fetch"/"cache"); the run log speaks
-      // in the collector's. Anything that is not a warning is a step.
-      (text, meta) => emit?.(text, { url: meta?.url, level: meta?.level === "warn" ? "warn" : "step" }),
-    );
-  } catch {
-    return 0; // the cause titles still stand
-  }
-
-  const byUrl = new Map(articles.map((a) => [a.url, a]));
   let read = 0;
 
   for (const hit of targets) {
-    const article = byUrl.get(hit.url as string);
-    if (!article?.text) continue;
+    const url = hit.url as string;
+    const got = await fetchJudgmentText(url, emit);
+    if (!got.text) {
+      // Say WHY on the hit itself, so the case row can tell the reader what
+      // stood in the way instead of a bare "could not be opened" — and so a
+      // failing route is diagnosable from the report alone.
+      hit.extra = { ...hit.extra, readFail: got.fail };
+      continue;
+    }
 
-    const facts = parseJudgment(article.text);
-    if (facts.parties.length === 0 && !facts.court) continue;
+    const facts = parseJudgment(got.text);
+    if (facts.parties.length === 0 && !facts.court) {
+      hit.extra = { ...hit.extra, readFail: `opened via ${got.via}, but the page did not read as a judgment` };
+      continue;
+    }
 
     const name = hit.entity ?? subject.company;
     const side = sideOf(facts, name, entityMentioned);
@@ -228,7 +299,7 @@ async function enrichWithJudgments(
     // so they are read. Amounts inside come from the text by regex rather than
     // from the model — a hallucinated figure would be quoted in a meeting as the
     // exposure. Failure here costs the substance and keeps the header.
-    const substance = await readJudgmentSubstance(name, article.text, (note) =>
+    const substance = await readJudgmentSubstance(name, got.text, (note) =>
       emit?.(note, { level: "warn" }),
     );
 

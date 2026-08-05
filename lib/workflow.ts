@@ -197,6 +197,7 @@ async function execute(runId: string): Promise<void> {
   // identity settled above is exactly what the brief needs to say who it covers.
   try {
     appendEvent(runId, { level: "step", text: "Writing the brief" });
+    appendEvent(runId, { level: "step", text: "Writing the brief — assembling and ranking what came back" });
     const brief = await synthesizeBrief(resolved, results, config);
 
     // Company mode: the company brief is only half the job. Publish it now — so
@@ -206,10 +207,14 @@ async function execute(runId: string): Promise<void> {
     // already went out.
     if (diligenceEnabled(resolved)) {
       updateRun(runId, { brief });
-      appendEvent(runId, { level: "step", text: "Screening the board — running deep diligence on each director" });
+      appendEvent(runId, {
+        level: "step",
+        sourceId: "diligence",
+        text: "Screening the board — running deep diligence on each director",
+      });
       try {
         await runBoardDiligence(resolved, results, config, {
-          emit: (text) => appendEvent(runId, { level: "step", text }),
+          emit: (text) => appendEvent(runId, { level: "step", sourceId: "diligence", text }),
           onUpdate: (people) => updateRun(runId, { diligence: people }),
         });
       } catch (err) {

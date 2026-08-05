@@ -588,10 +588,22 @@ export default function BriefView({ run, onReset, onScreenPeople, onScreenCompan
           </div>
         </div>
 
-        {/* What drives the score */}
-        <Section title="Risk drivers">
-          <RiskDrivers run={run} />
-        </Section>
+        {/* What drives the score — workings, not findings. Collapsed by
+            default: the score is already in the banner, and a reader who wants
+            the arithmetic can open it. Everyone else gets to the concerns one
+            screen sooner. */}
+        <details className="mt-7 group">
+          <summary className="flex cursor-pointer list-none items-baseline justify-between gap-3 border-b border-[rgba(23,43,77,0.12)] pb-1.5 [&::-webkit-details-marker]:hidden">
+            <h3 className="font-display text-[15px] leading-none text-navy-deep">Risk drivers</h3>
+            <span className="text-[11.5px] leading-none text-ink-secondary">
+              <span className="group-open:hidden">Show what drives the score ▸</span>
+              <span className="hidden group-open:inline">Hide ▾</span>
+            </span>
+          </summary>
+          <div className="mt-2.5">
+            <RiskDrivers run={run} />
+          </div>
+        </details>
 
         {/* Key concerns — the point of the report, so it leads */}
         <Section title="Key concerns" count={concerns.length}>
@@ -937,8 +949,9 @@ function CourtCaseTable({ rows, urlByRef }: { rows: CourtCaseRow[]; urlByRef: Ma
 
           {!c.readFromJudgment && (
             <p className="mt-2 text-[11px] leading-relaxed text-ink-secondary/75">
-              Listed on the registry only — the judgment could not be opened, so the parties and
-              court are not confirmed here.
+              {c.readFail
+                ? `Listed on the registry only — the judgment could not be read (${c.readFail}).`
+                : "Listed on the registry only — the judgment could not be opened, so the parties and court are not confirmed here."}
             </p>
           )}
         </div>

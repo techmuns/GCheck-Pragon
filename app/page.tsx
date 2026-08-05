@@ -200,6 +200,7 @@ export default function Home() {
             subject={active.run.subject}
             progress={active.run.progress}
             events={active.run.events}
+            diligence={active.run.diligence}
           />
         )}
 

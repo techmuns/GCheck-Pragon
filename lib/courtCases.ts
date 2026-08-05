@@ -72,6 +72,9 @@ export interface CourtCaseRow {
   amounts: string[];
   /** The verbatim lines the narrative fields rest on. */
   evidence: string[];
+  /** Why the judgment could not be read, when it could not — named route by
+   *  route, so the report itself says what to fix. */
+  readFail?: string;
 }
 
 function str(v: unknown): string | undefined {
@@ -187,6 +190,7 @@ export function buildCourtCases(hits: RawHit[], subjectName: string, refByUrl?: 
       stake: str(h.extra?.stake),
       amounts: list(h.extra?.amounts),
       evidence: list(h.extra?.evidence),
+      readFail: str(h.extra?.readFail),
     };
   });
 }
