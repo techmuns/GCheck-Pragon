@@ -36,7 +36,9 @@ function readExpiry(token: string): number | undefined {
 }
 
 export function tokenHealth(now: number = Date.now()): TokenHealth {
-  const hasFallback = Boolean(env.serpApiKey || (env.googleApiKey && env.googleCx));
+  // Firecrawl counts: it answers searches as well as reading pages, so a deploy
+  // holding only that key still degrades rather than going dark.
+  const hasFallback = Boolean(env.serpApiKey || (env.googleApiKey && env.googleCx) || env.firecrawlApiKey);
   const token = env.munshotToken?.trim();
 
   if (!token) {
@@ -44,8 +46,8 @@ export function tokenHealth(now: number = Date.now()): TokenHealth {
       state: "absent",
       hasFallback,
       message: hasFallback
-        ? "MUNSHOT_TOKEN is not set. Search is running on the configured Google backend; news search is limited."
-        : "MUNSHOT_TOKEN is not set and no Google backend is configured — search will fall back to the keyless engine, which is blocked from most servers.",
+        ? "MUNSHOT_TOKEN is not set. Search is running on the configured fallback backend; news search is limited."
+        : "MUNSHOT_TOKEN is not set and no durable backend is configured — search will fall back to the keyless engine, which is blocked from most servers.",
     };
   }
 
