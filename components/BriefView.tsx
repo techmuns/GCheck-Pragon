@@ -2,7 +2,8 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import type { Run, Severity } from "@/lib/types";
-import { apiUrl } from "@/lib/api";
+import { apiUrl, authHeaders } from "@/lib/api";
+import { useHostContext } from "@/hooks/useHostContext";
 import { severityStyle } from "./severity";
 import { VERDICT_META } from "./BriefViz";
 import BriefPrint, { type PrintVariant } from "./BriefPrint";
@@ -279,6 +280,7 @@ export default function BriefView({
   onScreenPeople,
   onScreenCompanies,
 }: Props) {
+  const { session } = useHostContext();
   const brief = run.brief;
   // Which document is being produced, so only the button that was pressed
   // shows the wait — a spinner on both reads as though both are running.
@@ -355,6 +357,7 @@ export default function BriefView({
     try {
       const res = await fetch(
         apiUrl(`/api/research/${run.id}/pdf${variant === "onepager" ? "?variant=onepager" : ""}`),
+        { headers: authHeaders(session.token) },
       );
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));

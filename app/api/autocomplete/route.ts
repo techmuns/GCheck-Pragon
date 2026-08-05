@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { displayName, formatSuggestion, parseDirectorInput } from "@/lib/directorId";
 import { resolveCandidates } from "@/lib/collectors/directors";
 import { searchStocks } from "@/lib/collectors/stocks";
+import { bearerFrom, withHostToken } from "@/lib/hostToken";
 import { SEED_COMPANIES, SEED_DIRECTORS, matchLocal } from "@/lib/seedEntities";
 import type { Suggestion } from "@/lib/types";
 
@@ -51,7 +52,11 @@ export async function GET(req: NextRequest) {
   const kind = req.nextUrl.searchParams.get("kind") === "promoter" ? "promoter" : "company";
   if (!raw) return NextResponse.json({ suggestions: [] });
 
-  const suggestions = kind === "promoter" ? await directorSuggestions(raw) : await companySuggestions(raw);
+  // The company typeahead runs on the live stock search, which authenticates
+  // with the caller's Munshot session token when the request came from the host.
+  const suggestions = await withHostToken(bearerFrom(req), () =>
+    kind === "promoter" ? directorSuggestions(raw) : companySuggestions(raw),
+  );
   // A typed prefix repeats constantly as the user backspaces and retypes. The
   // client caches too; this makes the browser's own reuse free as well.
   return NextResponse.json(

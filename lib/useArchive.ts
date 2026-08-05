@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { apiUrl } from "./api";
+import { apiUrl, authHeaders } from "./api";
+import { useHostContext } from "@/hooks/useHostContext";
 import {
   clearHistory,
   exportHistory,
@@ -56,6 +57,11 @@ export interface UseArchive {
 export function useArchive(): UseArchive {
   const [entries, setEntries] = useState<ArchiveEntry[]>([]);
   const [opening, setOpening] = useState<string | null>(null);
+  // Asking the server for a past run is an authenticated call like any other —
+  // without the host's session it comes back 401 and every Open would fall
+  // silently to the saved copy, even on a run the server still has.
+  const { session } = useHostContext();
+  const token = session.token;
 
   useEffect(() => {
     setEntries(readHistory());
@@ -87,6 +93,7 @@ export function useArchive(): UseArchive {
         if (entry.serverId) {
           try {
             const res = await fetch(apiUrl(`/api/research/${entry.serverId}`), {
+              headers: authHeaders(token),
               signal: AbortSignal.timeout(SERVER_WAIT_MS),
             });
             if (res.ok) {
@@ -103,7 +110,7 @@ export function useArchive(): UseArchive {
         setOpening(null);
       }
     },
-    [],
+    [token],
   );
 
   /**

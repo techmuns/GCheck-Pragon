@@ -10,3 +10,23 @@ export const API_BASE = (process.env.NEXT_PUBLIC_API_BASE ?? "").replace(/\/$/, 
 export function apiUrl(path: string): string {
   return `${API_BASE}${path}`;
 }
+
+// ── Auth ───────────────────────────────────────────────────────────────────
+// Every call to this app's API carries the Munshot session token the host hands
+// the dashboard (hooks/useHostContext). The backend prefers it over the
+// environment's MUNSHOT_TOKEN for the Munshot-backed sources, so the run is
+// authenticated as the person actually using the dashboard rather than by a
+// static session JWT that expires.
+//
+// A null token is left off entirely rather than sent as "Bearer null": outside
+// the host there is no session to forward, and the backend should fall through
+// to its own credential instead of being handed one it will only reject.
+
+export function authHeaders(token: string | null | undefined): Record<string, string> {
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+/** `authHeaders` plus a JSON content type, for the calls that send a body. */
+export function jsonAuthHeaders(token: string | null | undefined): Record<string, string> {
+  return { "Content-Type": "application/json", ...authHeaders(token) };
+}

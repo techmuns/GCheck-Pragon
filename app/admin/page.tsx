@@ -3,23 +3,25 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import Toggle from "@/components/Toggle";
-import { apiUrl } from "@/lib/api";
+import { apiUrl, authHeaders, jsonAuthHeaders } from "@/lib/api";
+import { useHostContext } from "@/hooks/useHostContext";
 import type { AppConfig, Keyword, Source } from "@/lib/types";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 export default function AdminPage() {
+  const { session } = useHostContext();
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [save, setSave] = useState<SaveState>("idle");
   const [newKeyword, setNewKeyword] = useState("");
 
   useEffect(() => {
-    fetch(apiUrl("/api/config"))
+    fetch(apiUrl("/api/config"), { headers: authHeaders(session.token) })
       .then((r) => r.json())
       .then(setConfig)
       .catch(() => setLoadError("Could not load config."));
-  }, []);
+  }, [session.token]);
 
   function patch(p: Partial<AppConfig>) {
     setConfig((c) => (c ? { ...c, ...p } : c));
@@ -61,7 +63,7 @@ export default function AdminPage() {
     try {
       const res = await fetch(apiUrl("/api/config"), {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: jsonAuthHeaders(session.token),
         body: JSON.stringify(config),
       });
       if (!res.ok) throw new Error();
@@ -76,7 +78,10 @@ export default function AdminPage() {
     if (!confirm("Reset everything back to the default settings?")) return;
     setSave("saving");
     try {
-      const res = await fetch(apiUrl("/api/config?reset=1"), { method: "POST" });
+      const res = await fetch(apiUrl("/api/config?reset=1"), {
+        method: "POST",
+        headers: authHeaders(session.token),
+      });
       setConfig(await res.json());
       setSave("saved");
     } catch {

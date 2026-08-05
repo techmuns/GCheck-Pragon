@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { apiUrl } from "@/lib/api";
+import { apiUrl, authHeaders } from "@/lib/api";
+import { useHostContext } from "@/hooks/useHostContext";
 import type { Suggestion } from "@/lib/types";
 
 interface Props {
@@ -89,6 +90,14 @@ export default function AutocompleteField({
   // Picking a row sets the value, which would otherwise fire a fresh lookup for
   // the exact text we just resolved.
   const skipNext = useRef(false);
+  // The live stock search behind the company box authenticates with the host's
+  // session token. Held in a ref so a session refresh does not re-run the
+  // lookup effect and re-query the text the user has already stopped typing.
+  const { session } = useHostContext();
+  const tokenRef = useRef<string | null>(null);
+  useEffect(() => {
+    tokenRef.current = session.token;
+  }, [session.token]);
 
   useEffect(() => {
     const q = value.trim();
@@ -131,6 +140,7 @@ export default function AutocompleteField({
       inflight.current = controller;
       try {
         const res = await fetch(apiUrl(`/api/autocomplete?kind=${kind}&q=${encodeURIComponent(q)}`), {
+          headers: authHeaders(tokenRef.current),
           signal: controller.signal,
         });
         const data = await res.json();
