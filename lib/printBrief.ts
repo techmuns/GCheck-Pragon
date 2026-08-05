@@ -183,6 +183,14 @@ export interface CaseRow {
   status: string;
   tone: Tone;
   sourceRef?: number;
+  /** Read off the judgment itself, where it could be opened. The side is the
+   *  one that changes how the row reads: a company that FILED an appeal is not
+   *  a company that has been sued. */
+  side?: string;
+  caseNumber?: string;
+  bench?: string;
+  /** The other party, so the row names the matter rather than just the subject. */
+  against?: string;
 }
 
 export interface SourceQualityRow {
@@ -872,8 +880,30 @@ function extractFacts(
   const who = extractWho(text, hit, subject);
   if (who) facts.push({ label: "Names", value: who });
 
+  // Read off the judgment where one was opened. This goes near the front
+  // deliberately: "the subject is the appellant" is the fact that decides how
+  // everything below it reads, and a reader who sees it last has already formed
+  // the wrong impression from the cause title.
+  const side = str(hit?.extra?.side);
+  if (side) {
+    const parties = Array.isArray(hit?.extra?.parties) ? (hit?.extra?.parties as string[]) : [];
+    const against = parties
+      .find((p) => !p.toLowerCase().endsWith(`(${side})`))
+      ?.replace(/\s*\([a-z]+\)$/i, "");
+    facts.push({
+      label: "Position",
+      value: `${side.charAt(0).toUpperCase()}${side.slice(1)}${against ? ` v. ${against}` : ""}`,
+    });
+  }
+
+  const caseNumber = str(hit?.extra?.caseNumber);
+  if (caseNumber) facts.push({ label: "Case", value: caseNumber });
+
   const authority = extractAuthority(text, t, hit);
   if (authority) facts.push({ label: "Before", value: authority });
+
+  const bench = Array.isArray(hit?.extra?.bench) ? (hit?.extra?.bench as string[]) : [];
+  if (bench.length > 0) facts.push({ label: "Bench", value: bench.join(", ") });
 
   const amount = extractAmount(t);
   if (amount) facts.push({ label: "Amount", value: amount });
@@ -883,9 +913,11 @@ function extractFacts(
   const when = normaliseDate(hit?.date) ?? dateInText(t);
   if (when) facts.push({ label: "As of", value: when });
 
-  // Four short facts is the row's budget at print size; more would wrap and
-  // cost the card a line.
-  return facts.slice(0, 4);
+  // Six short facts is the row's budget. It was four, set when a fact was a
+  // date or an amount; the judgment now supplies position, case number and
+  // bench, and dropping those to hold a line would be dropping the only part
+  // of a court matter a partner can act on.
+  return facts.slice(0, 6);
 }
 
 /** The consequence, written from THIS matter's stage and quantum. */
@@ -903,8 +935,17 @@ function composeWhy(stage: Stage, facts: ConcernFact[]): string {
       return `${authority ?? "The authority"} has already acted, so this is decided, not alleged${amount ? ` (${amount})` : ""} — confirm what was imposed on ${onWhom}, whether it has been complied with, and whether an appeal is pending.`;
     case "investigation":
       return `${authority ?? "The authority"} has not concluded, so nothing is proven and the exposure is unquantified — get the current status of the ${amount ? `${amount} ` : ""}matter in writing before committing.`;
-    case "case":
+    case "case": {
+      // A matter the subject BROUGHT is not a matter against them, and the two
+      // deserve opposite questions. Reading a company's own appeal back to it
+      // as exposure was the exact failure the judgment read exists to end.
+      const position = value("Position") ?? "";
+      const bringing = /^(Appellant|Petitioner|Plaintiff|Applicant)/i.test(position);
+      if (bringing) {
+        return `${onWhom} brought this, so it is a claim being pursued rather than exposure — ask what is being sought${amount ? ` against the ${amount}` : ""}, the cost of running it, and what happens if it fails.`;
+      }
       return `Live before ${authority ?? "the forum"}, so exposure on ${onWhom} runs until judgment${amount ? ` and ${amount} is claimed` : ""} — ask for the claim amount, the defence, and the next hearing date.`;
+    }
     case "allegation":
       return `Reported but not adjudicated — treat it as unverified against ${onWhom} and check the primary record${authority ? ` with ${authority}` : ""} before relying on it.`;
     default:
@@ -1469,13 +1510,26 @@ function buildCases(bySource: SourceIndex, citations: Citation[]): CaseRow[] {
     for (const h of ik.hits) {
       const { name, date } = splitCaseTitle(h.title);
       const authority = str(h.extra?.court);
+      const side = str(h.extra?.side);
+      // The parties as the judgment listed them — the one on the other side is
+      // what the row needs to name the matter.
+      const parties = Array.isArray(h.extra?.parties) ? (h.extra?.parties as string[]) : [];
+      const against = side
+        ? parties.find((p) => !p.toLowerCase().endsWith(`(${side})`))?.replace(/\s*\([a-z]+\)$/i, "")
+        : undefined;
+      const bench = Array.isArray(h.extra?.bench) ? (h.extra?.bench as string[]) : [];
       out.push({
-        date,
+        // The judgment's own date beats one parsed out of a cause-list title.
+        date: str(h.extra?.decidedOn) ?? date,
         name: shorten(name, 48),
         authority: authority ? shorten(authority, 30) : undefined,
         status: caseStatus(h.title),
         tone: "amber",
         sourceRef: h.url ? refByUrl.get(h.url) : undefined,
+        side,
+        caseNumber: str(h.extra?.caseNumber),
+        bench: bench.length > 0 ? bench.join(", ") : undefined,
+        against: against ? shorten(against, 34) : undefined,
       });
     }
   }

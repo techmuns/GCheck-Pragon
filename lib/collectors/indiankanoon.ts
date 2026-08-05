@@ -4,6 +4,9 @@ import { env } from "./env";
 import { searchWeb, withRetry } from "./google";
 import { fetchWithTimeout, noteExcluded, stripHtml, type Collector } from "./types";
 import { cached } from "../searchCache";
+import { readArticles } from "./reader";
+import { hasReader } from "./env";
+import { isDefendingSide, parseJudgment, sideOf, summariseJudgment } from "./judgment";
 
 // ── Indian Kanoon collector ────────────────────────────────────────────────
 // Litigation search for the company and each promoter. Per the checklist:
@@ -132,7 +135,16 @@ export const indianKanoonCollector: Collector = async ({ subject, emit }) => {
     };
   }
 
+  // ── Read the judgments, not just the cause titles ────────────────────────
+  // A title says a matter exists. The judgment says which side the subject is
+  // on, before which court, under which number, heard by whom — the facts the
+  // meeting is actually about. Bounded: reads are metered, and the top matters
+  // are the ones a partner will ask about.
+  const readCount = await enrichWithJudgments(hits, subject, emit);
+
   const servedNote = servedBy.size > 0 ? `via ${[...servedBy].join(", ")}` : undefined;
+  const readNote =
+    readCount > 0 ? `Read ${readCount} judgment(s) for parties, bench and case numbers.` : undefined;
   // Some backends stumbled but another carried the search — say so, so a partial
   // degrade is visible without being alarming.
   const degradeNote = errors.length > 0 ? `Some backends were unavailable this run (${errors.join("; ")}).` : undefined;
@@ -146,12 +158,97 @@ export const indianKanoonCollector: Collector = async ({ subject, emit }) => {
   return {
     ...base,
     status: "done",
-    note: [servedNote, filterNote, gradeNote, degradeNote].filter(Boolean).join(" ") || undefined,
+    note: [servedNote, readNote, filterNote, gradeNote, degradeNote].filter(Boolean).join(" ") || undefined,
     hits,
     queries: ranQueries,
     excluded,
   };
 };
+
+/** How many judgments one run may open. Each costs a reader call, so this is
+ *  the cost dial on the source — the cases are already ranked by relevance, so
+ *  the ones read are the ones a partner is most likely to raise. */
+function maxJudgmentReads(): number {
+  const raw = Number(process.env.MAX_JUDGMENT_READS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 5;
+}
+
+/**
+ * Open the top judgments and attach what they state about themselves.
+ *
+ * Everything written onto the hit is read off the document — court, number,
+ * date, parties, bench, counsel. Nothing is inferred, because the fact this is
+ * really for is which SIDE the subject is on, and a brief that gets that
+ * backwards files a company's own appeal as a case against it.
+ *
+ * Failures are silent by design: a judgment that will not open leaves the hit
+ * exactly as the cause list gave it, which is what the brief showed before this
+ * existed. Enrichment can add to a finding; it must never be able to lose one.
+ */
+async function enrichWithJudgments(
+  hits: RawHit[],
+  subject: Subject,
+  emit?: (text: string, meta?: { url?: string; level?: "step" | "skip" | "warn" }) => void,
+): Promise<number> {
+  if (!hasReader()) return 0;
+  const targets = hits.filter((h) => h.url).slice(0, maxJudgmentReads());
+  if (targets.length === 0) return 0;
+
+  emit?.(`Opening ${targets.length} judgment(s) for the facts behind the cause title`);
+
+  let articles: Awaited<ReturnType<typeof readArticles>> = [];
+  try {
+    articles = await readArticles(
+      targets.map((h) => h.url as string),
+      "Return the judgment verbatim, including the cause title, the parties and the sides they appear on, the coram, the case number and the date.",
+      // The reader logs at its own levels ("fetch"/"cache"); the run log speaks
+      // in the collector's. Anything that is not a warning is a step.
+      (text, meta) => emit?.(text, { url: meta?.url, level: meta?.level === "warn" ? "warn" : "step" }),
+    );
+  } catch {
+    return 0; // the cause titles still stand
+  }
+
+  const byUrl = new Map(articles.map((a) => [a.url, a]));
+  let read = 0;
+
+  for (const hit of targets) {
+    const article = byUrl.get(hit.url as string);
+    if (!article?.text) continue;
+
+    const facts = parseJudgment(article.text);
+    if (facts.parties.length === 0 && !facts.court) continue;
+
+    const name = hit.entity ?? subject.company;
+    const side = sideOf(facts, name, entityMentioned);
+    read += 1;
+
+    hit.extra = {
+      ...hit.extra,
+      // `court` already feeds the brief's authority line — prefer the court the
+      // judgment names over whatever the search result guessed.
+      court: facts.court ?? hit.extra?.court,
+      caseNumber: facts.caseNumber,
+      decidedOn: facts.decidedOn,
+      side,
+      defending: side ? isDefendingSide(side) : undefined,
+      parties: facts.parties.map((p) => `${p.name} (${p.side})`),
+      bench: facts.bench,
+      counsel: facts.counsel.map((c) => `${c.side}: ${c.advocates}`),
+      judgmentSummary: summariseJudgment(facts, side, name),
+    };
+
+    if (side) {
+      emit?.(
+        `${name} is the ${side} in ${facts.caseNumber ?? "this matter"}` +
+          (facts.court ? ` before the ${facts.court}` : ""),
+        { url: hit.url },
+      );
+    }
+  }
+
+  return read;
+}
 
 /**
  * The terms to search this party under. The name alone for a company or a
