@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { DiligenceFinding, PersonDiligence, Severity } from "@/lib/types";
 import { severityStyle } from "./severity";
+import { diligenceStats } from "@/lib/verdict";
 
 // ── Board diligence ──────────────────────────────────────────────────────────
 // One card per director, each carrying their own verdict, the items found for
@@ -22,14 +23,10 @@ const VERDICT_LABEL: Record<Severity, string> = {
   info: "Unresolved",
 };
 
-export function diligenceStats(people: PersonDiligence[]) {
-  return {
-    total: people.length,
-    done: people.filter((p) => p.status === "done" || p.status === "error").length,
-    red: people.filter((p) => p.verdict === "red").length,
-    amber: people.filter((p) => p.verdict === "amber").length,
-  };
-}
+// The board tally lives in lib/verdict.ts, beside the verdict it feeds — two
+// counters is how the brief and the rail came to print different numbers for
+// the same board. Re-exported here so existing importers keep working.
+export { diligenceStats };
 
 export default function DiligenceGrid({ people, running }: { people: PersonDiligence[]; running: boolean }) {
   const { total, done } = diligenceStats(people);

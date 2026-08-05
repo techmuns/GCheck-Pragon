@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { RunEvent, RunEventLevel, SourceProgress } from "@/lib/types";
+import { clock } from "@/lib/text";
 
 // ── The research, as reasoning rather than as a log ─────────────────────────
 // The activity list said what the run executed, in the order it executed it:
@@ -214,12 +215,6 @@ function groupByPhase(events: RunEvent[]): Array<{ phase: Phase; events: RunEven
 
 /** A source that has stopped, however it stopped. */
 const SETTLED = new Set(["done", "skipped", "error", "locked"]);
-
-/** "1m 42s" / "42s" — the elapsed side, which is a fact. */
-function clock(ms: number): string {
-  const s = Math.max(0, Math.round(ms / 1000));
-  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
-}
 
 /**
  * How much longer the run can take, counted against what will actually

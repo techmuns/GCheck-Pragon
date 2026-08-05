@@ -106,3 +106,15 @@ export function cleanFindingText(text: string, subjectName?: string): string {
 
   return humanizeCaps(out) || out;
 }
+
+/**
+ * A duration, as the app has always printed one — "42s", "1m 42s".
+ *
+ * Kept here rather than beside its first caller because history now prints the
+ * same thing ("took 1m 42s") and two hand-rolled duration formats would drift
+ * the way two date formats do.
+ */
+export function clock(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+}

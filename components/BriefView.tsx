@@ -1,27 +1,35 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { Run, Severity } from "@/lib/types";
 import { apiUrl, authHeaders } from "@/lib/api";
 import { useHostContext } from "@/hooks/useHostContext";
 import { severityStyle } from "./severity";
 import { VERDICT_META } from "./BriefViz";
-import BriefPrint from "./BriefPrint";
+import BriefPrint, { type PrintVariant } from "./BriefPrint";
 import ConcernCards from "./ConcernCards";
 import NewsTable from "./NewsTable";
 import ProfileCard from "./ProfileCard";
-import DiligenceGrid, { diligenceStats } from "./DiligenceSection";
+import DiligenceGrid from "./DiligenceSection";
 import { RiskDial, RiskDrivers, NetworkContent, ScopeContent } from "./InstitutionalPanels";
 import CitationRef, { sourceUrls } from "./CitationRef";
 import { buildPrintBrief, formatGenerated, listConcerns, type Person } from "@/lib/printBrief";
 import { buildNetwork } from "@/lib/network";
 import { sourceTier } from "@/lib/risk";
 import { humanizeCaps } from "@/lib/text";
+import { reconcile } from "@/lib/verdict";
 import { buildCourtCases, courtHitsOf, type CourtCaseRow } from "@/lib/courtCases";
 
 interface Props {
   run: Run;
   onReset: () => void;
+  /** Rendered from the copy saved in this browser rather than from a live run.
+   *  The server no longer holds it, so nothing here may ask the server for
+   *  anything — the PDFs are produced locally instead. */
+  archived?: boolean;
+  /** Re-run this subject. Offered on a brief opened out of history, where the
+   *  reason for opening it is usually to decide whether it still holds. */
+  onRunAgain?: () => void;
   /** Screen these people, each as a pre-screen of their own. Absent when the
    *  brief is rendered somewhere that cannot start runs (the print preview). */
   onScreenPeople?: (people: Array<{ name: string; din?: string }>) => void;
@@ -40,8 +48,14 @@ interface Props {
 // answer, what is it based on, who are these people, and what did we not reach.
 // Sections are ruled rather than floated, so the eye moves down one sheet.
 
-const RANK: Record<Severity, number> = { red: 3, amber: 2, clear: 1, info: 0 };
-const worstOf = (a: Severity, b: Severity): Severity => (RANK[a] >= RANK[b] ? a : b);
+/** Whole days since a brief was written, for saying plainly how old a saved one
+ *  is. Null when the timestamp cannot be read — a guess about how stale a
+ *  document is would be worse than saying nothing about it. */
+function age(iso: string): number | null {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return null;
+  return Math.floor((Date.now() - t) / (24 * 60 * 60 * 1000));
+}
 
 /** A ruled section of the document. */
 function Section({
@@ -259,13 +273,24 @@ function Stat({ value, label, tint }: { value: string | number; label: string; t
   );
 }
 
-export default function BriefView({ run, onReset, onScreenPeople, onScreenCompanies }: Props) {
+export default function BriefView({
+  run,
+  onReset,
+  archived = false,
+  onRunAgain,
+  onScreenPeople,
+  onScreenCompanies,
+}: Props) {
   const { session } = useHostContext();
   const brief = run.brief;
   // Which document is being produced, so only the button that was pressed
   // shows the wait — a spinner on both reads as though both are running.
   const [downloading, setDownloading] = useState<"detailed" | "onepager" | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  /** Which document the print stylesheet should reveal. Only meaningful for an
+   *  archived brief, where both PDFs are produced by printing this page rather
+   *  than by asking the server to render one. */
+  const [printVariant, setPrintVariant] = useState<PrintVariant>("detailed");
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [clarificationsOpen, setClarificationsOpen] = useState(false);
   /** Key people ticked for a pre-screen of their own, keyed by DIN where the
@@ -274,6 +299,44 @@ export default function BriefView({ run, onReset, onScreenPeople, onScreenCompan
   /** Entities ticked off a director's own directorships, keyed by CIN where the
    *  register gave one and by name otherwise. */
   const [pickedCos, setPickedCos] = useState<Set<string>>(new Set());
+  /** Set when a variant has been chosen and the print dialog is waiting on the
+   *  portal to re-render under it. */
+  const [pendingPrint, setPendingPrint] = useState(false);
+
+  /**
+   * Print an archived brief.
+   *
+   * The two downloads are rendered server-side by driving Chromium over
+   * /print?id=…, and that route resolves the run out of the in-memory store —
+   * which by definition no longer holds an archived run. So a saved brief
+   * produces its PDFs the other way round: the same print component is already
+   * portalled to <body> and the print stylesheet already reveals only it, so
+   * printing this page yields the identical A4 document with no server in it.
+   * Both documents survive that way, one-pager included — it is a cut of the
+   * same component, not a second layout, and dropping it would quietly remove
+   * the sheet a partner actually carries into the meeting.
+   */
+  function printArchived(variant: PrintVariant): void {
+    setDownloadError(null);
+    setPrintVariant(variant);
+    setPendingPrint(true);
+  }
+
+  useEffect(() => {
+    if (!pendingPrint) return;
+    // No animation frame, and nothing cancellable. Clearing the trigger inside
+    // the effect that owns the frame changes the effect's own dependency, so
+    // React runs its cleanup — cancelling the frame before it can ever fire,
+    // and the print dialog never opens at all. The variant is already committed
+    // by the time a passive effect runs, because it was set in the same click,
+    // so the portal is showing the right document already.
+    setPendingPrint(false);
+    try {
+      window.print();
+    } catch {
+      setDownloadError("This browser refused to open the print dialog.");
+    }
+  }, [pendingPrint]);
 
   /**
    * Get the PDF out of an embedded page.
@@ -325,7 +388,6 @@ export default function BriefView({ run, onReset, onScreenPeople, onScreenCompan
   const printBrief = buildPrintBrief(run, formatGenerated(run.createdAt));
   const concerns = listConcerns(run);
   const people = run.diligence ?? [];
-  const board = diligenceStats(people);
   const isCompany = run.subject.type !== "director";
 
   // The structured people — the same rows the print sheet uses, which unlike
@@ -369,21 +431,16 @@ export default function BriefView({ run, onReset, onScreenPeople, onScreenCompan
   // These used to disagree in public: the banner read RED FLAGS while the tally
   // beside it read "0 red flags", because the verdict was the worst severity
   // across every section while the count only ever looked at the itemised
-  // concerns. Both are now taken from one tally, and the board — which the
-  // assembler never saw — is folded in, so a director carrying a red flag is
-  // visible in the company's own verdict.
-  const counts: Record<Severity, number> = { red: 0, amber: 0, clear: 0, info: 0 };
-  for (const c of concerns) counts[c.severity] += 1;
-  for (const s of brief.sections) {
-    if (s.id === "red-flags") continue;
-    for (const f of s.findings) counts[f.severity] += 1;
-  }
-  const redTotal = counts.red + board.red;
-  const amberTotal = counts.amber + board.amber;
-  let verdict: Severity = brief.verdict;
-  for (const p of people) if (p.verdict) verdict = worstOf(verdict, p.verdict);
-  if (redTotal > 0) verdict = worstOf(verdict, "red");
-  else if (amberTotal > 0 && verdict === "red") verdict = "amber";
+  // concerns. Both come from one tally, with the board — which the assembler
+  // never saw — folded in, so a director carrying a red flag is visible in the
+  // company's own verdict. That tally now lives in lib/verdict.ts, because the
+  // run rail and the history list show the same verdict and had each grown
+  // their own reading of it.
+  const rec = reconcile(run);
+  const board = rec?.board ?? { total: people.length, done: 0, red: 0, amber: 0 };
+  const verdict: Severity = rec?.verdict ?? brief.verdict;
+  const redTotal = rec?.red ?? 0;
+  const amberTotal = rec?.amber ?? 0;
 
   const meta = VERDICT_META[verdict] ?? VERDICT_META.info;
   const takeaway = buildTakeaway(run, redTotal, amberTotal, board.red);
@@ -488,15 +545,17 @@ export default function BriefView({ run, onReset, onScreenPeople, onScreenCompan
     <div className="fade-in mx-auto w-full max-w-5xl">
       {/* Action bar */}
       <div className="no-print mb-5 flex items-center justify-between gap-3">
-        <span className="eyebrow">Pre-meeting brief</span>
+        <span className="eyebrow">{archived ? "Saved brief" : "Pre-meeting brief"}</span>
         <div className="flex items-center gap-2">
           {/* Two documents off one brief. The detailed record is everything
               the run produced; the one-pager is its executive sheet alone, for
               the reader walking into the meeting who wants the answer rather
-              than the file behind it. */}
+              than the file behind it. Both survive on a saved brief — they are
+              printed here rather than rendered by a server that no longer has
+              the run. */}
           <button
             type="button"
-            onClick={() => download("detailed")}
+            onClick={() => (archived ? printArchived("detailed") : download("detailed"))}
             disabled={downloading !== null}
             className="rounded-lg border border-[rgba(23,43,77,0.14)] bg-white px-3.5 py-2 text-[12.5px] font-medium text-navy-primary transition hover:bg-ice disabled:opacity-60"
           >
@@ -504,21 +563,40 @@ export default function BriefView({ run, onReset, onScreenPeople, onScreenCompan
           </button>
           <button
             type="button"
-            onClick={() => download("onepager")}
+            onClick={() => (archived ? printArchived("onepager") : download("onepager"))}
             disabled={downloading !== null}
             className="rounded-lg border border-[rgba(23,43,77,0.14)] bg-white px-3.5 py-2 text-[12.5px] font-medium text-navy-primary transition hover:bg-ice disabled:opacity-60"
           >
             {downloading === "onepager" ? "Preparing…" : "↓ One Pager"}
           </button>
+          {onRunAgain && (
+            <button
+              type="button"
+              onClick={onRunAgain}
+              className="rounded-lg border border-[rgba(23,43,77,0.14)] bg-white px-3.5 py-2 text-[12.5px] font-medium text-navy-primary transition hover:bg-ice"
+            >
+              Run again
+            </button>
+          )}
           <button
             type="button"
             onClick={onReset}
             className="rounded-lg border border-[rgba(23,43,77,0.14)] bg-white px-3.5 py-2 text-[12.5px] font-medium text-navy-primary transition hover:bg-ice"
           >
-            New search
+            {archived ? "Back to history" : "New search"}
           </button>
         </div>
       </div>
+
+      {archived && (
+        <p className="no-print mb-3 rounded-lg bg-ice px-3 py-2 text-[12px] leading-relaxed text-ink-secondary">
+          Rebuilt from the copy saved in this browser on {formatGenerated(run.createdAt)} — the server no longer holds
+          this run, so the two documents above are printed from this page rather than rendered by it.
+          {age(run.createdAt) !== null && age(run.createdAt)! >= 7 && (
+            <> Nothing that has happened in the {age(run.createdAt)} days since is in it; run it again for that.</>
+          )}
+        </p>
+      )}
 
       {downloadError && (
         <p
@@ -530,11 +608,22 @@ export default function BriefView({ run, onReset, onScreenPeople, onScreenCompan
           }}
           role="status"
         >
-          {downloadError} You can still open it at{" "}
-          <a className="underline" href={apiUrl(`/print?id=${run.id}`)} target="_blank" rel="noopener noreferrer">
-            the print view
-          </a>
-          .
+          {downloadError}{" "}
+          {archived ? (
+            // No print view to offer: the archived brief lives in this browser
+            // and /print?id= resolves against the server store, which is the
+            // 404 the saved copy exists to route around. Saying so is better
+            // than a link that dead-ends.
+            <>The saved brief can’t be exported from inside an embedded view — open this page in its own tab.</>
+          ) : (
+            <>
+              You can still open it at{" "}
+              <a className="underline" href={apiUrl(`/print?id=${run.id}`)} target="_blank" rel="noopener noreferrer">
+                the print view
+              </a>
+              .
+            </>
+          )}
         </p>
       )}
 
@@ -842,8 +931,10 @@ export default function BriefView({ run, onReset, onScreenPeople, onScreenCompan
         </p>
       </div>
 
-      {/* The download output — print-only, portalled to <body>. */}
-      {printBrief && <BriefPrint brief={printBrief} />}
+      {/* The download output — print-only, portalled to <body>. The variant
+          only ever moves for an archived brief, whose PDFs are printed from
+          here; a live run's are rendered server-side and never touch it. */}
+      {printBrief && <BriefPrint brief={printBrief} variant={printVariant} />}
     </div>
   );
 }

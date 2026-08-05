@@ -2,6 +2,7 @@
 
 import { severityStyle } from "./severity";
 import { runProgress, type TrackedRun } from "@/lib/useRuns";
+import { reconcile } from "@/lib/verdict";
 
 // ── The run rail ────────────────────────────────────────────────────────────
 // One row, always in the same place, showing every pre-screen this session has
@@ -19,10 +20,24 @@ interface Props {
   activeKey: string | null;
   onSelect: (key: string | null) => void;
   onClose: (key: string) => void;
+  onOpenHistory: () => void;
+  historyOpen: boolean;
+  historyCount: number;
 }
 
-export default function RunSwitcher({ runs, activeKey, onSelect, onClose }: Props) {
-  if (runs.length === 0) return null;
+export default function RunSwitcher({
+  runs,
+  activeKey,
+  onSelect,
+  onClose,
+  onOpenHistory,
+  historyOpen,
+  historyCount,
+}: Props) {
+  // The bar used to disappear whenever this session had no runs — which on a
+  // phone is exactly the screen a returning user wants their history from, and
+  // the one place it was unreachable.
+  if (runs.length === 0 && historyCount === 0) return null;
 
   const working = runs.filter((t) => t.phase === "starting" || t.phase === "running").length;
 
@@ -31,7 +46,7 @@ export default function RunSwitcher({ runs, activeKey, onSelect, onClose }: Prop
       <div className="card-surface flex items-center gap-2 p-2">
         <div className="hidden shrink-0 pl-1.5 pr-1 sm:block">
           <span className="eyebrow whitespace-nowrap">
-            {working > 0 ? `${working} running` : "Searches"}
+            {working > 0 ? `${working} running` : runs.length > 0 ? "Searches" : "History"}
           </span>
         </div>
 
@@ -50,9 +65,23 @@ export default function RunSwitcher({ runs, activeKey, onSelect, onClose }: Prop
 
         <button
           type="button"
+          onClick={onOpenHistory}
+          title="Everything run on this device, with the date and time"
+          className={`shrink-0 rounded-lg border px-3 py-2 text-[12.5px] font-semibold transition ${
+            historyOpen
+              ? "border-navy-primary/30 bg-white text-navy-deep shadow-sm"
+              : "border-[rgba(23,43,77,0.14)] bg-white/70 text-navy-primary hover:bg-white"
+          }`}
+        >
+          <span aria-hidden>⟲</span> History
+          {historyCount > 0 && <span className="tabular ml-1.5 opacity-70">{historyCount}</span>}
+        </button>
+
+        <button
+          type="button"
           onClick={() => onSelect(null)}
           className={`shrink-0 rounded-lg border px-3 py-2 text-[12.5px] font-semibold transition ${
-            activeKey === null
+            activeKey === null && !historyOpen
               ? "border-navy-primary/30 bg-white text-navy-deep shadow-sm"
               : "border-[rgba(23,43,77,0.14)] bg-white/70 text-navy-primary hover:bg-white"
           }`}
@@ -77,7 +106,8 @@ function RunTab({
 }) {
   const busy = t.phase === "starting" || t.phase === "running";
   const { done, total } = runProgress(t);
-  const verdict = t.run?.brief?.verdict;
+  // Reconciled, so this tab and the same run's history row agree.
+  const verdict = t.run ? reconcile(t.run)?.verdict : undefined;
 
   const sub = busy
     ? total > 0
@@ -146,7 +176,8 @@ export function StatusMark({ run: t, done, total }: { run: TrackedRun; done: num
   const busy = t.phase === "starting" || t.phase === "running";
 
   if (!busy) {
-    const colour = t.phase === "error" ? severityStyle.red.dot : severityStyle[t.run?.brief?.verdict ?? "info"].dot;
+    const settled = t.run ? reconcile(t.run)?.verdict : undefined;
+    const colour = t.phase === "error" ? severityStyle.red.dot : severityStyle[settled ?? "info"].dot;
     return (
       <span
         className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] font-bold text-white"

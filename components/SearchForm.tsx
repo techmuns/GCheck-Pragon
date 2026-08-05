@@ -2,13 +2,17 @@
 
 import { useEffect, useRef, useState } from "react";
 import AutocompleteField from "./AutocompleteField";
-import { getRecentSearches, removeRecentSearch, type RecentSearch } from "@/lib/history";
-import { displayName } from "@/lib/directorId";
+import { severityStyle } from "./severity";
+import { useArchive } from "@/lib/useArchive";
+import { countSearches } from "@/lib/archive";
+import { formatGenerated } from "@/lib/printBrief";
 
 type Mode = "company" | "director";
 
 interface Props {
   onSubmit: (company: string, promoters: string[], type?: Mode, ticker?: string) => void;
+  /** Show the whole record rather than the five most recent subjects. */
+  onOpenHistory?: () => void;
   busy?: boolean;
   /** The company the Munshot host currently has selected, and its ticker. They
    *  seed the box so opening Paragon from a stock in the host starts on that
@@ -24,17 +28,27 @@ interface Props {
 
 // The front door. Choose what you're screening — a company or an individual
 // director/person — then run the same governance checks. Clutter-free by design.
-export default function SearchForm({ onSubmit, busy, hostCompany, hostTicker, awaitingSession }: Props) {
+export default function SearchForm({
+  onSubmit,
+  onOpenHistory,
+  busy,
+  hostCompany,
+  hostTicker,
+  awaitingSession,
+}: Props) {
   const [mode, setMode] = useState<Mode>("company");
   const [company, setCompany] = useState("");
   // A ticker captured from a picked company suggestion. It rides along to enable
   // exchange-filings lookup, and is cleared the moment the text is edited by
   // hand so a stale ticker can never attach to a different company.
   const [ticker, setTicker] = useState<string | undefined>();
-  const [recent, setRecent] = useState<RecentSearch[]>([]);
-
-  // localStorage is client-only — read after mount to avoid a hydration mismatch.
-  useEffect(() => setRecent(getRecentSearches()), []);
+  // The five most recent distinct subjects, off the same record the History
+  // screen reads. The hook handles the read-after-mount, and keeps this list in
+  // step as runs land rather than freezing it at whatever was there on mount.
+  const { recent, entries, hide } = useArchive();
+  // The same figure the rail's badge shows — both are links to the same screen,
+  // and quoting two different numbers for it is a small lie about what is there.
+  const pastRuns = countSearches(entries);
 
   // ── The host's selected stock, offered once ──────────────────────────────
   // Changing the stock in Munshot is a deliberate act, so the box follows it.
@@ -127,17 +141,31 @@ export default function SearchForm({ onSubmit, busy, hostCompany, hostTicker, aw
 
       {recent.length > 0 && (
         <div className="mt-6 border-t border-navy-primary/8 pt-4">
-          <div className="eyebrow mb-2">Recent searches</div>
+          <div className="mb-2 flex items-baseline justify-between gap-3">
+            <span className="eyebrow">Recent searches</span>
+            {onOpenHistory && (
+              <button
+                type="button"
+                onClick={onOpenHistory}
+                className="text-[12px] font-medium text-navy-primary transition hover:text-navy-deep"
+              >
+                See all {pastRuns}
+              </button>
+            )}
+          </div>
           <div className="flex flex-col gap-1.5">
             {recent.map((r) => (
               <div
-                key={`${r.type ?? "company"}|${r.company}|${r.promoters.join(",")}`}
+                key={r.id}
                 className="group flex items-center gap-2 rounded-lg border border-navy-primary/10 pr-2 transition hover:border-navy-primary/25 hover:bg-navy-primary/5"
               >
                 <button
                   type="button"
                   disabled={busy}
-                  onClick={() => onSubmit(r.company, r.promoters, r.type ?? "company")}
+                  // The raw query, not the display name — for a director that
+                  // carries the DIN, so re-running screens the same person; and
+                  // the ticker rides along, so exchange filings survive a re-run.
+                  onClick={() => onSubmit(r.rawQuery, r.promoters, r.type, r.ticker)}
                   className="flex min-w-0 flex-1 items-center justify-between px-3 py-2 text-left disabled:opacity-50"
                 >
                   <span className="min-w-0">
@@ -147,9 +175,18 @@ export default function SearchForm({ onSubmit, busy, hostCompany, hostTicker, aw
                       >
                         {r.type === "director" ? "Director" : "Company"}
                       </span>
-                      {/* Stored with its DIN so re-running keeps the same
-                          person; shown as just the person. */}
-                      <span className="truncate">{r.type === "director" ? displayName(r.company) : r.company}</span>
+                      <span className="truncate">{r.company}</span>
+                    </span>
+                    {/* When it was last run, and what it said. The timestamp was
+                        always recorded and never shown, which left the list
+                        unable to answer the one question asked of it. */}
+                    <span className="tabular mt-0.5 block truncate text-[11px] text-ink-secondary/85">
+                      {formatGenerated(r.startedAt)}
+                      {r.outcome === "error"
+                        ? " · couldn’t finish"
+                        : r.verdict
+                          ? ` · ${severityStyle[r.verdict].label}`
+                          : ""}
                     </span>
                     {r.promoters.length > 0 && (
                       <span className="mt-0.5 block truncate text-[12px] text-ink-secondary">{r.promoters.join(", ")}</span>
@@ -161,16 +198,32 @@ export default function SearchForm({ onSubmit, busy, hostCompany, hostTicker, aw
                 </button>
                 <button
                   type="button"
-                  onClick={() => setRecent(removeRecentSearch({ type: r.type, company: r.company, promoters: r.promoters }))}
+                  // Takes the subject off this short list only. The run itself
+                  // stays in History — this button has always been a tidy-up,
+                  // and it must not quietly become the thing that destroys the
+                  // only remaining copy of a brief.
+                  onClick={() => hide(r.id)}
                   className="shrink-0 rounded-md px-1.5 py-1 text-[15px] leading-none text-navy-primary/40 transition hover:bg-coral/10 hover:text-coral"
-                  aria-label={`Remove ${r.company} from recent searches`}
-                  title="Remove"
+                  aria-label={`Take ${r.company} off recent searches — it stays in History`}
+                  title="Take off this list — it stays in History"
                 >
                   ×
                 </button>
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {recent.length === 0 && pastRuns > 0 && onOpenHistory && (
+        <div className="mt-6 border-t border-navy-primary/8 pt-4">
+          <button
+            type="button"
+            onClick={onOpenHistory}
+            className="text-[12.5px] font-medium text-navy-primary transition hover:text-navy-deep"
+          >
+            See all {pastRuns} past run{pastRuns === 1 ? "" : "s"}
+          </button>
         </div>
       )}
     </div>
