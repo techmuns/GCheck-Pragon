@@ -36,6 +36,11 @@ export const env = {
   munshotReaderUrl: process.env.MUNSHOT_READER_URL || "https://fastapi.muns.io/tools/web-reader",
   firecrawlApiKey: process.env.FIRECRAWL_API_KEY,
   firecrawlUrl: process.env.FIRECRAWL_URL || "https://api.firecrawl.dev/v1/scrape",
+  // Firecrawl also answers searches, not just page reads. It sits at the back of
+  // the web-search chain as the durable floor: the keyless engine behind it is
+  // blocked from most servers, so without this a deploy holding only a Munshot
+  // token has nothing to fall back to when that token lapses.
+  firecrawlSearchUrl: process.env.FIRECRAWL_SEARCH_URL || "https://api.firecrawl.dev/v1/search",
 
   // Exchange filings & announcements (BSE/NSE/DRHP/screener.in). Same Muns
   // platform as the search backend, so it reuses MUNSHOT_TOKEN unless a

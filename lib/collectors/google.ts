@@ -41,7 +41,7 @@ export interface WebResult {
 
 const MAX_PER_ENTITY = 8;
 
-export type Backend = "munshot" | "serpapi" | "programmable" | "fallback" | "gnews";
+export type Backend = "munshot" | "serpapi" | "programmable" | "firecrawl" | "fallback" | "gnews";
 
 /**
  * The breaker key for a backend: the *service* behind it, not its slot in a
@@ -72,6 +72,10 @@ export function backendChain(): Backend[] {
   if (env.munshotToken) chain.push("munshot");
   if (env.serpApiKey) chain.push("serpapi");
   if (env.googleApiKey && env.googleCx) chain.push("programmable");
+  // Firecrawl last among the keyed backends. It is metered and slower than the
+  // dedicated search APIs, so it earns its place only when they are absent or
+  // failing — but it is a real floor, which the keyless engine below it is not.
+  if (env.firecrawlApiKey) chain.push("firecrawl");
   chain.push("fallback");
   return chain;
 }
@@ -80,7 +84,8 @@ const BACKEND_NOTE: Record<Backend, string | undefined> = {
   munshot: undefined,
   serpapi: undefined,
   programmable: undefined,
-  fallback: "Keyless fallback engine (blocked from most servers — set MUNSHOT_TOKEN, SERPAPI_KEY, or GOOGLE_API_KEY).",
+  firecrawl: "Firecrawl search — the durable floor when no dedicated search credential is answering.",
+  fallback: "Keyless fallback engine (blocked from most servers — set MUNSHOT_TOKEN, SERPAPI_KEY, GOOGLE_API_KEY, or FIRECRAWL_API_KEY).",
   gnews: "Keyless Google News feed — headlines only, and no web results.",
 };
 
@@ -366,6 +371,8 @@ export async function runBackend(backend: Backend, query: string): Promise<WebRe
       return searchSerpApi(query);
     case "programmable":
       return searchProgrammable(query);
+    case "firecrawl":
+      return searchFirecrawl(query);
     default:
       return searchDuckDuckGo(query);
   }
@@ -484,6 +491,54 @@ async function searchSerpApi(query: string): Promise<WebResult[]> {
     url: o.link ? String(o.link) : undefined,
     snippet: o.snippet ? String(o.snippet) : undefined,
   }));
+}
+
+/**
+ * Firecrawl search — the same credential that reads article pages also answers
+ * searches, so a deploy that has one has a search floor whether or not it holds
+ * a Munshot token.
+ *
+ * Parsed defensively on purpose. Firecrawl has shipped more than one envelope
+ * for this endpoint (a bare `data` array, and a `data.web` array once sources
+ * were split out), and the field naming a result's link has varied between
+ * `url` and `link`. Reading all of them costs a few lines here and spares the
+ * whole sweep going dark over a response shape.
+ */
+async function searchFirecrawl(query: string): Promise<WebResult[]> {
+  const res = await fetchWithTimeout(env.firecrawlSearchUrl, {
+    method: "POST",
+    timeoutMs: 20000,
+    headers: {
+      "Content-Type": "application/json",
+      accept: "application/json",
+      Authorization: `Bearer ${env.firecrawlApiKey}`,
+    },
+    body: JSON.stringify({ query, limit: 10 }),
+  });
+  if (!res.ok) throw await backendFailure("firecrawl", "Firecrawl search", res);
+  return parseFirecrawl(await res.json());
+}
+
+/** Exported for the resilience checks — the shapes are the whole risk here. */
+export function parseFirecrawl(data: unknown): WebResult[] {
+  const body = (data ?? {}) as Record<string, unknown>;
+  const inner = (body.data ?? {}) as Record<string, unknown>;
+  const rows =
+    (Array.isArray(body.data) && body.data) ||
+    (Array.isArray(inner.web) && inner.web) ||
+    (Array.isArray(body.results) && body.results) ||
+    [];
+
+  return (rows as Record<string, unknown>[])
+    .map((o) => {
+      const url = o.url ?? o.link;
+      return {
+        title: String(o.title ?? ""),
+        url: url ? String(url) : undefined,
+        snippet: o.description ? String(o.description) : o.snippet ? String(o.snippet) : undefined,
+      };
+    })
+    .filter((r) => Boolean(r.url));
 }
 
 async function searchProgrammable(query: string): Promise<WebResult[]> {
