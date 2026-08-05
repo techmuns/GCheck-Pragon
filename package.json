@@ -15,9 +15,10 @@
     "check:attribution": "tsx scripts/check-attribution.mts",
     "check:clarifications": "tsx scripts/check-clarifications.mts",
     "check:search": "tsx scripts/check-search-resilience.mts",
+    "check:archive": "tsx scripts/check-archive.mts",
     "healthcheck:llm": "node scripts/llm-healthcheck.mjs",
     "test:llm": "node scripts/test-bedrock-transport.mjs",
-    "test": "npm run check:keywords && npm run check:attribution && npm run check:clarifications && npm run check:search && npm run test:llm"
+    "test": "npm run check:keywords && npm run check:attribution && npm run check:clarifications && npm run check:search && npm run check:archive && npm run test:llm"
   },
   "dependencies": {
     "next": "14.2.5",

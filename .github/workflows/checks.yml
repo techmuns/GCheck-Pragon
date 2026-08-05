@@ -42,6 +42,12 @@ jobs:
       # behaviour it guards only ever shows up when the credentials are broken
       # and there is no way to reproduce that in a live run.
       - run: npm run check:search
+      # A saved brief, diffed against the run it was saved from. Re-opening a
+      # past run renders a trimmed copy, and every read site in the brief
+      # tolerates a missing field — so a trim that goes too far shows up as a
+      # quieter document rather than as a failure. This is what notices.
+      # Fixtures only: no credential, no network.
+      - run: npm run check:archive
 
   registry-parser:
     runs-on: ubuntu-latest

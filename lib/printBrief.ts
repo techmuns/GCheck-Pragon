@@ -1593,8 +1593,13 @@ function buildClarifications(run: Run): PrintClarification[] {
     if (c.status !== "done") continue;
     const items = c.excluded ?? [];
     const searched = c.queries?.length ?? 0;
+    // What the source returned, not what this copy of it kept — a brief
+    // re-opened from the archive holds a trimmed hit list, and reading its
+    // length would turn "42 results" into a smaller number and, for a source
+    // trimmed to nothing, into "nothing on record".
+    const found = c.originalHits ?? c.hits.length;
 
-    if (c.hits.length === 0) {
+    if (found === 0) {
       out.push({
         source: c.sourceName,
         text: searched > 0
@@ -1605,7 +1610,7 @@ function buildClarifications(run: Run): PrintClarification[] {
     } else if (items.length > 0) {
       out.push({
         source: c.sourceName,
-        text: `${c.hits.length} result${c.hits.length === 1 ? "" : "s"} kept. Also came up, and not counted against the subject:`,
+        text: `${found} result${found === 1 ? "" : "s"} kept. Also came up, and not counted against the subject:`,
         items,
       });
     }

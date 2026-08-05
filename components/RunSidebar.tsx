@@ -4,6 +4,7 @@ import Link from "next/link";
 import { severityStyle } from "./severity";
 import RunSwitcher, { StatusMark } from "./RunSwitcher";
 import { runProgress, type TrackedRun } from "@/lib/useRuns";
+import { reconcile } from "@/lib/verdict";
 
 // ── The run rail ─────────────────────────────────────────────────────────────
 // Every pre-screen this session has going, kept in one place you can move
@@ -21,9 +22,24 @@ interface Props {
   activeKey: string | null;
   onSelect: (key: string | null) => void;
   onClose: (key: string) => void;
+  /** Show every past run, not just the ones this session is tracking. */
+  onOpenHistory: () => void;
+  historyOpen: boolean;
+  /** Past runs that read as searches made from the front door — children are
+   *  reached through their parent, so counting them would put a number on the
+   *  rail that matches nothing on any screen. */
+  historyCount: number;
 }
 
-export default function RunSidebar({ runs, activeKey, onSelect, onClose }: Props) {
+export default function RunSidebar({
+  runs,
+  activeKey,
+  onSelect,
+  onClose,
+  onOpenHistory,
+  historyOpen,
+  historyCount,
+}: Props) {
   const working = runs.filter((t) => t.phase === "starting" || t.phase === "running").length;
 
   return (
@@ -36,18 +52,39 @@ export default function RunSidebar({ runs, activeKey, onSelect, onClose }: Props
           <div className="eyebrow mt-1">Governance Pre-Screen</div>
         </div>
 
-        {/* New search */}
+        {/* New search, and the record of everything already run. Both are
+            states of this page rather than destinations — leaving for a route
+            would stop the poll that advances every run in flight — so they are
+            buttons, not links, and only one of them is ever lit. */}
         <div className="px-3">
           <button
             type="button"
             onClick={() => onSelect(null)}
             className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-[13px] font-semibold transition ${
-              activeKey === null
+              activeKey === null && !historyOpen
                 ? "bg-navy-primary text-white shadow-sm"
                 : "border border-[rgba(23,43,77,0.14)] bg-white text-navy-primary hover:bg-ice"
             }`}
           >
             <span className="text-[16px] leading-none">+</span> New search
+          </button>
+          <button
+            type="button"
+            onClick={onOpenHistory}
+            title="Everything run on this device, with the date and time"
+            className={`mt-1.5 flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-[13px] font-semibold transition ${
+              historyOpen
+                ? "bg-navy-primary text-white shadow-sm"
+                : "border border-[rgba(23,43,77,0.14)] bg-white text-navy-primary hover:bg-ice"
+            }`}
+          >
+            <span className="flex items-center gap-2">
+              <span className="text-[13px] leading-none" aria-hidden>
+                ⟲
+              </span>{" "}
+              History
+            </span>
+            {historyCount > 0 && <span className="tabular text-[11px] font-semibold opacity-70">{historyCount}</span>}
           </button>
         </div>
 
@@ -99,9 +136,17 @@ export default function RunSidebar({ runs, activeKey, onSelect, onClose }: Props
         </div>
       </aside>
 
-      {/* Mobile / narrow: the horizontal switcher, unchanged. */}
+      {/* Mobile / narrow: the horizontal switcher, carrying the same controls. */}
       <div className="no-print px-4 pt-6 sm:px-6 lg:hidden">
-        <RunSwitcher runs={runs} activeKey={activeKey} onSelect={onSelect} onClose={onClose} />
+        <RunSwitcher
+          runs={runs}
+          activeKey={activeKey}
+          onSelect={onSelect}
+          onClose={onClose}
+          onOpenHistory={onOpenHistory}
+          historyOpen={historyOpen}
+          historyCount={historyCount}
+        />
       </div>
     </>
   );
@@ -120,7 +165,9 @@ function SidebarRow({
 }) {
   const busy = t.phase === "starting" || t.phase === "running";
   const { done, total } = runProgress(t);
-  const verdict = t.run?.brief?.verdict;
+  // The reconciled verdict, not the raw one off the brief — the rail sits
+  // beside History, and the two must not label the same run differently.
+  const verdict = t.run ? reconcile(t.run)?.verdict : undefined;
 
   const sub = busy
     ? total > 0

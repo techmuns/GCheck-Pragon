@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiUrl } from "./api";
-import { addRecentSearch } from "./history";
+import { recordError, recordFinish, recordServerId, recordStart, recordUnknown } from "./archiveStore";
 import { displayName } from "./directorId";
 import type { Run, Subject } from "./types";
 
@@ -113,9 +113,11 @@ export interface StartOptions {
    *  whichever finished being created last would take the reader off the brief
    *  they are still reading. */
   keepFocus?: boolean;
-  /** Keep this out of the front page's recent-search list. A child run is
-   *  reachable from its parent, and five of them from one click would flush
-   *  everything the user actually searched for out of that list. */
+  /** Keep this out of the front page's short recent list. The run is still
+   *  recorded in history — it happened, and it is one of the things the user
+   *  will look for later — but a child run is reachable from its parent, and
+   *  five of them from one click would flush everything the user actually
+   *  searched for out of the five-item list on the front door. */
   skipHistory?: boolean;
 }
 
@@ -175,6 +177,11 @@ export function useRuns(): UseRuns {
           const res = await fetch(apiUrl(`/api/research/${s.serverId}`));
           if (!res.ok) return null;
           const run: Run = await res.json();
+          // A run that landed while the tab was shut is archived here — this is
+          // the only place that finish is ever observed. `recordFinish` is a
+          // no-op for a run already saved, so the re-attach (which runs on
+          // every mount, not only after a crash) costs nothing on a revisit.
+          if (run.status === "complete") void recordFinish(s.key, run, s.startedAt);
           return {
             key: s.key,
             serverId: s.serverId,
@@ -213,7 +220,14 @@ export function useRuns(): UseRuns {
       await Promise.all(
         live.map(async (t) => {
           const key = t.key;
-          const fail = (message: string) => patch(key, { phase: "error", error: message });
+          const fail = (message: string) => {
+            // History records what the client actually saw. `recordError`
+            // refuses to downgrade a run already archived, so a poll losing
+            // contact with a server that has moved on cannot relabel a
+            // successful run as a failure.
+            recordError(key, message);
+            patch(key, { phase: "error", error: message });
+          };
 
           if (Date.now() - t.startedAt > RUN_TIMEOUT_MS) {
             fail("This pre-screen is taking longer than expected. Please run it again.");
@@ -240,9 +254,14 @@ export function useRuns(): UseRuns {
             const subject = run.subject ?? t.subject;
 
             if (run.status === "complete") {
+              // The one place a live finish is recorded. `recordFinish` guards
+              // itself against a second call, so a tick that fires before the
+              // phase patch has committed costs one write, not two.
+              void recordFinish(key, run, t.startedAt);
               // Only a run that finished out of sight earns an attention dot.
               patch(key, { run, subject, phase: "done", seen: activeRef.current === key });
             } else if (run.status === "error") {
+              recordError(key, run.error ?? "The pre-screen failed.");
               patch(key, { run, subject, phase: "error", error: run.error ?? "The pre-screen failed." });
             } else {
               patch(key, { run, subject, phase: "running" });
@@ -290,9 +309,19 @@ export function useRuns(): UseRuns {
       setRuns((prev) => (opts.parentKey ? insertUnderParent(prev, fresh, opts.parentKey) : promote(prev, fresh)));
       if (!opts.keepFocus) setActiveKey(key);
 
-      // Stored raw, so "run again" re-runs the same person rather than falling
-      // back to their name and picking up whoever else shares it.
-      if (!opts.skipHistory) addRecentSearch({ type, company, promoters });
+      // Recorded the moment it starts, and recorded with the raw query — the
+      // DIN-decorated string, not the display name — so "run again" re-runs the
+      // same person rather than falling back to their name and picking up
+      // whoever else shares it. A run that never gets a server id still leaves
+      // a row saying it was attempted.
+      recordStart({
+        id: key,
+        rawQuery: company,
+        subject,
+        startedAt: fresh.startedAt,
+        parentId: opts.parentKey,
+        showInRecent: !opts.skipHistory,
+      });
 
       void (async () => {
         try {
@@ -306,9 +335,12 @@ export function useRuns(): UseRuns {
             throw new Error(body.error ?? "Could not start the pre-screen.");
           }
           const { id } = await res.json();
+          recordServerId(key, id);
           patch(key, { serverId: id, phase: "running" });
         } catch (e) {
-          patch(key, { phase: "error", error: e instanceof Error ? e.message : "Something went wrong." });
+          const message = e instanceof Error ? e.message : "Something went wrong.";
+          recordError(key, message);
+          patch(key, { phase: "error", error: message });
         }
       })();
     },
@@ -329,6 +361,15 @@ export function useRuns(): UseRuns {
     // read as searches from the front door that the user never made.
     const doomed = new Set<string>([key]);
     for (const t of runsRef.current) if (t.parentKey === key) doomed.add(t.key);
+
+    // Closing stops watching, not running — so a run still in flight is
+    // recorded as exactly that. Left alone its history row would sit at
+    // "running" until the staleness heuristic relabelled it as one that never
+    // landed, which is the opposite of what the close button's own tooltip
+    // promises. History can still ask the server for it later.
+    for (const t of runsRef.current) {
+      if (doomed.has(t.key) && (t.phase === "starting" || t.phase === "running")) recordUnknown(t.key);
+    }
 
     setRuns((prev) => prev.filter((t) => !doomed.has(t.key)));
     setActiveKey((cur) => (cur && doomed.has(cur) ? null : cur));
