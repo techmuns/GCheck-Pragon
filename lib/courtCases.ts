@@ -58,6 +58,20 @@ export interface CourtCaseRow {
   /** The judgment was opened and parsed, as opposed to title-only. Lets the UI
    *  be honest about which rows are thin. */
   readFromJudgment: boolean;
+
+  // ── Substance, from the body of the judgment ─────────────────────────────
+  /** Why the matter arose. */
+  dispute?: string;
+  /** What the party who started it asked the court for. */
+  reliefSought?: string;
+  /** How the court disposed of it, where the judgment says. */
+  outcome?: string;
+  /** What it means commercially for the subject. */
+  stake?: string;
+  /** Sums the judgment names. Read by regex from the text, never generated. */
+  amounts: string[];
+  /** The verbatim lines the narrative fields rest on. */
+  evidence: string[];
 }
 
 function str(v: unknown): string | undefined {
@@ -167,6 +181,12 @@ export function buildCourtCases(hits: RawHit[], subjectName: string, refByUrl?: 
       url: h.url,
       ref: h.url ? refByUrl?.get(h.url) : undefined,
       readFromJudgment,
+      dispute: str(h.extra?.dispute),
+      reliefSought: str(h.extra?.reliefSought),
+      outcome: str(h.extra?.outcome),
+      stake: str(h.extra?.stake),
+      amounts: list(h.extra?.amounts),
+      evidence: list(h.extra?.evidence),
     };
   });
 }

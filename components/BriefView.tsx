@@ -888,6 +888,37 @@ function CourtCaseTable({ rows, urlByRef }: { rows: CourtCaseRow[]; urlByRef: Ma
               the registry it came from. */}
           <div className="mt-1 text-[12px] italic leading-snug text-ink-secondary">{c.title}</div>
 
+          {/* What the dispute is about, read from the body of the judgment.
+              Sits above the header facts because it is the answer; the court and
+              the case number are how you check it. */}
+          {c.dispute && (
+            <p className="mt-2 text-[13px] leading-relaxed text-ink-primary">{c.dispute}</p>
+          )}
+          {c.reliefSought && (
+            <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-secondary">
+              <span className="font-semibold text-ink-primary">Sought: </span>
+              {c.reliefSought}
+            </p>
+          )}
+          {c.outcome && (
+            <p className="mt-1 text-[12.5px] leading-relaxed text-ink-secondary">
+              <span className="font-semibold text-ink-primary">Outcome: </span>
+              {c.outcome}
+            </p>
+          )}
+          {c.amounts.length > 0 && (
+            <p className="mt-1.5 text-[12.5px] leading-relaxed">
+              <span className="font-semibold text-ink-primary">Sums named: </span>
+              <span className="tabular text-[#8a6d1f]">{c.amounts.join(" · ")}</span>
+            </p>
+          )}
+          {c.stake && (
+            <p className="mt-2 rounded-lg bg-navy-primary/5 px-2.5 py-1.5 text-[12.5px] leading-relaxed text-ink-primary">
+              <span className="font-semibold">What it means: </span>
+              {c.stake}
+            </p>
+          )}
+
           <dl className="mt-2.5 grid grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-2">
             {c.subjectRole && (
               <Field

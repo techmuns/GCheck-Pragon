@@ -19,9 +19,10 @@
     "check:firecrawl": "tsx scripts/check-firecrawl-search.mts",
     "check:entity": "tsx scripts/check-entity-match.mts",
     "check:judgment": "tsx scripts/check-judgment.mts",
+    "check:substance": "tsx scripts/check-substance.mts",
     "healthcheck:llm": "node scripts/llm-healthcheck.mjs",
     "test:llm": "node scripts/test-bedrock-transport.mjs",
-    "test": "npm run check:keywords && npm run check:attribution && npm run check:clarifications && npm run check:search && npm run check:host-token && npm run check:firecrawl && npm run check:entity && npm run check:judgment && npm run test:llm"
+    "test": "npm run check:keywords && npm run check:attribution && npm run check:clarifications && npm run check:search && npm run check:host-token && npm run check:firecrawl && npm run check:entity && npm run check:judgment && npm run check:substance && npm run test:llm"
   },
   "dependencies": {
     "html-to-image": "^1.11.13",

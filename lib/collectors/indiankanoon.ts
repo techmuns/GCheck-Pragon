@@ -7,6 +7,7 @@ import { cached } from "../searchCache";
 import { readArticles } from "./reader";
 import { hasReader } from "./env";
 import { isDefendingSide, parseJudgment, sideOf, summariseJudgment } from "./judgment";
+import { readJudgmentSubstance } from "../judgmentSubstance";
 
 // ── Indian Kanoon collector ────────────────────────────────────────────────
 // Litigation search for the company and each promoter. Per the checklist:
@@ -223,6 +224,14 @@ async function enrichWithJudgments(
     const side = sideOf(facts, name, entityMentioned);
     read += 1;
 
+    // The header is parsed; why the matter arose and what is at stake are prose,
+    // so they are read. Amounts inside come from the text by regex rather than
+    // from the model — a hallucinated figure would be quoted in a meeting as the
+    // exposure. Failure here costs the substance and keeps the header.
+    const substance = await readJudgmentSubstance(name, article.text, (note) =>
+      emit?.(note, { level: "warn" }),
+    );
+
     hit.extra = {
       ...hit.extra,
       // `court` already feeds the brief's authority line — prefer the court the
@@ -236,6 +245,12 @@ async function enrichWithJudgments(
       bench: facts.bench,
       counsel: facts.counsel.map((c) => `${c.side}: ${c.advocates}`),
       judgmentSummary: summariseJudgment(facts, side, name),
+      dispute: substance.dispute,
+      reliefSought: substance.reliefSought,
+      outcome: substance.outcome,
+      stake: substance.stake,
+      amounts: substance.amounts,
+      evidence: substance.evidence,
     };
 
     if (side) {
