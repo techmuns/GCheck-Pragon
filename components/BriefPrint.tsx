@@ -835,7 +835,28 @@ function Cases({ cases, extra }: { cases: CaseRow[]; extra: number }) {
               <td className="pb-date-col pb-clip">{c.date ?? "—"}</td>
               <td>
                 <span className="pb-case-name pb-clip-b">{c.name}</span>
-                {c.authority && <span className="pb-case-auth pb-clip-b">{c.authority}</span>}
+                {/* Read off the judgment: which side the subject is on, against
+                    whom, under which number, before whom. The side is the fact
+                    that changes how the row reads — a company that filed an
+                    appeal has not been sued. */}
+                {(c.side || c.caseNumber) && (
+                  <span className="pb-case-auth pb-clip-b">
+                    {c.side && (
+                      <>
+                        Subject is <strong>{c.side}</strong>
+                        {c.against && <> v. {c.against}</>}
+                      </>
+                    )}
+                    {c.side && c.caseNumber && " · "}
+                    {c.caseNumber}
+                  </span>
+                )}
+                {c.authority && (
+                  <span className="pb-case-auth pb-clip-b">
+                    {c.authority}
+                    {c.bench && <> · {c.bench}</>}
+                  </span>
+                )}
               </td>
               <td className="pb-clip">
                 <span className={`pb-status pb-fg-${c.tone}`}>{c.status}</span>
