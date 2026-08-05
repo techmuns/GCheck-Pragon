@@ -1,7 +1,8 @@
 import { env } from "./env";
 import { canonicalUrl, fetchWithTimeout, stripHtml } from "./types";
-import { describe, withRetry } from "./google";
+import { backendFailure, withRetry } from "./google";
 import { cached } from "../searchCache";
+import { classifyError, noteBackendFailure, noteBackendSuccess, planAttempts } from "./backendHealth";
 
 // ── Article reader ──────────────────────────────────────────────────────────
 // A headline says that a matter exists. Only the body says what it was, who the
@@ -63,12 +64,25 @@ export async function readArticles(
 
     let read: Article[] = [];
     let failure: string | undefined;
-    for (const backend of chain) {
+    // The reader rides the same MUNSHOT_TOKEN as web and news search, so when
+    // that token is rejected it is rejected here too. Honouring the shared
+    // breaker means a dead token found by the search sweep sends reading
+    // straight to Firecrawl, instead of every batch paying for its own 403 —
+    // and with a read cap of 8 that was up to 8 doomed calls a run, each one
+    // retried, on the slowest timeout in the codebase.
+    const plan = planAttempts(chain);
+    if (plan.attempt.length === 0) {
+      emit?.(`No reader available — ${plan.knownFailures.join(" / ")}`, { level: "warn" });
+      break;
+    }
+    for (const backend of plan.attempt) {
       try {
         read = await readWith(backend, batch, task);
+        noteBackendSuccess(backend);
         if (read.length > 0) break;
       } catch (err) {
         failure = err instanceof Error ? err.message : String(err);
+        noteBackendFailure(backend, classifyError(err), failure);
         // Say which backend stepped aside and why — a silent fallback looks
         // identical to an article that had nothing in it.
         emit?.(`${backend} could not read this batch (${failure}) — trying the next reader`, { level: "warn" });
@@ -110,7 +124,7 @@ async function readMunshot(urls: string[], task: string): Promise<Article[]> {
         },
         body: JSON.stringify({ urls, task }),
       });
-      if (!res.ok) throw new Error(`Munshot reader ${await describe(res)}`);
+      if (!res.ok) throw await backendFailure("munshot", "Munshot reader", res);
       return parseReader(await res.json(), urls, "munshot");
     }),
   );
@@ -128,7 +142,7 @@ async function readFirecrawl(url: string): Promise<Article | null> {
       },
       body: JSON.stringify({ url, formats: ["markdown"], onlyMainContent: true }),
     });
-    if (!res.ok) throw new Error(`Firecrawl ${await describe(res)}`);
+    if (!res.ok) throw await backendFailure("firecrawl", "Firecrawl", res);
     const data = (await res.json()) as { data?: { markdown?: string; metadata?: { title?: string } } };
     const text = clean(data.data?.markdown ?? "");
     if (!text) return null;

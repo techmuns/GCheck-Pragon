@@ -40,6 +40,11 @@ services:
       # falls back instead of going dark, and FIRECRAWL_API_KEY so article
       # reading survives too. Without a reader the brief is written from
       # headlines, which cannot tell you who brought a complaint.
+      #
+      # When this expires, /api/health returns 503 and names the backend and the
+      # reason. News still runs on the keyless Google News feed; web search,
+      # filings and the reader have no keyless mode and will go quiet until a
+      # working credential is set here.
       - key: MUNSHOT_TOKEN
         sync: false
       # Fallback article reader. Set it in the dashboard if you have a key.
