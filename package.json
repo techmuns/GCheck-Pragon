@@ -17,11 +17,12 @@
     "check:search": "tsx scripts/check-search-resilience.mts",
     "check:host-token": "tsx scripts/check-host-token.mts",
     "check:firecrawl": "tsx scripts/check-firecrawl-search.mts",
+    "check:entity": "tsx scripts/check-entity-match.mts",
     "check:archive": "tsx scripts/check-archive.mts",
     "check:history": "tsx scripts/check-history-store.mts",
     "healthcheck:llm": "node scripts/llm-healthcheck.mjs",
     "test:llm": "node scripts/test-bedrock-transport.mjs",
-    "test": "npm run check:keywords && npm run check:attribution && npm run check:clarifications && npm run check:search && npm run check:host-token && npm run check:firecrawl && npm run check:archive && npm run check:history && npm run test:llm"
+    "test": "npm run check:keywords && npm run check:attribution && npm run check:clarifications && npm run check:search && npm run check:host-token && npm run check:firecrawl && npm run check:entity && npm run check:archive && npm run check:history && npm run test:llm"
   },
   "dependencies": {
     "html-to-image": "^1.11.13",

@@ -111,9 +111,20 @@ function words(s: string): string[] {
     .filter(Boolean);
 }
 
-/** Significant name words — legal-form noise ("Ltd", "Pvt", …) dropped. */
+/**
+ * Words that identify nothing on their own and are written inconsistently
+ * everywhere: legal forms, and the conjunctions that come and go between one
+ * source and the next. "Larsen & Toubro" and "Larsen and Toubro" are one
+ * company — the ampersand is punctuation to one writer and a word to another,
+ * and a matcher that counts it as a name word sees two different companies.
+ */
+function isNameNoise(token: string): boolean {
+  return CORP_FORMS.has(token) || token === "and" || token === "the" || token === "of";
+}
+
+/** Significant name words — legal-form and conjunction noise dropped. */
 function significantTokens(name: string): string[] {
-  return words(name).filter((t) => t.length > 1 && !CORP_FORMS.has(t));
+  return words(name).filter((t) => t.length > 1 && !isNameNoise(t));
 }
 
 /**
@@ -132,7 +143,7 @@ export function entityMentioned(text: string, entityName: string): boolean {
 
   // Text reduced to significant words too, so "Reliance Industries Limited"
   // collapses to [reliance, industries] and still matches [reliance, industries].
-  const hay = words(text).filter((t) => !CORP_FORMS.has(t));
+  const hay = words(text).filter((t) => !isNameNoise(t));
 
   // Slide the needle phrase across the haystack looking for a contiguous run.
   for (let i = 0; i + needle.length <= hay.length; i++) {
@@ -145,8 +156,33 @@ export function entityMentioned(text: string, entityName: string): boolean {
     }
     if (all) return true;
   }
+
+  // ── Word boundaries are not stable in company names ──────────────────────
+  // The register files "IndiaMART InterMESH Limited". A cause list writes
+  // "India Mart Intermesh Ltd". A headline writes "IndiaMart InterMesh". That
+  // is one company, and the phrase test above sees three different ones,
+  // because it compares token against token and "indiamart" is not "india".
+  //
+  // The consequence was not cosmetic: the subject's own court records were
+  // being set aside as "a different party". For a governance pre-screen that is
+  // the expensive direction to be wrong in — a near-miss shown to the reader
+  // costs a glance, a discarded litigation record costs the whole point of the
+  // exercise. So the compacted forms are compared as well: same letters, same
+  // order, boundaries ignored.
+  //
+  // This does not loosen the sibling-brand guard the phrase test exists for.
+  // "reliancepower" is still nowhere inside "reliancedigitalopensstore".
+  const needleCompact = needle.join("");
+  if (needleCompact.length >= MIN_COMPACT_MATCH && hay.join("").includes(needleCompact)) {
+    return true;
+  }
+
   return false;
 }
+
+/** Below this a compacted name is too short to look for inside a longer word —
+ *  "ola" sits inside "motorola". Shorter names rely on the phrase test alone. */
+const MIN_COMPACT_MATCH = 6;
 
 // ── Identity confidence ────────────────────────────────────────────────────
 // `entityMentioned` answers "does this text name the subject?". For a company

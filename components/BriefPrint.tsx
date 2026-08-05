@@ -152,6 +152,7 @@ function ReportContinuation({ brief }: { brief: PrintBrief }) {
       <DirectorshipsBlock rows={brief.directorships} />
       <ScopeBlock scope={brief.scope} generatedAt={brief.generatedAt} />
       <ClarificationsBlock rows={brief.clarifications} />
+      <MethodologyBlock risk={brief.risk} />
     </div>
   );
 }
@@ -285,6 +286,24 @@ function RiskBlock({ risk }: { risk: PrintRisk }) {
         </p>
       )}
 
+    </section>
+  );
+}
+
+/**
+ * How the score was arrived at — weights, bands, corroboration rules.
+ *
+ * Deliberately the last thing in the document. It used to sit inside the score
+ * block, which put a wall of scoring rules between the score and the board it
+ * was scoring: the reader met the method before they had met the findings. The
+ * report now runs highest-value first — verdict, score, board, network, the
+ * register — and the workings are where workings belong, at the back, for the
+ * reader who wants to audit the number rather than read it.
+ */
+function MethodologyBlock({ risk }: { risk: PrintRisk }) {
+  if (risk.methodology.length === 0) return null;
+  return (
+    <section className="pb-flow-section">
       <div className="pb-method">
         <div className="pb-method-label">Methodology</div>
         <ol>

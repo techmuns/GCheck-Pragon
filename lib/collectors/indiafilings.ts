@@ -39,6 +39,61 @@ export function cinUrl(cin: string): string {
   return `${BASE}/search/company-cin-${cin.toUpperCase()}`;
 }
 
+/**
+ * A CIN as the MCA issues them: listing class, five-digit industry code,
+ * two-letter state, four-digit year, three-letter class, six-digit number —
+ * L74899DL1999PLC101534. Matched by that structure rather than as "21
+ * alphanumerics", so a fragment of something else is never taken for one.
+ */
+const CIN_RE = /[LU]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6}/i;
+
+/** The CIN in whatever the user typed, if they gave one. */
+export function cinIn(text: string): string | null {
+  const match = CIN_RE.exec(text);
+  return match ? match[0].toUpperCase() : null;
+}
+
+/** Words that identify no company on their own, so they cannot confirm that a
+ *  search result is the entity we asked for. */
+const GENERIC_TOKEN = new Set([
+  "limited", "ltd", "private", "pvt", "llp", "company", "co", "corp",
+  "corporation", "inc", "and", "the", "of",
+]);
+
+function significantTokens(name: string): string[] {
+  return name
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length >= 3 && !GENERIC_TOKEN.has(t));
+}
+
+/**
+ * The queries tried, in order, to find a company's register page.
+ *
+ * This used to be a single `site:` query, and a single query is a single point
+ * of failure: `site:` is a Google operator that not every backend honours, and
+ * the web chain now runs on whichever of Munshot, SerpAPI, Firecrawl or the
+ * keyless engine is alive. A backend that ignores the operator turns a precise
+ * query into a vague one and the register page never surfaces — which reads to
+ * the user as "this company is not on the MCA register" when it plainly is.
+ *
+ * So the ladder degrades deliberately: keep the operator for the backends that
+ * honour it, then drop it, then drop the quotes and add the suffix the register
+ * actually files companies under. Companies are filed by full legal name, and
+ * "IndiaMART InterMESH" is not what the register calls IndiaMART InterMESH
+ * Limited. Each rung is only tried if the one above found nothing.
+ */
+export function registryQueries(company: string): string[] {
+  const name = company.trim().replace(/\s+/g, " ");
+  const suffixed = /\b(limited|ltd|llp|pvt|private)\b/i.test(name) ? name : `${name} limited`;
+  const queries = [
+    `site:${HOST} "${name}" cin`,
+    `${HOST} "${name}" cin`,
+    `indiafilings ${suffixed} cin`,
+  ];
+  return queries.filter((q, i) => queries.indexOf(q) === i);
+}
+
 const PAGE_TIMEOUT_MS = 20000;
 /** Company pages are supplementary, so they are strictly budgeted. */
 const MAX_COMPANY_PAGES = 6;
@@ -614,16 +669,37 @@ async function companyRun(
   const company = subject.company.trim();
   if (!company) return { ...base, status: "skipped", note: "No company to look up.", hits: [] };
 
-  const query = `site:${HOST} "${company}" cin`;
-  emit?.(`Searching the register for "${company}"`);
-  const url = pickCompanyUrl(await searchWeb(query));
+  // A CIN identifies the company outright, so it needs no search at all — the
+  // slug on these URLs is decorative, exactly as it is for a DIN. This is also
+  // the hand-hold when a name lookup misses: paste the CIN and the register
+  // answers directly.
+  const typedCin = cinIn(company);
+  const queries: string[] = [];
+  let url: string | null = null;
+
+  if (typedCin) {
+    emit?.(`Opening the register on CIN ${typedCin}`);
+    url = cinUrl(typedCin);
+  } else {
+    // Each rung is only tried when the one above found nothing, so the common
+    // case still costs a single search.
+    for (const q of registryQueries(company)) {
+      queries.push(q);
+      emit?.(`Searching the register for "${company}"`);
+      url = pickCompanyUrl(await searchWeb(q), company);
+      if (url) break;
+    }
+  }
+
   if (!url) {
     return {
       ...base,
       status: "done",
-      note: `Could not find an MCA registry page for "${company}".`,
+      note:
+        `Could not find an MCA registry page for "${company}". If you have the ` +
+        `company's CIN, searching that instead opens the record directly.`,
       hits: [],
-      queries: [query],
+      queries,
     };
   }
 
@@ -635,7 +711,7 @@ async function companyRun(
       status: "done",
       note: `Registry page found for "${company}" but nothing could be read from it.`,
       hits: [],
-      queries: [query, url],
+      queries: [...queries, url],
     };
   }
 
@@ -668,16 +744,43 @@ async function companyRun(
     status: "done",
     note: `${record.directors.length} director(s) from the MCA registry record${record.cin ? ` (CIN ${record.cin})` : ""}.`,
     hits,
-    queries: [query, url],
+    queries: [...queries, url],
   };
 }
 
-/** First result that is a company page — the CIN is what makes it one. */
-function pickCompanyUrl(results: Array<{ url?: string }>): string | null {
+/**
+ * The register page for the company we asked about — the CIN in the URL is what
+ * makes a result a company page, and the slug is what says which company.
+ *
+ * The slug is checked because the query ladder loosens as it descends: by the
+ * last rung there are no quotes and no `site:` operator, and the first
+ * indiafilings result for a loose query is not reliably the right company.
+ * Attributing another company's board to this subject would be a worse failure
+ * than finding nothing, so a candidate has to share a distinctive word with the
+ * name we searched. Where the name is entirely generic there is nothing to
+ * check against and the first company page stands, as it always did.
+ */
+export function pickCompanyUrl(results: Array<{ url?: string }>, company?: string): string | null {
+  const candidates: string[] = [];
   for (const r of results) {
     const u = r.url ?? "";
     if (!u.includes(HOST)) continue;
-    if (/-cin-[A-Z0-9]{21}/i.test(u)) return u.split("?")[0].split("#")[0];
+    if (/-cin-[A-Z0-9]{21}/i.test(u)) candidates.push(u.split("?")[0].split("#")[0]);
   }
-  return null;
+  if (candidates.length === 0) return null;
+
+  const wanted = company ? significantTokens(company) : [];
+  if (wanted.length === 0) return candidates[0];
+
+  let best: string | null = null;
+  let bestScore = 0;
+  for (const url of candidates) {
+    const slug = url.toLowerCase();
+    const score = wanted.filter((t) => slug.includes(t)).length;
+    if (score > bestScore) {
+      best = url;
+      bestScore = score;
+    }
+  }
+  return best;
 }

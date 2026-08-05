@@ -340,20 +340,22 @@ export default function BriefView({
   /**
    * Get the PDF out of an embedded page.
    *
-   * This dashboard runs inside an iframe on the host app, and that changes what
-   * a download can be. A blob + synthetic `a.click()` is silently discarded
-   * unless the frame carries `allow-downloads`, and `window.print()` is refused
-   * just as quietly. Opening a new tab is the one route that survives being
-   * framed — opened BEFORE the await, because a popup blocker allows a window
-   * opened during the click that asked for it and blocks one opened after a
-   * network round trip has broken that chain.
+   * This dashboard runs inside an iframe on the host app, so the PDF is fetched
+   * as a blob and handed to a synthetic `a.click()` with a real filename.
+   *
+   * It used to also pre-open a blank tab to navigate to the blob, on the theory
+   * that a framed download would be refused. That backfired twice over: the
+   * `noopener` it was opened with makes `window.open` return null, so the
+   * handle needed to navigate it never existed — and the tab was left sitting
+   * there as a blank white page beside a download that had in fact succeeded
+   * through the anchor all along. The anchor is the whole mechanism now, and
+   * the file lands with the name we gave it rather than a blob UUID.
    */
   async function download(variant: "detailed" | "onepager") {
     if (downloading) return;
     setDownloading(variant);
     setDownloadError(null);
 
-    const tab = window.open("", "_blank", "noopener,noreferrer");
     try {
       const res = await fetch(
         apiUrl(`/api/research/${run.id}/pdf${variant === "onepager" ? "?variant=onepager" : ""}`),
@@ -364,19 +366,16 @@ export default function BriefView({
         throw new Error(body.error ?? `The server could not render the PDF (${res.status}).`);
       }
       const url = URL.createObjectURL(await res.blob());
-      if (tab && !tab.closed) {
-        tab.location.href = url;
-      } else {
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${variant === "onepager" ? "One-Pager" : "Pre-Screen"} — ${run.subject.company}.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-      }
+      const name = `${variant === "onepager" ? "One-Pager" : "Pre-Screen"} — ${run.subject.company}.pdf`;
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (e) {
-      tab?.close();
       setDownloadError(e instanceof Error ? e.message : "Could not produce the PDF.");
     } finally {
       setDownloading(null);
