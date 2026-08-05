@@ -12,7 +12,11 @@ function corsHeaders(): Record<string, string> {
   return {
     "Access-Control-Allow-Origin": ALLOW_ORIGIN,
     "Access-Control-Allow-Methods": "GET,POST,PUT,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    // Authorization carries the Munshot session token the host hands the
+    // dashboard. Without it here the preflight refuses every authenticated
+    // call in the hybrid deploy, and the sources fall back to the environment
+    // token as if the host had never sent one.
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Access-Control-Max-Age": "86400",
   };
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getConfig, createRun } from "@/lib/store";
 import { deadlineFor, runWorkflow } from "@/lib/workflow";
+import { bearerFrom, rememberRunToken } from "@/lib/hostToken";
 import { parseDirectorInput } from "@/lib/directorId";
 import type { SourceProgress, Subject } from "@/lib/types";
 
@@ -55,6 +56,11 @@ export async function POST(req: NextRequest) {
     }));
 
   const run = createRun(subject, progressSeed);
+
+  // The caller's Munshot session token, if this request came from the host.
+  // Held against the run because the workflow outlives this request, and every
+  // Munshot-backed source it is about to run authenticates with it.
+  rememberRunToken(run.id, bearerFrom(req));
 
   // Fire the workflow without blocking the response. runWorkflow contains its
   // own failures, but the catch here is the backstop that matters: an escaping

@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiUrl } from "./api";
+import { apiUrl, authHeaders, jsonAuthHeaders } from "./api";
+import { useHostContext } from "@/hooks/useHostContext";
 import { addRecentSearch } from "./history";
 import { displayName } from "./directorId";
 import type { Run, Subject } from "./types";
@@ -149,6 +150,16 @@ export function useRuns(): UseRuns {
   const activeRef = useRef<string | null>(null);
   const failures = useRef<Record<string, number>>({});
 
+  // The host's session token, read through a ref for the same reason as the
+  // runs: the poll must send whatever token is current on the tick it fires,
+  // and rebuilding the interval every time the host refreshes the session
+  // would lose its place. A run in flight is re-authenticated by its own poll.
+  const { session } = useHostContext();
+  const tokenRef = useRef<string | null>(null);
+  useEffect(() => {
+    tokenRef.current = session.token;
+  }, [session.token]);
+
   useEffect(() => {
     runsRef.current = runs;
     writeStore(runs);
@@ -172,7 +183,9 @@ export function useRuns(): UseRuns {
     void Promise.all(
       stored.map(async (s): Promise<TrackedRun | null> => {
         try {
-          const res = await fetch(apiUrl(`/api/research/${s.serverId}`));
+          const res = await fetch(apiUrl(`/api/research/${s.serverId}`), {
+            headers: authHeaders(tokenRef.current),
+          });
           if (!res.ok) return null;
           const run: Run = await res.json();
           return {
@@ -221,7 +234,9 @@ export function useRuns(): UseRuns {
           }
 
           try {
-            const res = await fetch(apiUrl(`/api/research/${t.serverId}`));
+            const res = await fetch(apiUrl(`/api/research/${t.serverId}`), {
+              headers: authHeaders(tokenRef.current),
+            });
             if (res.status === 404) {
               fail("This pre-screen is no longer available — the server restarted. Please run it again.");
               return;
@@ -298,7 +313,7 @@ export function useRuns(): UseRuns {
         try {
           const res = await fetch(apiUrl("/api/research"), {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: jsonAuthHeaders(tokenRef.current),
             body: JSON.stringify({ type, company, promoters, ticker }),
           });
           if (!res.ok) {

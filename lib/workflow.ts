@@ -1,4 +1,5 @@
 import { getConfig, updateRun, getRun } from "./store";
+import { forgetRunToken, withRunToken } from "./hostToken";
 import { collectors, type CollectorContext } from "./collectors";
 import { resolveIdentity } from "./collectors/directors";
 import { anchorNames, resolveDirector } from "./collectors/indiafilings";
@@ -56,18 +57,27 @@ export function deadlineFor(sourceId: string): number {
 }
 
 export async function runWorkflow(runId: string): Promise<void> {
-  // Everything below runs detached from the request that started it, so an
-  // escaping throw would surface as an unhandled rejection and — worse — leave
-  // the run sitting at "queued" while the UI polls it forever.
-  try {
-    await execute(runId);
-  } catch (err) {
-    console.error("[workflow] run failed:", err);
-    updateRun(runId, {
-      status: "error",
-      error: err instanceof Error ? err.message : "The pre-screen failed to run.",
-    });
-  }
+  // Re-establish the caller's Munshot session token for everything the run
+  // touches. The request that carried it has already been answered, so the
+  // token is looked up by run id rather than inherited from the request scope —
+  // and looked up live, so a token refreshed while the run is still working
+  // reaches the sources that have yet to fire.
+  return withRunToken(runId, async () => {
+    // Everything below runs detached from the request that started it, so an
+    // escaping throw would surface as an unhandled rejection and — worse — leave
+    // the run sitting at "queued" while the UI polls it forever.
+    try {
+      await execute(runId);
+    } catch (err) {
+      console.error("[workflow] run failed:", err);
+      updateRun(runId, {
+        status: "error",
+        error: err instanceof Error ? err.message : "The pre-screen failed to run.",
+      });
+    } finally {
+      forgetRunToken(runId);
+    }
+  });
 }
 
 async function execute(runId: string): Promise<void> {

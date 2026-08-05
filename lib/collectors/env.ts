@@ -1,7 +1,14 @@
+import { hostToken } from "../hostToken";
+
 // ── Credential / key configuration ─────────────────────────────────────────
 // All source credentials come from environment variables. Nothing is committed.
 // A missing value simply means that source (or its richer mode) stays off, and
 // the collector reports that honestly.
+//
+// The one exception is the Munshot session token. It is a *user* session JWT
+// and expires, so the environment copy is the fallback rather than the source:
+// when the request came from the Munshot host, the live token the host handed
+// the dashboard is used instead. See lib/hostToken.ts.
 
 export const env = {
   // Google / web search backends, in priority order:
@@ -9,7 +16,9 @@ export const env = {
   //   2. SerpAPI — SERPAPI_KEY
   //   3. Google Programmable Search — GOOGLE_API_KEY + GOOGLE_CX
   //   4. keyless fallback (works locally, blocked from most servers)
-  munshotToken: process.env.MUNSHOT_TOKEN,
+  get munshotToken(): string | undefined {
+    return hostToken() ?? process.env.MUNSHOT_TOKEN;
+  },
   munshotSearchUrl: process.env.MUNSHOT_SEARCH_URL || "https://fastapi.muns.io/tools/web-search",
   munshotNewsUrl: process.env.MUNSHOT_NEWS_URL || "https://fastapi.muns.io/tools/news-search",
   munshotCountry: process.env.MUNSHOT_COUNTRY || "IN",
@@ -32,7 +41,11 @@ export const env = {
   // platform as the search backend, so it reuses MUNSHOT_TOKEN unless a
   // dedicated FILINGS_TOKEN is set. Needs a stock ticker on the subject.
   filingsUrl: process.env.FILINGS_URL || "https://devde.muns.io/filings/combined_filings_announcements",
-  filingsToken: process.env.FILINGS_TOKEN || process.env.MUNSHOT_TOKEN,
+  // A dedicated FILINGS_TOKEN is configured for this source specifically, so it
+  // keeps priority; without one this rides the same session token as search.
+  get filingsToken(): string | undefined {
+    return process.env.FILINGS_TOKEN || hostToken() || process.env.MUNSHOT_TOKEN;
+  },
   filingsCountry: process.env.FILINGS_COUNTRY || "India",
   googleApiKey: process.env.GOOGLE_API_KEY,
   googleCx: process.env.GOOGLE_CX,

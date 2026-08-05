@@ -1,6 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { toBlob } from "html-to-image";
+import { sdk } from "@/lib/sdk";
+import { useHostContext } from "@/hooks/useHostContext";
 import SearchForm from "@/components/SearchForm";
 import AuroraBackground from "@/components/AuroraBackground";
 import PrepCountdown from "@/components/PrepCountdown";
@@ -13,6 +16,10 @@ import { formatSuggestion } from "@/lib/directorId";
 
 export default function Home() {
   const { runs, active, activeKey, start, select, close } = useRuns();
+  // What the host is looking at. The ticker seeds the search box (below); the
+  // session token is what every API call is authenticated with, threaded
+  // through useRuns and the widgets that fetch.
+  const { session, ticker, tickerCompany } = useHostContext();
 
   // The counted lead-in belongs to whichever run is being started, not to the
   // page — switching away from a run and back must not replay its countdown.
@@ -39,6 +46,83 @@ export default function Home() {
     setPrepped(prune);
     setHanded(prune);
   }, [runs]);
+
+  // ── Host capture requests ────────────────────────────────────────────────
+  // A getter pointing at the page's current state, reassigned every render so
+  // the snapshot handler always reads live values rather than the closure it
+  // was registered with.
+  const snapshotRef = useRef<() => unknown>(() => ({}));
+  snapshotRef.current = () => ({
+    context: {
+      ticker: active?.run?.subject.ticker ?? active?.subject.ticker ?? ticker ?? null,
+      hostTicker: ticker ?? null,
+      subject: active?.run?.subject.company ?? active?.subject.company ?? null,
+      subjectType: active?.run?.subject.type ?? active?.subject.type ?? null,
+      phase: active?.phase ?? null,
+    },
+    selection: {
+      activeRunId: active?.serverId ?? null,
+      // Names only — the full run objects would blow the payload cap.
+      openRuns: runs.slice(0, 20).map((t) => ({
+        id: t.serverId ?? null,
+        subject: t.subject.company,
+        type: t.subject.type,
+        phase: t.phase,
+      })),
+    },
+    data: {
+      verdict: active?.run?.brief?.verdict ?? null,
+      headline: active?.run?.brief?.headline ?? null,
+      // Counts rather than contents: a finished brief carries hundreds of
+      // citations and every source's raw output, which is neither small nor
+      // useful to the host.
+      sections: active?.run?.brief?.sections.length ?? 0,
+      citations: active?.run?.brief?.citations.length ?? 0,
+      synthesizedBy: active?.run?.brief?.synthesizedBy ?? null,
+      sources: (active?.run?.progress ?? []).slice(0, 30).map((p) => ({
+        id: p.sourceId,
+        name: p.name,
+        status: p.status,
+        hits: p.hits ?? 0,
+      })),
+    },
+  });
+
+  useEffect(() => {
+    // 1) Visual snapshot — a PNG Blob of the dashboard's content area.
+    const offVisual = sdk.onRequest("dashboard.capture.visual", async () => {
+      try {
+        const el =
+          document.querySelector("#dashboard-main") ||
+          document.querySelector("[data-dashboard-capture-root='true']") ||
+          document.querySelector("main");
+        if (!el) throw new Error("capture root not found");
+        const blob = await toBlob(el as HTMLElement, { pixelRatio: 2 });
+        if (!blob) throw new Error("empty snapshot blob");
+        return { visualSnapshot: blob, capturedAt: new Date().toISOString() };
+      } catch (err) {
+        // Never throw out of the handler; return a structured, cloneable error.
+        return { ok: false, error: (err as Error).message };
+      }
+    });
+
+    // 2) State snapshot — the current JSON state of the dashboard.
+    const offSnapshot = sdk.onRequest("dashboard.capture.snapshot", () => {
+      try {
+        return snapshotRef.current();
+      } catch (err) {
+        return { ok: false, error: (err as Error).message };
+      }
+    });
+
+    // DO NOT call sdk.ready() here. The SDK auto-sends dashboard:ready on
+    // host:init. Calling it manually races the handshake and breaks it.
+
+    return () => {
+      offVisual();
+      offSnapshot();
+    };
+  }, []);
 
   const counted = activeKey ? Boolean(prepped[activeKey]) : false;
   // "Ready" means the lead-in has finished AND the run has landed. Until then
@@ -74,13 +158,25 @@ export default function Home() {
       {/* Recent runs — a fixed left rail on desktop, a horizontal bar on mobile. */}
       <RunSidebar runs={runs} activeKey={activeKey} onSelect={select} onClose={close} />
 
-      {/* Content column, offset clear of the rail on desktop. */}
+      {/* Content column, offset clear of the rail on desktop.
+
+          id/data-dashboard-capture-root mark this as the stable target the host
+          snapshots for `dashboard.capture.visual`. */}
       <main
+        id="dashboard-main"
+        data-dashboard-capture-root="true"
         className={`flex min-h-screen w-full flex-col items-center px-4 py-10 sm:px-6 lg:py-12 lg:pr-8 lg:pl-[17rem] ${
           centered ? "justify-center" : ""
         }`}
       >
-        {showForm && <SearchForm onSubmit={start} />}
+        {showForm && (
+          <SearchForm
+            onSubmit={start}
+            hostCompany={tickerCompany}
+            hostTicker={ticker}
+            awaitingSession={session.token === null && sdk.getChannelId() !== null}
+          />
+        )}
 
         {showPrep && active && (
           <PrepCountdown subject={active.run?.subject ?? active.subject} onDone={onPrepped} holding={active.run === null} />

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import AutocompleteField from "./AutocompleteField";
 import { getRecentSearches, removeRecentSearch, type RecentSearch } from "@/lib/history";
 import { displayName } from "@/lib/directorId";
@@ -10,11 +10,21 @@ type Mode = "company" | "director";
 interface Props {
   onSubmit: (company: string, promoters: string[], type?: Mode, ticker?: string) => void;
   busy?: boolean;
+  /** The company the Munshot host currently has selected, and its ticker. They
+   *  seed the box so opening Paragon from a stock in the host starts on that
+   *  company rather than on an empty field. Only ever a starting point: the
+   *  user picks what gets screened, and typing overrides them. */
+  hostCompany?: string | null;
+  hostTicker?: string | null;
+  /** The host is connected but has not handed over a session yet — a logout, or
+   *  the moment before a refreshed token lands. Non-blocking on purpose: the
+   *  form still works, and the run falls back to the server's own credential. */
+  awaitingSession?: boolean;
 }
 
 // The front door. Choose what you're screening — a company or an individual
 // director/person — then run the same governance checks. Clutter-free by design.
-export default function SearchForm({ onSubmit, busy }: Props) {
+export default function SearchForm({ onSubmit, busy, hostCompany, hostTicker, awaitingSession }: Props) {
   const [mode, setMode] = useState<Mode>("company");
   const [company, setCompany] = useState("");
   // A ticker captured from a picked company suggestion. It rides along to enable
@@ -25,6 +35,24 @@ export default function SearchForm({ onSubmit, busy }: Props) {
 
   // localStorage is client-only — read after mount to avoid a hydration mismatch.
   useEffect(() => setRecent(getRecentSearches()), []);
+
+  // ── The host's selected stock, offered once ──────────────────────────────
+  // Changing the stock in Munshot is a deliberate act, so the box follows it.
+  // But it only ever *offers*: a selection is applied while the field is empty
+  // or still showing the last thing the host put there, and never over text the
+  // user has typed. Each host selection is offered once, so a company the user
+  // cleared on purpose does not keep coming back on the next render.
+  const offered = useRef<string | null>(null);
+  useEffect(() => {
+    if (mode !== "company") return;
+    const name = (hostCompany ?? "").trim() || (hostTicker ?? "").trim();
+    if (!name || name === offered.current) return;
+    const untouched = company.trim() === "" || company === offered.current;
+    offered.current = name;
+    if (!untouched) return;
+    setCompany(name);
+    setTicker((hostTicker ?? "").trim() || undefined);
+  }, [hostCompany, hostTicker, mode, company]);
 
   const isDirector = mode === "director";
 
@@ -90,6 +118,12 @@ export default function SearchForm({ onSubmit, busy }: Props) {
       >
         {busy ? "Running pre-screen…" : isDirector ? "Run director check" : "Run pre-screen"}
       </button>
+
+      {/* The host has connected but has no session for us yet. Said quietly and
+          in place — it is transient, and the form is not blocked on it. */}
+      {awaitingSession && (
+        <p className="mt-2 text-center text-[12px] text-ink-secondary">Waiting for session…</p>
+      )}
 
       {recent.length > 0 && (
         <div className="mt-6 border-t border-navy-primary/8 pt-4">
