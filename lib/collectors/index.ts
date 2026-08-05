@@ -11,7 +11,12 @@ import { filingsCollector } from "./filings";
 import { profileCollector } from "./profile";
 
 // Registry — maps a source id (from config) to its collector implementation.
+import { ratingsCollector } from "./ratings";
+import { politicalCollector } from "./political";
+
 export const collectors: Record<string, Collector> = {
+  ratings: ratingsCollector,
+  political: politicalCollector,
   google: googleCollector,
   news: newsCollector,
   profile: profileCollector,

@@ -5,6 +5,7 @@ import { resolveIdentity } from "./collectors/directors";
 import { anchorNames, resolveDirector } from "./collectors/indiafilings";
 import { synthesizeBrief } from "./synthesize";
 import { diligenceEnabled, runBoardDiligence, sweepRelatedEntities } from "./diligence";
+import { findLeads } from "./critic";
 import type { CollectorResult, RunEvent, SourceProgress, Subject } from "./types";
 
 // ── Research workflow (Phase 2) ────────────────────────────────────────────
@@ -78,6 +79,23 @@ export async function runWorkflow(runId: string): Promise<void> {
       forgetRunToken(runId);
     }
   });
+}
+
+/** The completeness pass: what does the evidence raise that the brief does not
+ *  answer? Wrapped — a critic that fails must never unship the report. */
+async function critique(runId: string): Promise<void> {
+  const run = getRun(runId);
+  if (!run) return;
+  try {
+    appendEvent(runId, { level: "step", text: "Reviewing the evidence for leads the report has not chased" });
+    const leads = await findLeads(run, (n) => appendEvent(runId, { level: "warn", text: n }));
+    if (leads.length > 0) {
+      updateRun(runId, { leads });
+      appendEvent(runId, { level: "step", text: `${leads.length} open lead(s) worth chasing — listed at the end of the brief` });
+    }
+  } catch (err) {
+    appendEvent(runId, { level: "warn", text: `Lead review failed — ${err instanceof Error ? err.message : String(err)}` });
+  }
 }
 
 async function execute(runId: string): Promise<void> {
@@ -241,8 +259,10 @@ async function execute(runId: string): Promise<void> {
           text: `Board diligence stopped early — ${err instanceof Error ? err.message : String(err)}`,
         });
       }
+      await critique(runId);
       updateRun(runId, { status: "complete", brief });
     } else {
+      await critique(runId);
       updateRun(runId, { status: "complete", brief });
     }
   } catch (err) {

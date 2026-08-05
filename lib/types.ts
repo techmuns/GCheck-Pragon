@@ -323,5 +323,8 @@ export interface Run {
    *  check always closes with that sentence, and its absence reads as "not
    *  looked at" rather than "looked at and clean". */
   keywordsScreened?: string[];
+  /** Open questions the evidence raises that the report does not answer — the
+   *  critic's research agenda. Never findings, never scored. */
+  leads?: string[];
   error?: string;
 }

@@ -19,6 +19,7 @@ import { sourceTier } from "@/lib/risk";
 import { humanizeCaps } from "@/lib/text";
 import { reconcile } from "@/lib/verdict";
 import { buildCourtCases, courtHitsOf, type CourtCaseRow } from "@/lib/courtCases";
+import { familyClusters } from "@/lib/family";
 
 interface Props {
   run: Run;
@@ -736,6 +737,17 @@ export default function BriefView({
               </>
             }
           >
+            {/* Probable family ties on the board, from shared surnames. Worded
+                as probable and never scored: it changes what a partner asks —
+                who actually controls this — not the number. */}
+            {familyClusters(people).length > 0 && (
+              <p className="mb-2.5 rounded-lg bg-gold/10 px-2.5 py-1.5 text-[12px] leading-relaxed text-ink-primary">
+                {familyClusters(people)
+                  .map((c) => `${c.members.length} of ${people.length} directors share the surname ${c.surname} (${c.members.join(", ")})`)
+                  .join("; ")}{" "}
+                — a probable family board. Worth asking who holds control and how related-party decisions are approved.
+              </p>
+            )}
             <DiligenceGrid people={people} running={run.status === "running"} />
           </Section>
         )}
@@ -796,6 +808,26 @@ export default function BriefView({
                   : null
           }
         />
+        {/* The critic's research agenda: what the evidence raises that this
+            report does not answer. Deliberately questions rather than findings
+            — nothing here is scored, and each survived a check that the
+            evidence actually raised it. */}
+        {(run.leads ?? []).length > 0 && (
+          <Section title="Leads not yet chased" count={run.leads!.length}>
+            <ul className="space-y-1.5">
+              {run.leads!.map((l, i) => (
+                <li key={i} className="flex items-start gap-2.5 text-[13px] leading-relaxed text-ink-primary">
+                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-navy-primary/40" />
+                  {l}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-[11px] leading-relaxed text-ink-secondary/75">
+              Questions the collected evidence raises but this run could not settle — a starting agenda for manual follow-up, not findings.
+            </p>
+          </Section>
+        )}
+
         {/* One hop out: adverse material at the OTHER companies the board sits
             on. This is where the finding a subject's own name never surfaces
             lives — an enforcement matter at a related entity reaches the

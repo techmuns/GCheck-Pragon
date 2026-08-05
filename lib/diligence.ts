@@ -381,9 +381,19 @@ export function rankRelatedEntities(
     }
   }
   const adverse = (s?: string) => Boolean(s && /strike|liquidat|dissolv|defunct|amalgamat|dormant/i.test(s));
+  // A related entity sharing the subject's distinctive first word — Ingex Lab
+  // beside Ingex Botanicals — is a probable sibling in the same group, and the
+  // benchmark case's fund-routing allegation ran through exactly such a
+  // sibling. The name test elsewhere exists to keep siblings APART when
+  // attributing findings; here the same signal is a reason to look closer.
+  const subjectHead = headToken(subjectCompany);
+  const sibling = (name: string) => Boolean(subjectHead && headToken(name) === subjectHead);
   return [...byName.values()]
     .sort((a, b) => {
       if (b.via.length !== a.via.length) return b.via.length - a.via.length;
+      const as_ = sibling(a.name) ? 1 : 0;
+      const bs = sibling(b.name) ? 1 : 0;
+      if (bs !== as_) return bs - as_;
       const av = adverse(a.status) ? 1 : 0;
       const bv = adverse(b.status) ? 1 : 0;
       if (bv !== av) return bv - av;
@@ -391,6 +401,19 @@ export function rankRelatedEntities(
     })
     .slice(0, cap);
 }
+
+/** The distinctive first word of a company name, for sibling detection. */
+function headToken(name: string): string | undefined {
+  const NOISE = new Set(["the", "shri", "sri", "new", "india", "indian", "national"]);
+  const t = name
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length >= 4 && !NOISE.has(w))[0];
+  return t;
+}
+
+export { familyClusters } from "./family";
+
 
 /**
  * Sweep the ranked entities. Failures cost only that entity's findings — a

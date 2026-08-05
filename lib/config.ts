@@ -59,6 +59,24 @@ export const defaultConfig: AppConfig = {
       url: "https://www.wikidata.org",
     },
     {
+      id: "ratings",
+      name: "Credit Rating Actions",
+      kind: "api",
+      description:
+        "CRISIL / ICRA / CARE rating actions on the company. Rationales are public prose about governance, and 'issuer not cooperating' or a withdrawal is one of the strongest distress signals a private company shows.",
+      enabled: true,
+      url: "https://www.crisilratings.com",
+    },
+    {
+      id: "political",
+      name: "Political Affiliation",
+      kind: "api",
+      description:
+        "Political exposure of the company and its people — candidate affidavits on the ADR register (myneta.info), electoral-bond and party-donor coverage. A disclosure item, not an allegation.",
+      enabled: true,
+      url: "https://myneta.info",
+    },
+    {
       id: "profile",
       name: "Profile & Background",
       kind: "api",
