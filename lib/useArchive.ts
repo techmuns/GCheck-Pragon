@@ -5,7 +5,7 @@ import { apiUrl } from "./api";
 import {
   clearHistory,
   exportHistory,
-  hideFromRecent,
+  hideSubjectFromRecent,
   importHistory,
   loadArchived,
   readHistory,
@@ -24,9 +24,13 @@ import type { Run } from "./types";
 // behaviour where the recent list was read once and then never noticed a run
 // finishing.
 
+/** How long the live record is worth waiting for before the saved copy is used
+ *  instead. The free backend cold-starts in tens of seconds; nobody should sit
+ *  through that for a brief already on the device. */
+const SERVER_WAIT_MS = 2500;
+
 /** What "Open" gave back: a live run if the server still had one, otherwise the
- *  copy saved in this browser. The distinction is shown, not hidden — the
- *  archived path has no server-rendered PDF behind it. */
+ *  copy saved in this browser. */
 export interface OpenedRun {
   run: Run;
   entry: ArchiveEntry;
@@ -40,7 +44,9 @@ export interface UseArchive {
   /** The id currently being opened, so its row can say so. */
   opening: string | null;
   open: (id: string) => Promise<OpenedRun | null>;
+  /** Delete the run and its saved brief. */
   remove: (id: string) => void;
+  /** Take the subject off the front page's short list. It stays in History. */
   hide: (id: string) => void;
   clear: () => void;
   exportJson: () => Promise<void>;
@@ -67,6 +73,10 @@ export function useArchive(): UseArchive {
    * comes with working PDF downloads, which the saved copy cannot have. A 404
    * or an unreachable backend falls back to the snapshot, which is the whole
    * reason the snapshot exists.
+   *
+   * The attempt is bounded. The backend sleeps on the free plan and takes tens
+   * of seconds to wake, and a saved brief sitting in this browser is not worth
+   * making anyone wait that long for a slightly better version of.
    */
   const open = useCallback(
     async (id: string): Promise<OpenedRun | null> => {
@@ -76,13 +86,15 @@ export function useArchive(): UseArchive {
       try {
         if (entry.serverId) {
           try {
-            const res = await fetch(apiUrl(`/api/research/${entry.serverId}`));
+            const res = await fetch(apiUrl(`/api/research/${entry.serverId}`), {
+              signal: AbortSignal.timeout(SERVER_WAIT_MS),
+            });
             if (res.ok) {
               const run: Run = await res.json();
               if (run?.brief) return { run, entry, archived: false };
             }
           } catch {
-            /* offline, or no API origin in the static build — use the copy */
+            /* timed out, offline, or no API origin in the static build */
           }
         }
         const saved = await loadArchived(id);
@@ -97,33 +109,24 @@ export function useArchive(): UseArchive {
   /**
    * Hand the record over as a file.
    *
-   * The tab is opened before the await, for the reason spelled out in
-   * BriefView's download: this dashboard runs framed, a popup opened after a
-   * round trip is blocked, and a synthetic download click is discarded unless
-   * the frame allows downloads.
+   * A download anchor rather than a pre-opened tab. BriefView opens one because
+   * its PDF comes back from the server and a popup opened after a round trip is
+   * blocked — but `window.open` with `noopener` returns null by specification,
+   * so that handle can never be used here, and opening one would only leave a
+   * blank tab behind every export.
    */
   const exportJson = useCallback(async () => {
-    const tab = typeof window !== "undefined" ? window.open("", "_blank", "noopener,noreferrer") : null;
-    try {
-      const payload = await exportHistory();
-      const url = URL.createObjectURL(
-        new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }),
-      );
-      if (tab && !tab.closed) {
-        tab.location.href = url;
-      } else {
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `Paragon history — ${payload.exportedAt.slice(0, 10)}.json`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-      }
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    } catch (e) {
-      tab?.close();
-      throw e;
-    }
+    const payload = await exportHistory();
+    const url = URL.createObjectURL(
+      new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }),
+    );
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Paragon history — ${payload.exportedAt.slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
   }, []);
 
   const importJson = useCallback(async (raw: string) => {
@@ -138,7 +141,7 @@ export function useArchive(): UseArchive {
     opening,
     open,
     remove: removeEntry,
-    hide: hideFromRecent,
+    hide: hideSubjectFromRecent,
     clear: clearHistory,
     exportJson,
     importJson,

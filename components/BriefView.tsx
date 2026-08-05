@@ -321,17 +321,18 @@ export default function BriefView({
 
   useEffect(() => {
     if (!pendingPrint) return;
+    // No animation frame, and nothing cancellable. Clearing the trigger inside
+    // the effect that owns the frame changes the effect's own dependency, so
+    // React runs its cleanup — cancelling the frame before it can ever fire,
+    // and the print dialog never opens at all. The variant is already committed
+    // by the time a passive effect runs, because it was set in the same click,
+    // so the portal is showing the right document already.
     setPendingPrint(false);
-    // One frame for the portal to re-render under the chosen variant before the
-    // dialog snapshots the page.
-    const id = requestAnimationFrame(() => {
-      try {
-        window.print();
-      } catch {
-        setDownloadError("This browser refused to open the print dialog.");
-      }
-    });
-    return () => cancelAnimationFrame(id);
+    try {
+      window.print();
+    } catch {
+      setDownloadError("This browser refused to open the print dialog.");
+    }
   }, [pendingPrint]);
 
   /**

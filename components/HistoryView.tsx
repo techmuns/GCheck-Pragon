@@ -39,7 +39,10 @@ const RANGE_MS: Record<Exclude<Range, "all" | "today">, number> = {
   "30d": 30 * 24 * 60 * 60 * 1000,
 };
 
-const VERDICT_FILTERS: Severity[] = ["red", "amber", "clear"];
+// Every verdict a finished run can carry, "Note" included — lib/assemble.ts
+// settles on "info" for a run that completed and found nothing to itemise, and
+// leaving it out made those runs the one kind the filter could not reach.
+const VERDICT_FILTERS: Severity[] = ["red", "amber", "clear", "info"];
 
 interface Props {
   entries: ArchiveEntry[];
@@ -112,7 +115,13 @@ export default function HistoryView({
     return out;
   }, [entries]);
 
-  const groups = useMemo(() => groupByDay(filtered), [filtered]);
+  // Children are started after their parent, so a newest-first list puts them
+  // above it — and an indent under a row that is not there reads as an indent
+  // under whatever happens to sit above. Each child is moved to sit directly
+  // beneath its parent, which is the only arrangement the indent describes.
+  const ordered = useMemo(() => nestUnderParents(filtered), [filtered]);
+  const groups = useMemo(() => groupByDay(ordered), [ordered]);
+  const byId = useMemo(() => new Map(entries.map((e) => [e.id, e])), [entries]);
   const filtering = query.trim() !== "" || verdicts.size > 0 || range !== "all";
 
   function toggleVerdict(v: Severity): void {
@@ -278,7 +287,7 @@ export default function HistoryView({
                 <Row
                   key={e.id}
                   entry={e}
-                  nested={Boolean(e.parentId) && entries.some((p) => p.id === e.parentId)}
+                  parent={e.parentId ? byId.get(e.parentId) : undefined}
                   changedFrom={previousVerdict.get(e.id)}
                   opening={opening === e.id}
                   onRunAgain={() => onRunAgain(e.rawQuery, e.promoters, e.type, e.ticker)}
@@ -302,7 +311,7 @@ export default function HistoryView({
 
 function Row({
   entry: e,
-  nested,
+  parent,
   changedFrom,
   opening,
   onRunAgain,
@@ -310,7 +319,8 @@ function Row({
   onDelete,
 }: {
   entry: ArchiveEntry;
-  nested: boolean;
+  /** The brief this run was picked off, when it is still in the record. */
+  parent?: ArchiveEntry;
   changedFrom?: Severity;
   opening: boolean;
   onRunAgain: () => void;
@@ -319,21 +329,23 @@ function Row({
 }) {
   const stale = unresolved(e);
   const failed = e.outcome === "error";
-  // Only a run that produced a brief has a verdict to show. A dot for anything
-  // else would colour an outcome the app never saw.
-  const dotSeverity: Severity = failed ? "red" : (e.verdict ?? "info");
 
   // Second line: what it said, when, and what it cost. The status fragment
   // comes first because on a row that did not land it is the only true thing.
   const said = failed
     ? `couldn’t finish${e.error ? ` — ${e.error}` : ""}`
-    : stale
-      ? "we don’t know how this one ended — this tab stopped watching it"
-      : e.outcome === "running"
-        ? "running now"
-        : e.verdict
-          ? severityStyle[e.verdict].label
-          : "finished";
+    : e.outcome === "legacy"
+      ? // Carried over from the old recent-search list, which kept a name and a
+        // time and nothing else. Saying the tab stopped watching would be a
+        // story about a run nothing was ever recorded about.
+        "from your earlier recent searches — no outcome was kept"
+      : stale
+        ? "we don’t know how this one ended — this tab stopped watching it"
+        : e.outcome === "running"
+          ? "running now"
+          : e.verdict
+            ? severityStyle[e.verdict].label
+            : "finished";
 
   const parts = [formatGenerated(e.startedAt), said];
   if (e.outcome === "complete") {
@@ -343,14 +355,25 @@ function Row({
   }
 
   return (
-    <div className={nested ? "ml-3 border-l border-[rgba(23,43,77,0.10)] pl-2" : undefined}>
+    <div className={parent ? "ml-3 border-l border-[rgba(23,43,77,0.10)] pl-2" : undefined}>
       <div className="group flex items-center gap-2 rounded-lg border border-navy-primary/10 pr-2 transition hover:border-navy-primary/25 hover:bg-navy-primary/5">
         <div className="flex min-w-0 flex-1 items-center gap-2.5 px-3 py-2.5">
-          <span
-            className="mt-0.5 inline-block h-2 w-2 shrink-0 rounded-full"
-            style={{ backgroundColor: severityStyle[dotSeverity].dot }}
-            aria-hidden
-          />
+          {/* A verdict dot only where there is a verdict. A run that could not
+              finish gets a neutral mark instead: colouring it red would make a
+              failure indistinguishable from a red flag, and the Red-flag filter
+              would then not match the row its own colour promised. */}
+          {e.verdict ? (
+            <span
+              className="mt-0.5 inline-block h-2 w-2 shrink-0 rounded-full"
+              style={{ backgroundColor: severityStyle[e.verdict].dot }}
+              aria-hidden
+            />
+          ) : (
+            <span
+              className="mt-0.5 inline-flex h-2 w-2 shrink-0 items-center justify-center rounded-full border border-[rgba(23,43,77,0.28)]"
+              aria-hidden
+            />
+          )}
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-1.5 truncate text-[13.5px] font-medium text-navy-deep">
               <span className="shrink-0 rounded bg-navy-primary/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-navy-primary">
@@ -373,12 +396,19 @@ function Row({
             <span className="tabular mt-0.5 block truncate text-[10.5px] leading-tight text-ink-secondary/85">
               {parts.join(" · ")}
             </span>
+            {parent && (
+              <span className="mt-0.5 block truncate text-[11px] text-ink-secondary">
+                screened from {parent.company}
+              </span>
+            )}
             {e.promoters.length > 0 && (
               <span className="mt-0.5 block truncate text-[11px] text-ink-secondary">{e.promoters.join(", ")}</span>
             )}
             {e.outcome === "complete" && !e.hasBody && (
               <span className="mt-0.5 block text-[11px] italic text-ink-secondary/70">
-                The saved copy was cleared to make room — run it again to rebuild it.
+                {e.serverId
+                  ? "The saved copy was cleared to make room — Open will try the server, or run it again."
+                  : "The saved copy was cleared to make room — run it again to rebuild it."}
               </span>
             )}
           </span>
@@ -415,6 +445,36 @@ function Row({
       </div>
     </div>
   );
+}
+
+/**
+ * Move every child directly beneath its parent.
+ *
+ * The list is newest-first, and a run screened off a brief is by definition
+ * newer than the brief — so left alone the children sit above the parent they
+ * are indented under, and the indent describes a relationship to whatever row
+ * happens to be above them. A child whose parent is not in the filtered set
+ * keeps its place and is labelled instead.
+ */
+function nestUnderParents(entries: ArchiveEntry[]): ArchiveEntry[] {
+  const present = new Set(entries.map((e) => e.id));
+  const children = new Map<string, ArchiveEntry[]>();
+  for (const e of entries) {
+    if (!e.parentId || !present.has(e.parentId)) continue;
+    const list = children.get(e.parentId) ?? [];
+    list.push(e);
+    children.set(e.parentId, list);
+  }
+  if (children.size === 0) return entries;
+
+  const nested = new Set([...children.values()].flat().map((e) => e.id));
+  const out: ArchiveEntry[] = [];
+  for (const e of entries) {
+    if (nested.has(e.id)) continue;
+    out.push(e);
+    out.push(...(children.get(e.id) ?? []));
+  }
+  return out;
 }
 
 /**

@@ -179,11 +179,11 @@ export default function Home() {
               start(past.entry.rawQuery, past.entry.promoters, past.entry.type, past.entry.ticker);
             }}
             onScreenPeople={(people) => {
-              // The same move off an old brief as off a live one — each pick
+              // The same move off a saved brief as off a live one — each pick
               // becomes an ordinary new search, with no parent to hang under
-              // because an archived brief is not a tracked run.
-              setPast(null);
-              setView("search");
+              // because a saved brief is not a tracked run. The brief stays on
+              // screen: `keepFocus` means the reader keeps their page, and
+              // closing it here would drop them on an empty search form.
               for (const p of people) {
                 start(formatSuggestion({ name: p.name, din: p.din }), [], "director", undefined, {
                   keepFocus: true,
@@ -191,8 +191,6 @@ export default function Home() {
               }
             }}
             onScreenCompanies={(companies) => {
-              setPast(null);
-              setView("search");
               for (const c of companies) start(c.name, [], "company", undefined, { keepFocus: true });
             }}
           />

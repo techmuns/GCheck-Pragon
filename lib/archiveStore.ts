@@ -6,6 +6,7 @@ import {
   errorEntry,
   finishEntry,
   snapshotRun,
+  subjectKey,
   unknownEntry,
   type ArchiveEntry,
   type ArchivedRun,
@@ -46,6 +47,11 @@ const MIGRATED_KEY = "paragon.runHistory.migrated";
 
 const MAX_ENTRIES = 500;
 const MAX_INDEX_BYTES = 512 * 1024;
+/** Deletions are remembered so another tab's copy of the index cannot put a row
+ *  back. They expire — a tombstone older than any index row it could resurrect
+ *  is just weight. */
+const TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const TOMBSTONE_MAX = 300;
 
 const DB_NAME = "paragon";
 const DB_VERSION = 1;
@@ -60,8 +66,14 @@ const MAX_BODY_BYTES = 40 * 1024 * 1024;
 // cheap.
 
 let cache: ArchiveEntry[] | null = null;
-/** Ids deleted here, so a merge with another tab's copy cannot resurrect them. */
-const tombstones = new Set<string>();
+/** Ids deleted, and when — so neither another tab's copy of the index nor a run
+ *  still finishing in this one can put a deleted row back. Persisted with the
+ *  index, because a tombstone only this tab knows about is a tombstone the
+ *  other tab will happily overwrite. */
+const tombstones = new Map<string, number>();
+/** Bumped by "Clear all". A write already in flight re-checks it after each
+ *  await and gives up if the record was cleared underneath it. */
+let epoch = 0;
 let flushQueued = false;
 
 const listeners = new Set<(entries: ArchiveEntry[]) => void>();
@@ -81,8 +93,15 @@ function newestFirst(a: ArchiveEntry, b: ArchiveEntry): number {
   return Date.parse(b.startedAt) - Date.parse(a.startedAt);
 }
 
-function parseIndex(raw: string | null): ArchiveEntry[] {
-  if (!raw) return [];
+interface Envelope {
+  v: number;
+  entries: ArchiveEntry[];
+  /** Deletions, so every tab honours every tab's. */
+  deleted?: Array<{ id: string; at: number }>;
+}
+
+function parseEnvelope(raw: string | null): { entries: ArchiveEntry[]; deleted: Array<{ id: string; at: number }> } {
+  if (!raw) return { entries: [], deleted: [] };
   try {
     const parsed = JSON.parse(raw) as unknown;
     // An envelope from day one, so a future shape change is an upgrade rather
@@ -90,25 +109,51 @@ function parseIndex(raw: string | null): ArchiveEntry[] {
     // case anything ever wrote one.
     const rows = Array.isArray(parsed)
       ? parsed
-      : Array.isArray((parsed as { entries?: unknown })?.entries)
-        ? (parsed as { entries: unknown[] }).entries
+      : Array.isArray((parsed as Envelope | null)?.entries)
+        ? (parsed as Envelope).entries
         : [];
-    return rows.filter(valid).sort(newestFirst);
+    const deleted = Array.isArray((parsed as Envelope | null)?.deleted)
+      ? (parsed as Envelope).deleted!.filter(
+          (d) => typeof d?.id === "string" && Number.isFinite(d?.at),
+        )
+      : [];
+    return { entries: (rows as unknown[]).filter(valid).sort(newestFirst), deleted };
   } catch {
-    return [];
+    return { entries: [], deleted: [] };
   }
 }
 
-/** Carry the old five-item recent list across, once, so an upgrade does not
- *  look like a wipe. The rows have a timestamp and a subject and nothing else,
- *  which is exactly what they are shown as. */
+function parseIndex(raw: string | null): ArchiveEntry[] {
+  return parseEnvelope(raw).entries;
+}
+
+/** Adopt another tab's deletions alongside our own, and drop the ones too old
+ *  to still be protecting anything. */
+function absorbTombstones(deleted: Array<{ id: string; at: number }>): void {
+  const now = Date.now();
+  for (const d of deleted) if (!tombstones.has(d.id)) tombstones.set(d.id, d.at);
+  for (const [id, at] of tombstones) if (now - at > TOMBSTONE_TTL_MS) tombstones.delete(id);
+  if (tombstones.size > TOMBSTONE_MAX) {
+    const oldest = [...tombstones.entries()].sort((a, b) => a[1] - b[1]);
+    for (const [id] of oldest.slice(0, tombstones.size - TOMBSTONE_MAX)) tombstones.delete(id);
+  }
+}
+
+/**
+ * Carry the old five-item recent list across, once.
+ *
+ * The sentinel is written by the caller, and only once the converted rows have
+ * actually reached storage. Claiming the migration is done before persisting it
+ * is how an upgrade that nobody interrupted still loses the five rows: they
+ * would live in memory for one page view, never be written, and the sentinel
+ * would stop them ever being read again.
+ */
 function migrate(): ArchiveEntry[] {
   if (window.localStorage.getItem(MIGRATED_KEY)) return [];
-  const out: ArchiveEntry[] = [];
   try {
-    getRecentSearches().forEach((r, i) => {
-      if (!Number.isFinite(Date.parse(r.at))) return;
-      out.push({
+    return getRecentSearches()
+      .filter((r) => Number.isFinite(Date.parse(r.at)))
+      .map((r, i): ArchiveEntry => ({
         id: `legacy-${i}-${Date.parse(r.at)}`,
         showInRecent: true,
         rawQuery: r.company,
@@ -116,37 +161,52 @@ function migrate(): ArchiveEntry[] {
         company: r.company,
         promoters: r.promoters,
         startedAt: r.at,
-        outcome: "unknown",
+        // These rows are a subject and a time. Nothing was ever kept about how
+        // the run ended, and the list says exactly that rather than borrowing
+        // the wording of a run this browser stopped watching.
+        outcome: "legacy",
         red: 0,
         amber: 0,
         sourcesDone: 0,
         sourcesTotal: 0,
         hasBody: false,
         bytes: 0,
-      });
-    });
-    window.localStorage.setItem(MIGRATED_KEY, "1");
+      }));
   } catch {
-    /* best effort — a failed migration must not block history itself */
+    return [];
   }
-  return out;
 }
 
 function load(): ArchiveEntry[] {
   if (typeof window === "undefined") return [];
-  const stored = parseIndex(window.localStorage.getItem(INDEX_KEY));
-  if (stored.length > 0) {
-    // Still mark the migration done, so a browser that already carried its
-    // legacy rows across cannot re-import them after a "Clear all".
+  const { entries, deleted } = parseEnvelope(window.localStorage.getItem(INDEX_KEY));
+  absorbTombstones(deleted);
+  const done = () => {
     try {
-      if (!window.localStorage.getItem(MIGRATED_KEY)) window.localStorage.setItem(MIGRATED_KEY, "1");
+      window.localStorage.setItem(MIGRATED_KEY, "1");
     } catch {
       /* ignore */
     }
-    return stored;
+  };
+
+  if (entries.length > 0) {
+    // A browser that already carried its legacy rows across must not re-import
+    // them after a "Clear all".
+    if (!window.localStorage.getItem(MIGRATED_KEY)) done();
+    return entries;
   }
-  const migrated = migrate();
-  return migrated.length > 0 ? migrated.sort(newestFirst) : stored;
+
+  const migrated = migrate().sort(newestFirst);
+  if (migrated.length === 0) {
+    done();
+    return entries;
+  }
+  // Persist first, claim second. Nothing else on mount writes the index, so a
+  // user who opens the page and reads it without starting a search would
+  // otherwise lose the rows on their next reload.
+  write(migrated);
+  done();
+  return migrated;
 }
 
 export function readHistory(): ArchiveEntry[] {
@@ -166,17 +226,28 @@ function emit(): void {
   }
 }
 
+/** A cheap identity for "what the subscribers were last shown", so a flush that
+ *  silently trimmed the list can tell it has to say so. */
+function signature(entries: ArchiveEntry[]): string {
+  return `${entries.length}:${entries.map((e) => e.id).join(",")}`;
+}
+
+function tombstonePayload(): Array<{ id: string; at: number }> {
+  return [...tombstones.entries()].map(([id, at]) => ({ id, at }));
+}
+
 function write(entries: ArchiveEntry[]): void {
-  const payload = JSON.stringify({ v: ARCHIVE_VERSION, entries });
+  const envelope = (rows: ArchiveEntry[]) =>
+    JSON.stringify({ v: ARCHIVE_VERSION, entries: rows, deleted: tombstonePayload() } satisfies Envelope);
   try {
-    window.localStorage.setItem(INDEX_KEY, payload);
+    window.localStorage.setItem(INDEX_KEY, envelope(entries));
   } catch {
     // Out of room. Drop the oldest half and try once more; if that fails the
     // index stays as it was on disk, which is worse than the truth but never
     // an exception thrown at whatever was recording a run.
     const half = entries.slice(0, Math.max(1, Math.floor(entries.length / 2)));
     try {
-      window.localStorage.setItem(INDEX_KEY, JSON.stringify({ v: ARCHIVE_VERSION, entries: half }));
+      window.localStorage.setItem(INDEX_KEY, envelope(half));
       cache = half;
     } catch {
       /* give up quietly */
@@ -186,14 +257,17 @@ function write(entries: ArchiveEntry[]): void {
 
 function flush(): void {
   if (typeof window === "undefined" || cache === null) return;
+  const before = signature(cache);
 
   // Merge with whatever is on disk before writing. Two tabs both hold the whole
   // array, so a plain overwrite would silently drop a run the other one just
-  // finished. Ours wins per id; anything we deleted stays deleted.
-  const disk = parseIndex(window.localStorage.getItem(INDEX_KEY));
+  // finished. Ours wins per id; anything either tab deleted stays deleted.
+  const { entries: disk, deleted } = parseEnvelope(window.localStorage.getItem(INDEX_KEY));
+  absorbTombstones(deleted);
+
   const byId = new Map<string, ArchiveEntry>();
   for (const e of disk) if (!tombstones.has(e.id)) byId.set(e.id, e);
-  for (const e of cache) byId.set(e.id, e);
+  for (const e of cache) if (!tombstones.has(e.id)) byId.set(e.id, e);
 
   let merged = [...byId.values()].sort(newestFirst).slice(0, MAX_ENTRIES);
   while (merged.length > 1 && byteLength(merged) > MAX_INDEX_BYTES) {
@@ -202,6 +276,10 @@ function flush(): void {
 
   cache = merged;
   write(merged);
+  // The merge can add another tab's runs and the budget can drop the oldest —
+  // either way what is on screen is no longer what is stored, and a list that
+  // shows a row the store has just dropped is a list with a dead Open button.
+  if (signature(cache) !== before) emit();
 }
 
 function commit(next: ArchiveEntry[]): void {
@@ -246,10 +324,15 @@ export function subscribeHistory(fn: (entries: ArchiveEntry[]) => void): () => v
   };
 }
 
-/** Another tab wrote the index. Adopt it rather than fighting over it. */
+/** Another tab wrote the index. Adopt it rather than fighting over it — but
+ *  not its idea of what still exists: a row this tab deleted a moment ago is
+ *  still deleted, and adopting the other tab's copy wholesale would put it
+ *  back on screen. */
 function onStorage(e: StorageEvent): void {
   if (e.key !== INDEX_KEY) return;
-  cache = parseIndex(e.newValue);
+  const { entries, deleted } = parseEnvelope(e.newValue);
+  absorbTombstones(deleted);
+  cache = entries.filter((row) => !tombstones.has(row.id));
   emit();
 }
 
@@ -294,8 +377,18 @@ function tx<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequ
         try {
           const t = db.transaction(STORE, mode);
           const req = run(t.objectStore(STORE));
-          req.onsuccess = () => resolve((req.result as T) ?? fallback);
+          let result: T = fallback;
+          req.onsuccess = () => {
+            result = (req.result as T) ?? fallback;
+            // A read is answered by its request. A write is not answered until
+            // the transaction commits: a quota failure surfaces at commit time,
+            // after the put has already reported success, and reporting that as
+            // a saved brief is how a row comes to offer an Open that opens
+            // nothing.
+            if (mode === "readonly") resolve(result);
+          };
           req.onerror = () => resolve(fallback);
+          t.oncomplete = () => resolve(result);
           t.onabort = () => resolve(fallback);
           t.onerror = () => resolve(fallback);
         } catch {
@@ -379,10 +472,22 @@ async function bodyBudget(): Promise<number> {
 /** Finishes already under way, so a double-fire from the poll costs one write
  *  rather than two whole-index rewrites and two snapshot builds. */
 const finishing = new Set<string>();
-/** Every body write, and the index write that follows it, in one chain — a
- *  synchronous `recordError` must not land between an async finish's put and
- *  its row update and get overwritten by it. */
+
+/**
+ * Every body write, and the index write that follows it, in one chain.
+ *
+ * A synchronous `recordError` must not land between an async finish's put and
+ * its row update and get overwritten by it. The chain is also self-healing: a
+ * step that throws is swallowed rather than left as a rejected promise, because
+ * a single malformed run must not silently turn every later write in the
+ * session into a no-op.
+ */
 let chain: Promise<void> = Promise.resolve();
+
+function queue(step: () => void | Promise<void>): Promise<void> {
+  chain = chain.then(step).catch(() => {});
+  return chain;
+}
 
 export function recordStart(i: StartInput): void {
   mutate((entries) => upsert(entries, entryFromStart(i)));
@@ -399,7 +504,7 @@ export function recordServerId(id: string, serverId: string): void {
 }
 
 export function recordError(id: string, message: string): void {
-  chain = chain.then(() => {
+  void queue(() => {
     patch(id, (prev) =>
       // A run already archived is done. An error seen afterwards is the poll
       // losing contact with a server that has moved on, not the run failing.
@@ -409,9 +514,9 @@ export function recordError(id: string, message: string): void {
 }
 
 /** The run kept going after this browser stopped watching — a tab closed from
- *  the rail. Recorded as what is known, which is nothing about the outcome. */
+ *  the rail, or a client-side timeout on a run the server is still working. */
 export function recordUnknown(id: string): void {
-  chain = chain.then(() => {
+  void queue(() => {
     patch(id, (prev) => (prev.outcome === "running" ? unknownEntry(prev) : prev));
   });
 }
@@ -419,18 +524,27 @@ export function recordUnknown(id: string): void {
 /**
  * Archive a finished run.
  *
- * Idempotent and cheap on the second call: a run already saved with its brief
- * returns immediately, without rebuilding a snapshot. That matters because this
- * is called from the poll's completion branch AND from the reload re-attach,
- * and the re-attach runs on every mount — not only after a crash.
+ * Idempotent and cheap on the second call: a run already saved with its brief —
+ * or one whose brief storage was already refused — returns immediately, without
+ * rebuilding a snapshot. That matters because this is called from the poll's
+ * completion branch AND from the reload re-attach, and the re-attach runs on
+ * every mount, not only after a crash. Without the refusal case in the guard, a
+ * browser that will not store bodies would rebuild a 65 KB snapshot and evict
+ * other people's briefs to make room for it, on every single visit.
  */
 export function recordFinish(id: string, run: Run, startedAt?: number): Promise<void> {
   if (typeof window === "undefined") return Promise.resolve();
 
-  chain = chain.then(async () => {
+  return queue(async () => {
     if (finishing.has(id)) return;
+    // The record was cleared, or this row deleted, since the run started. Both
+    // are the user saying they do not want it; finishing it would put it back.
+    const era = epoch;
+    if (tombstones.has(id)) return;
+
     const existing = readHistory().find((e) => e.id === id);
-    if (existing?.outcome === "complete" && existing.hasBody) return;
+    if (existing?.outcome === "complete" && (existing.hasBody || existing.bodyFailed)) return;
+    if (!existing && tombstones.has(id)) return;
 
     finishing.add(id);
     try {
@@ -442,54 +556,80 @@ export function recordFinish(id: string, run: Run, startedAt?: number): Promise<
       if (body) {
         bytes = byteLength(body);
         await evictBodies(bytes, id);
+        if (epoch !== era) return;
         saved = await putBody({ id, v: ARCHIVE_VERSION, entry: prev, run: body });
         if (!saved) {
           // Most likely a quota refusal against a budget the browser disagrees
-          // with. Make room the hard way and try once more.
-          await evictBodies(bytes * 8, id);
+          // with. Make a little more room and try once; anything more
+          // aggressive trades other people's briefs for one that may well be
+          // refused again anyway.
+          await evictBodies(bytes * 2, id);
+          if (epoch !== era) return;
           saved = await putBody({ id, v: ARCHIVE_VERSION, entry: prev, run: body });
         }
       }
 
-      mutate((entries) => upsert(entries, finishEntry(prev, run, saved ? bytes : 0, saved, Date.now())));
+      // Re-checked after every await: "Clear all" may have run while the body
+      // was being written, and a row upserted after that would come back from
+      // the dead with its body already deleted behind it.
+      if (epoch !== era || tombstones.has(id)) return;
+
+      mutate((entries) =>
+        upsert(
+          entries,
+          finishEntry(prev, run, {
+            bytes: saved ? bytes : 0,
+            hasBody: saved,
+            bodyFailed: Boolean(body) && !saved,
+            now: Date.now(),
+          }),
+        ),
+      );
     } finally {
       finishing.delete(id);
     }
   });
-
-  return chain;
 }
 
 // ── Reading and editing the record ──────────────────────────────────────────
 
-/** Take a subject off the front page's short list without destroying the run.
- *  The × on "Recent searches" has always been a tidy-up; it must not quietly
- *  become the only copy of a brief being deleted. */
-export function hideFromRecent(id: string): void {
-  patch(id, (prev) => ({ ...prev, showInRecent: false }));
+export function removeEntry(id: string): void {
+  tombstones.set(id, Date.now());
+  mutate((entries) => entries.filter((e) => e.id !== id));
+  void queue(() => delBody(id));
 }
 
-export function removeEntry(id: string): void {
-  tombstones.add(id);
-  mutate((entries) => entries.filter((e) => e.id !== id));
-  chain = chain.then(() => delBody(id));
+/** Every subject on the front page's short list shares one identity, and the ×
+ *  there promises to take that subject off it. Hiding a single run id would let
+ *  the previous run of the same company step straight into the empty slot. */
+export function hideSubjectFromRecent(id: string): void {
+  mutate((entries) => {
+    const target = entries.find((e) => e.id === id);
+    if (!target) return entries;
+    const key = subjectKey(target);
+    return entries.map((e) => (subjectKey(e) === key ? { ...e, showInRecent: false } : e));
+  });
 }
 
 export function clearHistory(): void {
   if (typeof window === "undefined") return;
-  for (const e of readHistory()) tombstones.add(e.id);
+  // Anything still finishing checks this before it writes, so a run that lands
+  // a second after the clear does not walk back into an emptied list.
+  epoch += 1;
+  const now = Date.now();
+  for (const e of readHistory()) tombstones.set(e.id, now);
   commit([]);
   try {
     // An empty history is a stored fact, not an absent key — and the superseded
     // recent-search list goes with it. "Clear all" that leaves one of the two
     // places history lives untouched is a control that undoes itself.
-    window.localStorage.setItem(INDEX_KEY, JSON.stringify({ v: ARCHIVE_VERSION, entries: [] }));
+    write([]);
     window.localStorage.setItem(MIGRATED_KEY, "1");
     window.localStorage.removeItem("paragon.recentSearches");
   } catch {
     /* ignore */
   }
-  chain = chain.then(() => clearBodies());
+  void queue(() => clearBodies());
 }
 
 export function loadArchived(id: string): Promise<ArchivedRun | null> {
@@ -545,13 +685,16 @@ export async function importHistory(raw: string): Promise<ImportResult> {
     (r) => r?.run?.brief && fresh.some((e) => e.id === r.entry?.id),
   );
 
-  let briefs = 0;
+  // `hasBody` must track what storage actually accepted, not what was offered
+  // — a row claiming a saved brief it does not have is an Open that opens
+  // nothing, which is the one thing this list must never show.
+  const stored = new Set<string>();
   for (const r of bodies) {
-    const ok = await putBody({ ...r, id: r.entry.id });
-    if (ok) briefs += 1;
+    if (await putBody({ ...r, id: r.entry.id })) stored.add(r.entry.id);
   }
-  const stored = new Set(bodies.map((r) => r.entry.id));
+  const briefs = stored.size;
 
+  // Re-importing a row the user deleted here is them asking for it back.
   for (const e of fresh) tombstones.delete(e.id);
   mutate((entries) => [
     ...entries,

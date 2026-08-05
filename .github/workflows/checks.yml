@@ -48,6 +48,12 @@ jobs:
       # quieter document rather than as a failure. This is what notices.
       # Fixtures only: no credential, no network.
       - run: npm run check:archive
+      # The history store against the ways it can silently lose a record — a
+      # migration claimed before it was written, a "Clear all" overtaken by a
+      # run landing behind it, a delete undone by another tab's copy of the
+      # index. Each page load is a child process with a stubbed browser, because
+      # the store holds the index in memory and a reload is what drops it.
+      - run: npm run check:history
 
   registry-parser:
     runs-on: ubuntu-latest

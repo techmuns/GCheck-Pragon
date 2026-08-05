@@ -177,11 +177,15 @@ export function useRuns(): UseRuns {
           const res = await fetch(apiUrl(`/api/research/${s.serverId}`));
           if (!res.ok) return null;
           const run: Run = await res.json();
-          // A run that landed while the tab was shut is archived here — this is
-          // the only place that finish is ever observed. `recordFinish` is a
+          // A run that ended while the tab was shut is recorded here — this is
+          // the only place that ending is ever observed. `recordFinish` is a
           // no-op for a run already saved, so the re-attach (which runs on
           // every mount, not only after a crash) costs nothing on a revisit.
+          // The failure branch matters as much: without it a run that errored
+          // overnight sits in history claiming to be running, and the staleness
+          // heuristic eventually relabels it as one nobody ever saw the end of.
           if (run.status === "complete") void recordFinish(s.key, run, s.startedAt);
+          else if (run.status === "error") recordError(s.key, run.error ?? "The pre-screen failed.");
           return {
             key: s.key,
             serverId: s.serverId,
@@ -200,7 +204,15 @@ export function useRuns(): UseRuns {
     ).then((restored) => {
       if (cancelled) return;
       const live = restored.filter((r): r is TrackedRun => r !== null);
-      if (live.length > 0) setRuns((prev) => (prev.length > 0 ? prev : live));
+      if (live.length === 0) return;
+      // Merged by key, not swapped in wholesale. A search started while these
+      // were still being fetched used to throw every restored run away — and
+      // the next `writeStore` then erased them from storage too, so a run still
+      // in flight became unreachable because the user was quick.
+      setRuns((prev) => {
+        const have = new Set(prev.map((t) => t.key));
+        return trim([...prev, ...live.filter((t) => !have.has(t.key))]);
+      });
     });
 
     return () => {
@@ -230,7 +242,15 @@ export function useRuns(): UseRuns {
           };
 
           if (Date.now() - t.startedAt > RUN_TIMEOUT_MS) {
-            fail("This pre-screen is taking longer than expected. Please run it again.");
+            // This browser's patience running out is not the run failing. The
+            // server may well still be working, so history records that it
+            // stopped watching rather than inventing a failure and a finish
+            // time for a run that has neither.
+            recordUnknown(key);
+            patch(key, {
+              phase: "error",
+              error: "This pre-screen is taking longer than expected. Please run it again.",
+            });
             return;
           }
 
@@ -359,8 +379,19 @@ export function useRuns(): UseRuns {
     // Closing a brief closes the runs started from it. They were opened while
     // reading that brief and are reached through it; left behind they would
     // read as searches from the front door that the user never made.
+    // The whole subtree, not one generation: a director screened off a company
+    // brief can have companies screened off theirs, and a grandchild left
+    // behind renders as a search from the front door that nobody made.
     const doomed = new Set<string>([key]);
-    for (const t of runsRef.current) if (t.parentKey === key) doomed.add(t.key);
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const t of runsRef.current) {
+        if (t.parentKey && doomed.has(t.parentKey) && !doomed.has(t.key)) {
+          doomed.add(t.key);
+          grew = true;
+        }
+      }
+    }
 
     // Closing stops watching, not running — so a run still in flight is
     // recorded as exactly that. Left alone its history row would sit at

@@ -38,8 +38,13 @@ export const ARCHIVE_VERSION = 1;
  *  "unknown" is a real outcome, not a placeholder: a run closed from the rail
  *  keeps going on the server, and a tab shut mid-run never sees the finish. The
  *  app knows it stopped watching; it does not know the run failed, and must not
- *  say so. */
-export type ArchiveOutcome = "running" | "complete" | "error" | "unknown";
+ *  say so.
+ *
+ *  "legacy" is a row carried over from the recent-search list this archive
+ *  replaced. Those rows are a subject and a time; no outcome was ever recorded
+ *  for them, and saying the tab stopped watching would be inventing a story
+ *  about a run nothing was ever kept about. */
+export type ArchiveOutcome = "running" | "complete" | "error" | "unknown" | "legacy";
 
 /** One row of history — everything the list needs, and nothing that costs. */
 export interface ArchiveEntry {
@@ -87,6 +92,10 @@ export interface ArchiveEntry {
   /** Whether a re-openable copy of the brief is still stored. Snapshots are a
    *  rolling window; rows are not. */
   hasBody: boolean;
+  /** Set when a snapshot was built and storage refused it. Stops every later
+   *  mount rebuilding the same 65 KB snapshot and evicting other people's
+   *  briefs to make room it will be refused again. */
+  bodyFailed?: boolean;
   /** Serialised size of the snapshot, for the eviction budget. */
   bytes: number;
 }
@@ -217,17 +226,24 @@ export function entryFromStart(i: StartInput): ArchiveEntry {
 export function entryFromRun(id: string, run: Run, startedAt?: number): ArchiveEntry {
   const s = run.subject;
   const type = s.type ?? "company";
+  const createdAt = Date.parse(run.createdAt);
   return {
     id,
     serverId: run.id,
     showInRecent: true,
-    rawQuery: type === "director" ? formatSuggestion({ name: s.company, din: s.din }) : s.company,
+    // The anchor company goes back into the query with the DIN. For a namesake
+    // the register could not resolve, that anchor is the only thing separating
+    // this person from the others of their name, and a re-run without it is a
+    // sweep across all of them.
+    rawQuery: type === "director" ? formatSuggestion({ name: s.company, din: s.din, companies: s.anchors }) : s.company,
     type,
     company: s.company,
     promoters: s.promoters,
     ticker: s.ticker,
     din: s.din,
-    startedAt: new Date(startedAt ?? Date.parse(run.createdAt) ?? Date.now()).toISOString(),
+    // Never `?? Date.now()` off a Date.parse: an unparseable date yields NaN,
+    // which is not nullish, and `new Date(NaN).toISOString()` throws.
+    startedAt: new Date(startedAt ?? (Number.isFinite(createdAt) ? createdAt : Date.now())).toISOString(),
     outcome: "running",
     red: 0,
     amber: 0,
@@ -247,14 +263,23 @@ function landedAt(run: Run): number | undefined {
   return Number.isFinite(t) ? t : undefined;
 }
 
-export function finishEntry(prev: ArchiveEntry, run: Run, bytes: number, hasBody: boolean, now: number): ArchiveEntry {
+export interface FinishInput {
+  bytes: number;
+  hasBody: boolean;
+  /** A snapshot was built and storage refused it — different from a run that
+   *  never had one, and the thing that stops every later mount trying again. */
+  bodyFailed: boolean;
+  now: number;
+}
+
+export function finishEntry(prev: ArchiveEntry, run: Run, i: FinishInput): ArchiveEntry {
   const rec = reconcile(run);
   const risk = run.brief ? assessRisk(run) : null;
   const s = run.subject;
 
   // A finish already recorded keeps its own timestamp. Re-deriving it on a
   // later visit is how a 90-second run comes to report a duration of a day.
-  const finishedAt = prev.finishedAt ?? new Date(landedAt(run) ?? now).toISOString();
+  const finishedAt = prev.finishedAt ?? new Date(landedAt(run) ?? i.now).toISOString();
   const started = Date.parse(prev.startedAt);
   const finished = Date.parse(finishedAt);
   const durationMs =
@@ -274,7 +299,7 @@ export function finishEntry(prev: ArchiveEntry, run: Run, bytes: number, hasBody
     din: s.din ?? prev.din,
     rawQuery:
       (s.type ?? prev.type) === "director" && s.din
-        ? formatSuggestion({ name: s.company, din: s.din })
+        ? formatSuggestion({ name: s.company, din: s.din, companies: s.anchors })
         : prev.rawQuery,
     finishedAt,
     durationMs,
@@ -290,8 +315,9 @@ export function finishEntry(prev: ArchiveEntry, run: Run, bytes: number, hasBody
     sourcesTotal: run.progress.length,
     boardDone: rec?.board.total ? rec.board.done : undefined,
     boardTotal: rec?.board.total || undefined,
-    hasBody,
-    bytes,
+    hasBody: i.hasBody,
+    bodyFailed: i.bodyFailed || undefined,
+    bytes: i.bytes,
   };
 }
 

@@ -4,6 +4,7 @@ import { useState } from "react";
 import AutocompleteField from "./AutocompleteField";
 import { severityStyle } from "./severity";
 import { useArchive } from "@/lib/useArchive";
+import { countSearches } from "@/lib/archive";
 import { formatGenerated } from "@/lib/printBrief";
 
 type Mode = "company" | "director";
@@ -28,6 +29,9 @@ export default function SearchForm({ onSubmit, onOpenHistory, busy }: Props) {
   // screen reads. The hook handles the read-after-mount, and keeps this list in
   // step as runs land rather than freezing it at whatever was there on mount.
   const { recent, entries, hide } = useArchive();
+  // The same figure the rail's badge shows — both are links to the same screen,
+  // and quoting two different numbers for it is a small lie about what is there.
+  const pastRuns = countSearches(entries);
 
   const isDirector = mode === "director";
 
@@ -104,7 +108,7 @@ export default function SearchForm({ onSubmit, onOpenHistory, busy }: Props) {
                 onClick={onOpenHistory}
                 className="text-[12px] font-medium text-navy-primary transition hover:text-navy-deep"
               >
-                See all {entries.length}
+                See all {pastRuns}
               </button>
             )}
           </div>
@@ -170,14 +174,14 @@ export default function SearchForm({ onSubmit, onOpenHistory, busy }: Props) {
         </div>
       )}
 
-      {recent.length === 0 && entries.length > 0 && onOpenHistory && (
+      {recent.length === 0 && pastRuns > 0 && onOpenHistory && (
         <div className="mt-6 border-t border-navy-primary/8 pt-4">
           <button
             type="button"
             onClick={onOpenHistory}
             className="text-[12.5px] font-medium text-navy-primary transition hover:text-navy-deep"
           >
-            See all {entries.length} past run{entries.length === 1 ? "" : "s"}
+            See all {pastRuns} past run{pastRuns === 1 ? "" : "s"}
           </button>
         </div>
       )}
