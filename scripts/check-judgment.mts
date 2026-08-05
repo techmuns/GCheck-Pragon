@@ -202,3 +202,90 @@ if (failures > 0) {
   process.exit(1);
 }
 console.log("\nAll judgment-reading checks passed.\n");
+
+// ── The table a partner reads ──────────────────────────────────────────────
+// Parsing the judgment is only half of it: the row built from those facts has
+// to answer, in plain English, who brought the matter and whether it is still
+// running. A bulleted cause title answered neither.
+
+const { buildCourtCases, prettyDate: pretty } = await import("../lib/courtCases");
+
+console.log("\nCourt case rows");
+
+check("a case the subject brought reads as theirs, not against them", () => {
+  const [row] = buildCourtCases(
+    [
+      {
+        title: "Indiamart Intermesh Ltd vs Puma Se on 2 June, 2025",
+        url: "https://indiankanoon.org/doc/85285346/",
+        extra: {
+          side: "appellant",
+          parties: ["Indiamart Intermesh Ltd. (appellant)", "PUMA SE (respondent)"],
+          court: "High Court of Delhi at New Delhi",
+          caseNumber: "FAO(OS) (COMM) 6/2024",
+          decidedOn: "2025-06-02",
+          bench: ["Vibhu Bakhru", "Tara Vitasta Ganju"],
+        },
+      },
+    ],
+    "IndiaMART InterMESH",
+  );
+  assert.equal(row.summary, "IndiaMART InterMESH brought this case against PUMA SE.");
+  assert.equal(row.subjectRole, "Brought the appeal");
+  assert.equal(row.subjectSide, "Appellant");
+  assert.equal(row.defending, false);
+  assert.equal(row.claimant, "Indiamart Intermesh Ltd.");
+  assert.equal(row.defendant, "PUMA SE");
+  assert.equal(row.caseNumber, "FAO(OS) (COMM) 6/2024");
+  assert.equal(row.bench, "Vibhu Bakhru, Tara Vitasta Ganju");
+  assert.equal(row.readFromJudgment, true);
+});
+
+check("a decided matter is never reported as live", () => {
+  const [row] = buildCourtCases(
+    [{ title: "X vs Y on 2 June, 2025", extra: { decidedOn: "2025-06-02" } }],
+    "X",
+  );
+  assert.equal(row.status, "Decided 2 Jun 2025");
+  assert.doesNotMatch(row.status, /live/i);
+});
+
+check("a case brought AGAINST the subject reads that way round", () => {
+  const [row] = buildCourtCases(
+    [
+      {
+        title: "Puma Se vs Indiamart Intermesh Ltd",
+        extra: {
+          side: "respondent",
+          parties: ["PUMA SE (appellant)", "Indiamart Intermesh Ltd. (respondent)"],
+        },
+      },
+    ],
+    "IndiaMART InterMESH",
+  );
+  assert.equal(row.summary, "PUMA SE brought this case against IndiaMART InterMESH.");
+  assert.equal(row.subjectRole, "Defending");
+  assert.equal(row.defending, true);
+});
+
+check("a title-only case still produces a usable row and says so", () => {
+  const [row] = buildCourtCases(
+    [{ title: "Indiamart Intermesh Limited vs Ankit & Ors on 7 February, 2024" }],
+    "IndiaMART InterMESH",
+  );
+  assert.equal(row.title, "Indiamart Intermesh Limited vs Ankit & Ors");
+  assert.equal(row.readFromJudgment, false);
+  assert.match(row.status, /7 February 2024/);
+  assert.equal(row.subjectRole, undefined);
+});
+
+check("dates read the way a person writes them", () => {
+  assert.equal(pretty("2025-06-02"), "2 Jun 2025");
+  assert.equal(pretty(undefined), undefined);
+});
+
+if (failures > 0) {
+  console.error(`\n${failures} check(s) failed.\n`);
+  process.exit(1);
+}
+console.log("\nAll court-case row checks passed.\n");

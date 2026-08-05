@@ -17,6 +17,7 @@ import { buildPrintBrief, formatGenerated, listConcerns, type Person } from "@/l
 import { buildNetwork } from "@/lib/network";
 import { sourceTier } from "@/lib/risk";
 import { humanizeCaps } from "@/lib/text";
+import { buildCourtCases, courtHitsOf, type CourtCaseRow } from "@/lib/courtCases";
 
 interface Props {
   run: Run;
@@ -388,6 +389,13 @@ export default function BriefView({ run, onReset, onScreenPeople, onScreenCompan
   const takeaway = buildTakeaway(run, redTotal, amberTotal, board.red);
   const sourcesChecked = run.progress.filter((p) => p.status === "done").length;
   const urlByRef = sourceUrls(brief.citations);
+  // Court cases, assembled from the judgments themselves rather than the cause
+  // titles. Built here so both the table and the empty-state read from one list.
+  const courtRows = buildCourtCases(
+    courtHitsOf(run),
+    run.subject.company,
+    new Map(brief.citations.filter((c) => c.url).map((c) => [c.url as string, c.ref])),
+  );
   const section = (id: string) => brief.sections.find((s) => s.id === id);
 
   // Sections rendered explicitly below rather than mapped in config order — a
@@ -687,10 +695,18 @@ export default function BriefView({ run, onReset, onScreenPeople, onScreenCompan
                   : null
           }
         />
-        <Pair
-          left={section("litigation") ? { title: "Court cases", body: listSection("litigation") } : null}
-          right={section("defaulters") ? { title: "Loan defaults", body: listSection("defaulters") } : null}
-        />
+        {/* Court cases get a table of their own rather than a slot in a Pair:
+            the answer to "what is this case" is six fields wide, and half a row
+            cannot hold it. */}
+        {courtRows.length > 0 && (
+          <Section title="Court cases" count={courtRows.length}>
+            <CourtCaseTable rows={courtRows} urlByRef={urlByRef} />
+          </Section>
+        )}
+        {courtRows.length === 0 && section("litigation") && (
+          <Section title="Court cases">{listSection("litigation")}</Section>
+        )}
+        {section("defaulters") && <Section title="Loan defaults">{listSection("defaulters")}</Section>}
 
 
         {/* Company runs only. On a director run these are the subject's own
@@ -828,6 +844,86 @@ export default function BriefView({ run, onReset, onScreenPeople, onScreenCompan
 
       {/* The download output — print-only, portalled to <body>. */}
       {printBrief && <BriefPrint brief={printBrief} />}
+    </div>
+  );
+}
+
+/**
+ * Court cases as a table.
+ *
+ * A bulleted cause title — "Indiamart Intermesh Ltd vs Puma Se on 2 June,
+ * 2025" — is the registry's filing label, not an answer. Everything a partner
+ * actually asks is missing from it: who started this, who is defending, before
+ * which court, under what number, is it still running.
+ *
+ * So each case gets a row and, beneath it, the facts read off the judgment. The
+ * plain-English line comes first because it is the one a non-litigator needs;
+ * the exact legal terms sit beside it because counsel will use those.
+ */
+function CourtCaseTable({ rows, urlByRef }: { rows: CourtCaseRow[]; urlByRef: Map<number, string | undefined> }) {
+  return (
+    <div className="space-y-2.5">
+      {rows.map((c, i) => (
+        <div
+          key={i}
+          className="rounded-xl border border-[rgba(23,43,77,0.12)] bg-white/60 p-3.5"
+        >
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+            <span className="text-[13.5px] font-semibold leading-snug text-navy-deep">
+              {c.summary}
+              {c.ref !== undefined && <CitationRef n={c.ref} url={urlByRef.get(c.ref)} />}
+            </span>
+            <span
+              className={`shrink-0 rounded-md px-2 py-0.5 text-[11px] font-semibold ${
+                c.decidedOn
+                  ? "bg-navy-primary/8 text-navy-primary"
+                  : "bg-gold/15 text-[#8a6d1f]"
+              }`}
+            >
+              {c.status}
+            </span>
+          </div>
+
+          {/* The cause title, kept verbatim so the row can be checked against
+              the registry it came from. */}
+          <div className="mt-1 text-[12px] italic leading-snug text-ink-secondary">{c.title}</div>
+
+          <dl className="mt-2.5 grid grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-2">
+            {c.subjectRole && (
+              <Field
+                label="Our subject"
+                value={`${c.subjectRole}${c.subjectSide ? ` (${c.subjectSide})` : ""}`}
+                tone={c.defending ? "amber" : "plain"}
+              />
+            )}
+            {c.claimant && <Field label="Brought by" value={c.claimant} />}
+            {c.defendant && <Field label="Against" value={c.defendant} />}
+            {c.court && <Field label="Court" value={c.court} />}
+            {c.caseNumber && <Field label="Case number" value={c.caseNumber} />}
+            {c.bench && <Field label="Heard by" value={c.bench} />}
+            {c.counsel && <Field label="Counsel" value={c.counsel} />}
+          </dl>
+
+          {!c.readFromJudgment && (
+            <p className="mt-2 text-[11px] leading-relaxed text-ink-secondary/75">
+              Listed on the registry only — the judgment could not be opened, so the parties and
+              court are not confirmed here.
+            </p>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** One labelled fact in a case row. */
+function Field({ label, value, tone = "plain" }: { label: string; value: string; tone?: "plain" | "amber" }) {
+  return (
+    <div className="flex gap-2">
+      <dt className="w-[92px] shrink-0 text-[11px] uppercase tracking-wide text-ink-secondary/70">{label}</dt>
+      <dd className={`text-[12.5px] leading-snug ${tone === "amber" ? "font-semibold text-[#8a6d1f]" : "text-ink-primary"}`}>
+        {value}
+      </dd>
     </div>
   );
 }
