@@ -1,9 +1,19 @@
 import type { Subject } from "./types";
 
-// ── Recent-search history (client-side) ────────────────────────────────────
-// Runs live only in the server's in-memory store, so "recent searches" is kept
-// in the browser's localStorage instead — it survives reloads and lets a
-// partner re-run a recent subject in one click. Last few, most-recent first.
+// ── Superseded: the old recent-search list ─────────────────────────────────
+// This key held the last five *queries* — names and a timestamp, no outcome,
+// and the timestamp was never shown. It has been replaced by the run archive
+// (lib/archive.ts, lib/archiveStore.ts), which records every run rather than
+// the last five subjects, keeps what each one concluded, and is what the
+// History screen and the front page's recent list both read.
+//
+// The file survives for exactly one reason: a browser upgrading into the new
+// version still has this key, and those five rows are the only history that
+// user has. `archiveStore` reads them once, converts them, and writes a
+// sentinel so it never does it again.
+//
+// Nothing writes here any more. Leaving a live writer on a superseded key is
+// how two lists that are meant to be one start disagreeing.
 
 const KEY = "paragon.recentSearches";
 const MAX = 5;
@@ -11,12 +21,6 @@ const MAX = 5;
 export interface RecentSearch extends Subject {
   /** ISO timestamp of when the search was last run. */
   at: string;
-}
-
-/** A stable identity for a subject — type + name + promoter set. */
-function keyOf(s: Subject): string {
-  const promoters = [...s.promoters].map((p) => p.toLowerCase()).sort();
-  return `${s.type ?? "company"}|${s.company.toLowerCase()}|${promoters.join(",")}`;
 }
 
 export function getRecentSearches(): RecentSearch[] {
@@ -32,36 +36,4 @@ export function getRecentSearches(): RecentSearch[] {
   } catch {
     return [];
   }
-}
-
-/** Remove one recent search by its subject identity. Returns the new list. */
-export function removeRecentSearch(subject: Subject): RecentSearch[] {
-  if (typeof window === "undefined") return [];
-  const key = keyOf(subject);
-  const next = getRecentSearches().filter((r) => keyOf(r) !== key);
-  try {
-    window.localStorage.setItem(KEY, JSON.stringify(next));
-  } catch {
-    /* storage unavailable — best-effort */
-  }
-  return next;
-}
-
-/** Record a search, deduping by subject identity and capping at MAX. */
-export function addRecentSearch(subject: Subject): RecentSearch[] {
-  if (typeof window === "undefined") return [];
-  const entry: RecentSearch = {
-    type: subject.type ?? "company",
-    company: subject.company,
-    promoters: subject.promoters,
-    at: new Date().toISOString(),
-  };
-  const key = keyOf(subject);
-  const next = [entry, ...getRecentSearches().filter((r) => keyOf(r) !== key)].slice(0, MAX);
-  try {
-    window.localStorage.setItem(KEY, JSON.stringify(next));
-  } catch {
-    /* storage full / unavailable — history is best-effort */
-  }
-  return next;
 }

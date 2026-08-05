@@ -224,6 +224,11 @@ export interface CollectorResult {
   /** Honest reason for skip/error — surfaced to the user, never hidden. */
   note?: string;
   hits: RawHit[];
+  /** How many hits the source actually returned, when `hits` is a trimmed copy
+   *  of that (a run re-read from the browser archive). Absent on a live run,
+   *  where `hits.length` is the truth. Kept so a saved brief cannot report
+   *  "nothing on record" about a source that returned forty things. */
+  originalHits?: number;
   /** The queries this collector actually ran (for transparency). */
   queries?: string[];
   /** A sample of what the sweep found and set aside, and why. */

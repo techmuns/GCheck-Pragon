@@ -11,7 +11,10 @@ import ResearchProgress from "@/components/ResearchProgress";
 import RunComplete from "@/components/RunComplete";
 import BriefView from "@/components/BriefView";
 import RunSidebar from "@/components/RunSidebar";
+import HistoryView from "@/components/HistoryView";
 import { useRuns } from "@/lib/useRuns";
+import { useArchive, type OpenedRun } from "@/lib/useArchive";
+import { countSearches } from "@/lib/archive";
 import { formatSuggestion } from "@/lib/directorId";
 
 export default function Home() {
@@ -20,6 +23,14 @@ export default function Home() {
   // session token is what every API call is authenticated with, threaded
   // through useRuns and the widgets that fetch.
   const { session, ticker, tickerCompany } = useHostContext();
+  const { entries, opening, open, remove, clear, exportJson, importJson } = useArchive();
+
+  // Where the page is when no run is selected: the search box, the history
+  // list, or a past brief re-opened from it. One value rather than a pile of
+  // booleans, so the rail can never highlight two places at once.
+  const [view, setView] = useState<"search" | "history">("search");
+  const [past, setPast] = useState<OpenedRun | null>(null);
+  const [historyNote, setHistoryNote] = useState<string | null>(null);
 
   // The counted lead-in belongs to whichever run is being started, not to the
   // page — switching away from a run and back must not replay its countdown.
@@ -124,13 +135,35 @@ export default function Home() {
     };
   }, []);
 
+  // Every route back to the front door goes through here, so leaving a brief
+  // never lands the reader on the history panel they last had open.
+  const goTo = useCallback(
+    (key: string | null) => {
+      setView("search");
+      setPast(null);
+      setHistoryNote(null);
+      select(key);
+    },
+    [select],
+  );
+
+  const openHistory = useCallback(() => {
+    setPast(null);
+    setHistoryNote(null);
+    setView("history");
+    select(null);
+  }, [select]);
+
   const counted = activeKey ? Boolean(prepped[activeKey]) : false;
   // "Ready" means the lead-in has finished AND the run has landed. Until then
   // the prep card holds, so a cold-started backend never drops the user onto a
   // bare screen.
   const ready = counted && active?.run != null;
 
-  const showForm = active === null;
+  const idle = active === null;
+  const showPast = idle && past !== null;
+  const showHistory = idle && !showPast && view === "history";
+  const showForm = idle && !showPast && view === "search";
   const showPrep = active !== null && active.phase !== "error" && !ready;
   const hasBrief = active?.run?.brief != null;
   // ── One final answer, not a moving one ───────────────────────────────────
@@ -169,7 +202,15 @@ export default function Home() {
       {(centered || showPrep) && <AuroraBackground />}
 
       {/* Recent runs — a fixed left rail on desktop, a horizontal bar on mobile. */}
-      <RunSidebar runs={runs} activeKey={activeKey} onSelect={select} onClose={close} />
+      <RunSidebar
+        runs={runs}
+        activeKey={activeKey}
+        onSelect={goTo}
+        onClose={close}
+        onOpenHistory={openHistory}
+        historyOpen={showHistory || showPast}
+        historyCount={countSearches(entries)}
+      />
 
       {/* Content column, offset clear of the rail on desktop.
 
@@ -185,9 +226,84 @@ export default function Home() {
         {showForm && (
           <SearchForm
             onSubmit={start}
+            onOpenHistory={openHistory}
             hostCompany={tickerCompany}
             hostTicker={ticker}
             awaitingSession={session.token === null && sdk.getChannelId() !== null}
+          />
+        )}
+
+        {showHistory && (
+          <HistoryView
+            entries={entries}
+            opening={opening}
+            notice={historyNote}
+            onRunAgain={(rawQuery, promoters, type, tick) => {
+              setView("search");
+              start(rawQuery, promoters, type, tick);
+            }}
+            onOpen={(id) => {
+              setHistoryNote(null);
+              void open(id).then((opened) => {
+                if (opened) setPast(opened);
+                else
+                  setHistoryNote(
+                    "That brief isn’t here any more — the saved copy was cleared and the server no longer has the run. Run it again to rebuild it.",
+                  );
+              });
+            }}
+            onDelete={remove}
+            onClear={clear}
+            onExport={() => {
+              void exportJson().catch(() =>
+                setHistoryNote(
+                  "Couldn’t write the export file. If this page is embedded, open it in its own tab and try again.",
+                ),
+              );
+            }}
+            onImport={(raw) => {
+              void importJson(raw)
+                .then((r) =>
+                  setHistoryNote(
+                    `Imported ${r.added} run${r.added === 1 ? "" : "s"}${r.briefs > 0 ? ` and ${r.briefs} saved brief${r.briefs === 1 ? "" : "s"}` : ""}${
+                      r.skipped > 0 ? `; ${r.skipped} were already here` : ""
+                    }.`,
+                  ),
+                )
+                .catch((e: unknown) =>
+                  setHistoryNote(e instanceof Error ? e.message : "That file couldn’t be imported."),
+                );
+            }}
+          />
+        )}
+
+        {/* A brief from history. Either the live run — the server keeps the last
+            hundred, so anything from today usually still resolves — or the copy
+            saved in this browser, which says so and prints without a server. */}
+        {showPast && past && (
+          <BriefView
+            run={past.run}
+            archived={past.archived}
+            onReset={() => setPast(null)}
+            onRunAgain={() => {
+              setPast(null);
+              setView("search");
+              start(past.entry.rawQuery, past.entry.promoters, past.entry.type, past.entry.ticker);
+            }}
+            onScreenPeople={(people) => {
+              // The same move off a saved brief as off a live one — each pick
+              // becomes an ordinary new search, with no parent to hang under
+              // because a saved brief is not a tracked run. The brief stays on
+              // screen: `keepFocus` means the reader keeps their page.
+              for (const p of people) {
+                start(formatSuggestion({ name: p.name, din: p.din }), [], "director", undefined, {
+                  keepFocus: true,
+                });
+              }
+            }}
+            onScreenCompanies={(companies) => {
+              for (const c of companies) start(c.name, [], "company", undefined, { keepFocus: true });
+            }}
           />
         )}
 
@@ -209,7 +325,7 @@ export default function Home() {
         {showBrief && active?.run && (
           <BriefView
             run={active.run}
-            onReset={() => select(null)}
+            onReset={() => goTo(null)}
             onScreenPeople={(people) => {
               // One director pre-screen each, exactly as the search box would
               // start them — the DIN goes along where the register gave one, so
@@ -249,7 +365,7 @@ export default function Home() {
             </p>
             <button
               type="button"
-              onClick={() => select(null)}
+              onClick={() => goTo(null)}
               className="blob-btn mt-4 rounded-xl px-5 py-2.5 text-[13px] font-semibold"
             >
               New search

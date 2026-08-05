@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiUrl, authHeaders, jsonAuthHeaders } from "./api";
 import { useHostContext } from "@/hooks/useHostContext";
-import { addRecentSearch } from "./history";
+import { recordError, recordFinish, recordServerId, recordStart, recordUnknown } from "./archiveStore";
 import { displayName } from "./directorId";
 import type { Run, Subject } from "./types";
 
@@ -114,9 +114,11 @@ export interface StartOptions {
    *  whichever finished being created last would take the reader off the brief
    *  they are still reading. */
   keepFocus?: boolean;
-  /** Keep this out of the front page's recent-search list. A child run is
-   *  reachable from its parent, and five of them from one click would flush
-   *  everything the user actually searched for out of that list. */
+  /** Keep this out of the front page's short recent list. The run is still
+   *  recorded in history — it happened, and it is one of the things the user
+   *  will look for later — but a child run is reachable from its parent, and
+   *  five of them from one click would flush everything the user actually
+   *  searched for out of the five-item list on the front door. */
   skipHistory?: boolean;
 }
 
@@ -188,6 +190,15 @@ export function useRuns(): UseRuns {
           });
           if (!res.ok) return null;
           const run: Run = await res.json();
+          // A run that ended while the tab was shut is recorded here — this is
+          // the only place that ending is ever observed. `recordFinish` is a
+          // no-op for a run already saved, so the re-attach (which runs on
+          // every mount, not only after a crash) costs nothing on a revisit.
+          // The failure branch matters as much: without it a run that errored
+          // overnight sits in history claiming to be running, and the staleness
+          // heuristic eventually relabels it as one nobody ever saw the end of.
+          if (run.status === "complete") void recordFinish(s.key, run, s.startedAt);
+          else if (run.status === "error") recordError(s.key, run.error ?? "The pre-screen failed.");
           return {
             key: s.key,
             serverId: s.serverId,
@@ -206,7 +217,15 @@ export function useRuns(): UseRuns {
     ).then((restored) => {
       if (cancelled) return;
       const live = restored.filter((r): r is TrackedRun => r !== null);
-      if (live.length > 0) setRuns((prev) => (prev.length > 0 ? prev : live));
+      if (live.length === 0) return;
+      // Merged by key, not swapped in wholesale. A search started while these
+      // were still being fetched used to throw every restored run away — and
+      // the next `writeStore` then erased them from storage too, so a run still
+      // in flight became unreachable because the user was quick.
+      setRuns((prev) => {
+        const have = new Set(prev.map((t) => t.key));
+        return trim([...prev, ...live.filter((t) => !have.has(t.key))]);
+      });
     });
 
     return () => {
@@ -226,10 +245,25 @@ export function useRuns(): UseRuns {
       await Promise.all(
         live.map(async (t) => {
           const key = t.key;
-          const fail = (message: string) => patch(key, { phase: "error", error: message });
+          const fail = (message: string) => {
+            // History records what the client actually saw. `recordError`
+            // refuses to downgrade a run already archived, so a poll losing
+            // contact with a server that has moved on cannot relabel a
+            // successful run as a failure.
+            recordError(key, message);
+            patch(key, { phase: "error", error: message });
+          };
 
           if (Date.now() - t.startedAt > RUN_TIMEOUT_MS) {
-            fail("This pre-screen is taking longer than expected. Please run it again.");
+            // This browser's patience running out is not the run failing. The
+            // server may well still be working, so history records that it
+            // stopped watching rather than inventing a failure and a finish
+            // time for a run that has neither.
+            recordUnknown(key);
+            patch(key, {
+              phase: "error",
+              error: "This pre-screen is taking longer than expected. Please run it again.",
+            });
             return;
           }
 
@@ -255,9 +289,14 @@ export function useRuns(): UseRuns {
             const subject = run.subject ?? t.subject;
 
             if (run.status === "complete") {
+              // The one place a live finish is recorded. `recordFinish` guards
+              // itself against a second call, so a tick that fires before the
+              // phase patch has committed costs one write, not two.
+              void recordFinish(key, run, t.startedAt);
               // Only a run that finished out of sight earns an attention dot.
               patch(key, { run, subject, phase: "done", seen: activeRef.current === key });
             } else if (run.status === "error") {
+              recordError(key, run.error ?? "The pre-screen failed.");
               patch(key, { run, subject, phase: "error", error: run.error ?? "The pre-screen failed." });
             } else {
               patch(key, { run, subject, phase: "running" });
@@ -305,9 +344,19 @@ export function useRuns(): UseRuns {
       setRuns((prev) => (opts.parentKey ? insertUnderParent(prev, fresh, opts.parentKey) : promote(prev, fresh)));
       if (!opts.keepFocus) setActiveKey(key);
 
-      // Stored raw, so "run again" re-runs the same person rather than falling
-      // back to their name and picking up whoever else shares it.
-      if (!opts.skipHistory) addRecentSearch({ type, company, promoters });
+      // Recorded the moment it starts, and recorded with the raw query — the
+      // DIN-decorated string, not the display name — so "run again" re-runs the
+      // same person rather than falling back to their name and picking up
+      // whoever else shares it. A run that never gets a server id still leaves
+      // a row saying it was attempted.
+      recordStart({
+        id: key,
+        rawQuery: company,
+        subject,
+        startedAt: fresh.startedAt,
+        parentId: opts.parentKey,
+        showInRecent: !opts.skipHistory,
+      });
 
       void (async () => {
         try {
@@ -321,9 +370,12 @@ export function useRuns(): UseRuns {
             throw new Error(body.error ?? "Could not start the pre-screen.");
           }
           const { id } = await res.json();
+          recordServerId(key, id);
           patch(key, { serverId: id, phase: "running" });
         } catch (e) {
-          patch(key, { phase: "error", error: e instanceof Error ? e.message : "Something went wrong." });
+          const message = e instanceof Error ? e.message : "Something went wrong.";
+          recordError(key, message);
+          patch(key, { phase: "error", error: message });
         }
       })();
     },
@@ -342,8 +394,28 @@ export function useRuns(): UseRuns {
     // Closing a brief closes the runs started from it. They were opened while
     // reading that brief and are reached through it; left behind they would
     // read as searches from the front door that the user never made.
+    // The whole subtree, not one generation: a director screened off a company
+    // brief can have companies screened off theirs, and a grandchild left
+    // behind renders as a search from the front door that nobody made.
     const doomed = new Set<string>([key]);
-    for (const t of runsRef.current) if (t.parentKey === key) doomed.add(t.key);
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const t of runsRef.current) {
+        if (t.parentKey && doomed.has(t.parentKey) && !doomed.has(t.key)) {
+          doomed.add(t.key);
+          grew = true;
+        }
+      }
+    }
+
+    // Closing stops watching, not running — so a run still in flight is
+    // recorded as exactly that. Left alone its history row would sit at
+    // "running" until the staleness heuristic relabelled it as one that never
+    // landed, which is the opposite of what the close button's own tooltip
+    // promises. History can still ask the server for it later.
+    for (const t of runsRef.current) {
+      if (doomed.has(t.key) && (t.phase === "starting" || t.phase === "running")) recordUnknown(t.key);
+    }
 
     setRuns((prev) => prev.filter((t) => !doomed.has(t.key)));
     setActiveKey((cur) => (cur && doomed.has(cur) ? null : cur));
