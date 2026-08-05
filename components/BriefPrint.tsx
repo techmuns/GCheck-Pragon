@@ -149,6 +149,7 @@ function ReportContinuation({ brief }: { brief: PrintBrief }) {
       <RiskBlock risk={brief.risk} />
       {brief.diligence.length > 0 && <DiligenceBlock people={brief.diligence} />}
       {brief.network && <NetworkBlock network={brief.network} />}
+      <RelatedBlock rows={brief.related} />
       <DirectorshipsBlock rows={brief.directorships} />
       <ScopeBlock scope={brief.scope} generatedAt={brief.generatedAt} />
       <ClarificationsBlock rows={brief.clarifications} />
@@ -399,6 +400,32 @@ function NetworkBlock({ network }: { network: PrintNetwork }) {
   );
 }
 
+/** Adverse material at companies linked through the board — one hop out. The
+ *  `via` line is the point: it names the person the risk travels through. */
+function RelatedBlock({ rows }: { rows: PrintBrief["related"] }) {
+  if (rows.length === 0) return null;
+  return (
+    <section className="pb-flow-section">
+      <div className="pb-flow-head">Related Entities — Adverse Material</div>
+      <ul className="pb-net">
+        {rows.map((r, i) => (
+          <li key={i} className="pb-net-row">
+            <span className="pb-dot pb-bg-amber" />
+            <div>
+              <span className="pb-net-co">{r.entity}</span>
+              {r.status && /strike|liquidat|dissolv|defunct|dormant/i.test(r.status) && (
+                <span className="pb-net-flag">{r.status}</span>
+              )}
+              <div className="pb-net-dirs">{r.title}</div>
+              <div className="pb-net-dirs">Linked via {r.via}</div>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function ScopeBlock({ scope, generatedAt }: { scope: PrintScope; generatedAt: string }) {
   return (
     <section className="pb-flow-section">
@@ -407,6 +434,7 @@ function ScopeBlock({ scope, generatedAt }: { scope: PrintScope; generatedAt: st
         <span className="pb-flow-head-meta">As of {generatedAt}</span>
       </div>
       <p className="pb-scope-statement">{scope.statement}</p>
+      {scope.clearance && <p className="pb-scope-statement">{scope.clearance}</p>}
       <ul className="pb-scope-list">
         {scope.lines.map((l, i) => (
           <li key={i} className="pb-scope-row">

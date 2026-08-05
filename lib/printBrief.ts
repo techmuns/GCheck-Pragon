@@ -257,11 +257,21 @@ export interface PrintScopeLine {
 
 export interface PrintScope {
   statement: string;
+  clearance?: string;
   lines: PrintScopeLine[];
+}
+
+export interface PrintRelatedRow {
+  entity: string;
+  via: string;
+  status?: string;
+  title: string;
 }
 
 export interface PrintBrief {
   company: string;
+  /** Adverse material at companies linked through the board — one hop out. */
+  related: PrintRelatedRow[];
   subtitle?: string;
   isDirector: boolean;
   generatedAt: string;
@@ -342,6 +352,15 @@ const RANK: Record<Severity, number> = { red: 3, amber: 2, clear: 1, info: 0 };
 
 // ── Public entry point ──────────────────────────────────────────────────────
 
+function buildPrintRelated(run: Run): PrintRelatedRow[] {
+  return (run.related ?? []).slice(0, 10).map((r) => ({
+    entity: r.entity,
+    via: r.via.join(", "),
+    status: r.status,
+    title: r.title,
+  }));
+}
+
 export function buildPrintBrief(run: Run, generatedAt: string): PrintBrief | null {
   const brief = run.brief;
   if (!brief) return null;
@@ -371,6 +390,7 @@ export function buildPrintBrief(run: Run, generatedAt: string): PrintBrief | nul
 
   return {
     company: run.subject.company,
+    related: buildPrintRelated(run),
     subtitle: subtitleFor(run, isDirector),
     isDirector,
     generatedAt,
@@ -1325,6 +1345,7 @@ function buildScopeBlock(run: Run): PrintScope {
   };
   return {
     statement: scope.statement,
+    clearance: scope.clearance,
     lines: scope.lines.map((l) => ({
       name: l.name,
       tierLabel: l.tierLabel,

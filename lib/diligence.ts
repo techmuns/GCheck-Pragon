@@ -13,6 +13,9 @@ import { compareByHierarchy, seniorRole, type RankablePerson } from "./hierarchy
 import { nameFromTitle } from "./people";
 import { normaliseDin } from "./directorId";
 import { cleanFindingText, titleCaseName } from "./text";
+import { searchWeb } from "./collectors/google";
+import { entityMentioned } from "./queries";
+import type { PersonDiligence as Person, RelatedEntityFinding } from "./types";
 
 // ── Board diligence ──────────────────────────────────────────────────────────
 // Running a company is not the same as running its people. The company brief
@@ -314,4 +317,120 @@ function withDeadline<T>(work: Promise<T>, label: string, ms: number): Promise<T
     timer = setTimeout(() => reject(new Error(`${label} did not respond within ${Math.round(ms / 1000)}s`)), ms);
   });
   return Promise.race([work, deadline]).finally(() => clearTimeout(timer)) as Promise<T>;
+}
+
+// ── Second-order sweep: the companies around the board ──────────────────────
+// The most serious finding in the manual governance checks we benchmarked
+// against was never going to surface under the subject's own name: an ED
+// arrest and a ₹1,500cr PMLA matter at a company two steps away — reached
+// through a director's other ventures — with funds allegedly routed through a
+// sibling entity. The subject's name appears in none of the coverage.
+//
+// The register already gives us the hop: each screened director carries the
+// companies filed against their DIN. This sweeps the most significant of those
+// entities through the red-flag search, so adverse material AT a related
+// company reaches the brief THROUGH the person who connects them.
+
+/** How many related entities one run may sweep. Each costs one search. */
+function relatedSweepMax(): number {
+  const n = Number(process.env.RELATED_SWEEP_MAX);
+  return Number.isFinite(n) && n > 0 ? n : 6;
+}
+
+/** The red-flag terms a related entity is swept under. Narrower than the full
+ *  keyword set on purpose: at one hop out, only the serious end of the
+ *  vocabulary is worth a metered search. */
+const RELATED_TERMS = [
+  "fraud",
+  '"enforcement directorate"',
+  "PMLA",
+  '"money laundering"',
+  "insolvency",
+  "NCLT",
+  "scam",
+  "ponzi",
+];
+
+/**
+ * Which related entities earn a search, most significant first.
+ *
+ * Shared entities lead — a company two board members sit on binds the board to
+ * whatever happens there. Entities the register flags as not in good standing
+ * come next; the rest follow. The subject itself is excluded (it has the whole
+ * rest of the run), and so are struck-off shells with a single link when the
+ * cap is tight — exported for the checks, because this ranking IS the feature.
+ */
+export function rankRelatedEntities(
+  people: Person[],
+  subjectCompany: string,
+  cap: number = relatedSweepMax(),
+): Array<{ name: string; via: string[]; status?: string }> {
+  const byName = new Map<string, { name: string; via: string[]; status?: string }>();
+  for (const p of people) {
+    for (const c of p.companies ?? []) {
+      const name = c.name.trim();
+      if (!name || entityMentioned(name, subjectCompany) || entityMentioned(subjectCompany, name)) continue;
+      const key = name.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const held = byName.get(key);
+      if (held) {
+        if (!held.via.includes(p.name)) held.via.push(p.name);
+        held.status = held.status ?? c.status;
+      } else {
+        byName.set(key, { name, via: [p.name], status: c.status });
+      }
+    }
+  }
+  const adverse = (s?: string) => Boolean(s && /strike|liquidat|dissolv|defunct|amalgamat|dormant/i.test(s));
+  return [...byName.values()]
+    .sort((a, b) => {
+      if (b.via.length !== a.via.length) return b.via.length - a.via.length;
+      const av = adverse(a.status) ? 1 : 0;
+      const bv = adverse(b.status) ? 1 : 0;
+      if (bv !== av) return bv - av;
+      return a.name.localeCompare(b.name);
+    })
+    .slice(0, cap);
+}
+
+/**
+ * Sweep the ranked entities. Failures cost only that entity's findings — a
+ * related-entity search that dies must never take down the diligence that
+ * already shipped.
+ */
+export async function sweepRelatedEntities(
+  people: Person[],
+  subjectCompany: string,
+  emit?: (text: string) => void,
+): Promise<RelatedEntityFinding[]> {
+  const targets = rankRelatedEntities(people, subjectCompany);
+  if (targets.length === 0) return [];
+  emit?.(`Sweeping ${targets.length} related entit${targets.length === 1 ? "y" : "ies"} for adverse material`);
+
+  const out: RelatedEntityFinding[] = [];
+  for (const t of targets) {
+    try {
+      const results = await searchWeb(`"${t.name}" (${RELATED_TERMS.join(" OR ")})`);
+      let kept = 0;
+      for (const r of results) {
+        if (kept >= 3) break;
+        const hay = `${r.title} ${r.snippet ?? ""}`;
+        // The result must actually name the related entity — the guard that
+        // keeps a sibling brand's trouble from being pinned on this one.
+        if (!entityMentioned(hay, t.name)) continue;
+        kept += 1;
+        out.push({
+          entity: t.name,
+          via: t.via,
+          status: t.status,
+          title: r.title,
+          url: r.url,
+          snippet: r.snippet,
+        });
+      }
+      if (kept > 0) emit?.(`${t.name}: ${kept} adverse mention(s) — linked via ${t.via.join(", ")}`);
+    } catch {
+      // This entity's search failed; the next one still runs.
+    }
+  }
+  return out;
 }

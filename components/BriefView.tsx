@@ -796,6 +796,40 @@ export default function BriefView({
                   : null
           }
         />
+        {/* One hop out: adverse material at the OTHER companies the board sits
+            on. This is where the finding a subject's own name never surfaces
+            lives — an enforcement matter at a related entity reaches the
+            subject through its people, and the row names that path. */}
+        {(run.related ?? []).length > 0 && (
+          <Section title="Related entities — adverse material" count={new Set(run.related!.map((r) => r.entity)).size}>
+            <div className="space-y-2">
+              {run.related!.map((r, i) => (
+                <div key={i} className="rounded-xl border border-[rgba(23,43,77,0.12)] bg-white/60 p-3">
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                    <span className="text-[13px] font-semibold text-navy-deep">{r.entity}</span>
+                    {r.status && /strike|liquidat|dissolv|defunct|dormant/i.test(r.status) && (
+                      <span className="rounded-md bg-coral/12 px-2 py-0.5 text-[10.5px] font-semibold text-coral">{r.status}</span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-[12.5px] leading-snug text-ink-primary">
+                    {r.url ? (
+                      <a href={r.url} target="_blank" rel="noreferrer" className="underline decoration-navy-primary/30 underline-offset-2 hover:decoration-navy-primary">
+                        {r.title}
+                      </a>
+                    ) : (
+                      r.title
+                    )}
+                  </p>
+                  {r.snippet && <p className="mt-0.5 text-[12px] leading-snug text-ink-secondary">{r.snippet}</p>}
+                  <p className="mt-1.5 text-[11px] text-ink-secondary/80">
+                    Linked to the subject via {r.via.join(", ")} — verify how much of this reaches the subject before weighing it.
+                  </p>
+                </div>
+              ))}
+            </div>
+          </Section>
+        )}
+
         {/* Court cases get a table of their own rather than a slot in a Pair:
             the answer to "what is this case" is six fields wide, and half a row
             cannot hold it. */}

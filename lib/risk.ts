@@ -1,4 +1,5 @@
 import type { CollectorResult, Finding, Run, SourceProgress } from "./types";
+import { matchKeywords } from "./queries";
 import { boardFlagCounts, buildNetwork } from "./network";
 
 // ── Risk methodology, source tiers & scope ───────────────────────────────────
@@ -169,6 +170,20 @@ export function assessRisk(run: Run): RiskAssessment {
     contributions.push({ label: "Dense director interlock network", points: 3, detail: `${network!.interlocks.length} shared companies` });
   }
 
+  // Second-order: adverse material at the companies the board sits on. Scored
+  // per ENTITY, not per article — three stories about one troubled company are
+  // one problem — and below a direct finding, because the tie still needs a
+  // human to weigh how much of it reaches the subject.
+  const relatedEntities = new Set((run.related ?? []).map((r) => r.entity)).size;
+  add(
+    "Adverse material at related entities",
+    relatedEntities * 6,
+    18,
+    relatedEntities > 0
+      ? `${relatedEntities} entit${relatedEntities === 1 ? "y" : "ies"} linked through the board`
+      : undefined,
+  );
+
   const score = Math.min(100, contributions.reduce((s, c) => s + c.points, 0));
 
   // Coverage — a thin run's clean score is not a clean bill of health.
@@ -235,6 +250,10 @@ export interface Scope {
   completed: number;
   total: number;
   statement: string;
+  /** "Screened for X, Y, Z — nothing surfaced naming the subject." A manual
+   *  governance check always closes with this sentence; without it a quiet
+   *  report reads as "not looked at" rather than "looked at and clean". */
+  clearance?: string;
 }
 
 function scopeStatus(p: SourceProgress): ScopeStatus {
@@ -260,5 +279,37 @@ export function buildScope(run: Run): Scope {
   if (upgrade.length > 0) parts.push(`Available on upgrade: ${upgrade.join(", ")}.`);
   if (notRun.length === 0 && upgrade.length === 0) parts.push("All configured sources contributed.");
 
-  return { lines, completed, total, statement: parts.join(" ") };
+  return { lines, completed, total, statement: parts.join(" "), clearance: buildClearance(run) };
+}
+
+/**
+ * The keywords screened that surfaced nothing tied to the subject.
+ *
+ * Computed against the text of every kept finding: a keyword that appears in
+ * none of them was searched and came back clean. Exported for the checks —
+ * claiming "clear on fraud" while a fraud finding sits above it would be the
+ * exact lie this line exists to prevent.
+ */
+export function buildClearance(run: Run): string | undefined {
+  const screened = run.keywordsScreened ?? [];
+  if (screened.length === 0) return undefined;
+
+  const texts: string[] = [];
+  for (const c of run.collected ?? []) {
+    for (const h of c.hits) texts.push(`${h.title} ${h.snippet ?? ""}`);
+  }
+  for (const p of run.diligence ?? []) {
+    for (const f of p.concerns) texts.push(f.text);
+  }
+  for (const r of run.related ?? []) texts.push(`${r.title} ${r.snippet ?? ""}`);
+  const corpus = texts.join(" \n ");
+
+  const hitTerms = new Set(matchKeywords(corpus, screened).map((k) => k.toLowerCase()));
+  const clear = screened.filter((k) => !hitTerms.has(k.toLowerCase()));
+  if (clear.length === 0) return undefined;
+
+  return (
+    `Screened against ${screened.length} red-flag term(s); no material surfaced for: ` +
+    `${clear.join(", ")}. Terms not listed here surfaced at least one item, reported above.`
+  );
 }

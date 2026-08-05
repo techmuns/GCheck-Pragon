@@ -74,6 +74,7 @@ export function readerTask(subject: Subject): string {
       ".",
     "For each, keep: what happened, who alleged or filed what against whom, the court or authority involved, dates, amounts, and the current status.",
     "Preserve who is the complainant and who is the accused.",
+    "Also keep, verbatim, any sentence stating a family or related-party tie — X is the wife/brother/sister/in-law of Y, X founded or controls Z, funds moved between A and B — these links are how adverse matters at one company reach another.",
     "Return the relevant text verbatim; do not summarise away the names.",
   ].join(" ");
 }

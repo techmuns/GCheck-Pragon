@@ -234,7 +234,10 @@ export function sleep(ms: number): Promise<void> {
  * than trusted, so narrowing the sweep never costs coverage.
  */
 function queryPlan(entities: Entity[], subject: Subject, kw: string[]): Array<{ entity: Entity; query: string }> {
-  const orClause = kw.length > 0 ? ` (${kw.join(" OR ")})` : "";
+  // A phrase keyword unquoted inside an OR clause degrades to loose words —
+  // "money OR laundering" is a very different search from "money laundering".
+  const quoted = kw.map((k) => (/\s/.test(k) ? `"${k}"` : k));
+  const orClause = quoted.length > 0 ? ` (${quoted.join(" OR ")})` : "";
   const anchors = anchorsOf(subject);
   const plan: Array<{ entity: Entity; query: string }> = [];
   for (const entity of entities) {

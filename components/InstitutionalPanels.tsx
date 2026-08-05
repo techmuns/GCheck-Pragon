@@ -183,6 +183,11 @@ export function ScopeContent({ run }: { run: Run }) {
   return (
     <>
       <p className="mb-3 text-[12.5px] leading-relaxed text-ink-primary">{scope.statement}</p>
+      {scope.clearance && (
+        <p className="mb-3 rounded-lg bg-[#2F855A]/8 px-2.5 py-1.5 text-[12px] leading-relaxed text-ink-primary">
+          {scope.clearance}
+        </p>
+      )}
       <ul className="grid grid-cols-1 gap-x-8 gap-y-1.5 sm:grid-cols-2">
         {scope.lines.map((l, i) => {
           const m = STATUS_META[l.status];

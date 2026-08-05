@@ -4,7 +4,7 @@ import { collectors, type CollectorContext } from "./collectors";
 import { resolveIdentity } from "./collectors/directors";
 import { anchorNames, resolveDirector } from "./collectors/indiafilings";
 import { synthesizeBrief } from "./synthesize";
-import { diligenceEnabled, runBoardDiligence } from "./diligence";
+import { diligenceEnabled, runBoardDiligence, sweepRelatedEntities } from "./diligence";
 import type { CollectorResult, RunEvent, SourceProgress, Subject } from "./types";
 
 // ── Research workflow (Phase 2) ────────────────────────────────────────────
@@ -85,6 +85,9 @@ async function execute(runId: string): Promise<void> {
   updateRun(runId, { status: "running" });
 
   const enabledKeywords = config.keywords.filter((k) => k.enabled).map((k) => k.term);
+  // Recorded on the run so the brief can close the way a manual check closes:
+  // naming what was screened for and found clear, not just what was found.
+  updateRun(runId, { keywordsScreened: enabledKeywords });
   const enabledSources = config.sources.filter((s) => s.enabled);
 
   const run = getRun(runId);
@@ -213,10 +216,25 @@ async function execute(runId: string): Promise<void> {
         text: "Screening the board — running deep diligence on each director",
       });
       try {
-        await runBoardDiligence(resolved, results, config, {
+        const people = await runBoardDiligence(resolved, results, config, {
           emit: (text) => appendEvent(runId, { level: "step", sourceId: "diligence", text }),
           onUpdate: (people) => updateRun(runId, { diligence: people }),
         });
+        // One hop out: adverse material at the companies the board sits on.
+        // Wrapped separately — the sweep failing must not read as the board
+        // diligence having failed.
+        try {
+          const related = await sweepRelatedEntities(people, resolved.company, (text) =>
+            appendEvent(runId, { level: "step", sourceId: "diligence", text }),
+          );
+          if (related.length > 0) updateRun(runId, { related });
+        } catch (err) {
+          appendEvent(runId, {
+            level: "warn",
+            sourceId: "diligence",
+            text: `Related-entity sweep stopped early — ${err instanceof Error ? err.message : String(err)}`,
+          });
+        }
       } catch (err) {
         appendEvent(runId, {
           level: "warn",

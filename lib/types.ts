@@ -252,6 +252,18 @@ export interface DiligenceFinding {
 }
 
 /** The diligence outcome for a single person on (or named alongside) the board. */
+export interface RelatedEntityFinding {
+  /** The related company the adverse material names. */
+  entity: string;
+  /** Board members of the subject who sit on it — the path the risk travels. */
+  via: string[];
+  /** The register's status for it, when known ("Strike Off", "Active"). */
+  status?: string;
+  title: string;
+  url?: string;
+  snippet?: string;
+}
+
 export interface PersonDiligence {
   /** Stable key — the DIN where resolved, else a slug of the name. */
   id: string;
@@ -301,5 +313,15 @@ export interface Run {
   /** Per-director diligence (company mode). Streams in one person at a time
    *  after the company brief lands, so the board fills with verdicts live. */
   diligence?: PersonDiligence[];
+  /** Second-order sweep: adverse mentions of the OTHER companies the board
+   *  sits on. This is where the findings a subject's own name never surfaces
+   *  live — an enforcement case at a related entity reaches the subject
+   *  through its people, not through its name. */
+  related?: RelatedEntityFinding[];
+  /** The red-flag keywords this run was screened against, recorded so the
+   *  brief can state what was checked and found clear — a manual governance
+   *  check always closes with that sentence, and its absence reads as "not
+   *  looked at" rather than "looked at and clean". */
+  keywordsScreened?: string[];
   error?: string;
 }

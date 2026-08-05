@@ -102,6 +102,15 @@ export const defaultConfig: AppConfig = {
   ],
 
   // From the checklist, plus the note "(pls add relevant ones)".
+  //
+  // Extended to the full vocabulary a manual governance check actually clears:
+  // the analyst files we benchmarked against close with "no evidence of
+  // criminal proceedings, GST, Income Tax, Customs, Excise, CBI, EOW, or
+  // political affiliation" — and the one material finding among them (an ED
+  // arrest over an alleged ₹1,500cr MLM scheme, PMLA attachment through
+  // related entities) sat entirely under terms the old list never searched.
+  // Keywords are OR-batched into single queries, so breadth here costs almost
+  // no extra search quota.
   keywords: [
     "lawsuit",
     "legal",
@@ -115,6 +124,20 @@ export const defaultConfig: AppConfig = {
     "defaulter",
     "wilful",
     "police",
+    "enforcement directorate",
+    "PMLA",
+    "money laundering",
+    "NCLT",
+    "insolvency",
+    "SFIO",
+    "SEBI",
+    "GST",
+    "income tax",
+    "customs",
+    "excise",
+    "ponzi",
+    "pyramid scheme",
+    "political",
   ].map((term, i) => ({ id: `kw-${i + 1}`, term, enabled: true })),
 
   sections: [
