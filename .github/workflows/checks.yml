@@ -35,6 +35,13 @@ jobs:
       # fallback, structured-output fallback. No credential, no network, no
       # cost, so it runs on every push like the type and lint checks.
       - run: npm run test:llm
+      # Search-backend resilience: failure classification, the circuit breaker,
+      # and an end-to-end replay of the outage where every credential was down
+      # at once. Stubs `fetch`, so like the transport tests it needs no
+      # credential and touches no network — which matters here, because the
+      # behaviour it guards only ever shows up when the credentials are broken
+      # and there is no way to reproduce that in a live run.
+      - run: npm run check:search
 
   registry-parser:
     runs-on: ubuntu-latest

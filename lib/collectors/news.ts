@@ -2,7 +2,24 @@ import type { CollectorResult, ExcludedItem, RawHit, Subject } from "../types";
 import { allAnchorsOf, entitiesOf, entityMentioned, gradesIdentity, matchKeywords, subjectConfidence } from "../queries";
 import { env, hasReader, maxArticleReads } from "./env";
 import { canonicalUrl, fetchWithTimeout, noteExcluded, stripHtml, type Collector, type CollectorContext } from "./types";
-import { EmptyAnswer, describe, extractRows, sleep, withRetry, type Backend, type WebResult } from "./google";
+import {
+  EmptyAnswer,
+  backendFailure,
+  extractRows,
+  serviceOf,
+  sleep,
+  withRetry,
+  type Backend,
+  type WebResult,
+} from "./google";
+import {
+  classifyError,
+  noteBackendFailure,
+  noteBackendSuccess,
+  planAttempts,
+  remedyFor,
+  type FailureKind,
+} from "./backendHealth";
 import { readArticles } from "./reader";
 import { extractInsights, readerTask } from "../insights";
 import { cachedWithMeta } from "../searchCache";
@@ -57,6 +74,10 @@ export const newsCollector: Collector = async (ctx) => {
   let failure: string | undefined;
   let succeeded = 0;
   let offTarget = 0;
+  // Which backends actually answered. A sweep served by the keyless feed is a
+  // real sweep, but a thinner one — no snippets, no operators — and the brief
+  // has to say so rather than letting it pass for the keyed result.
+  const servedBy = new Set<Backend>();
   // A sample of the stories set aside, so the brief can say what came up under
   // the name and why it was not counted against the subject.
   const excluded: ExcludedItem[] = [];
@@ -68,8 +89,9 @@ export const newsCollector: Collector = async (ctx) => {
 
     emit?.(`Search ${i + 1}/${plan.length} — ${step.label}`, { level: "query" });
     try {
-      const { results, reused } = await runNewsChain(step.query);
+      const { results, reused, backend } = await runNewsChain(step.query);
       succeeded += 1;
+      if (backend) servedBy.add(backend);
       if (reused) emit?.(`  already had this one — reused it, no search spent`, { level: "cache" });
       let kept = 0;
       for (const r of results.slice(0, MAX_PER_QUERY)) {
@@ -124,11 +146,18 @@ export const newsCollector: Collector = async (ctx) => {
   hits.push(...read.hits);
 
   const flagged = hits.filter((h) => (h.matchedKeywords?.length ?? 0) > 0).length;
+  // Ran entirely on the keyless feed: every credential was down. The sweep
+  // still happened and its findings stand, but the reader needs to know it was
+  // headlines-only before treating a quiet result as an all-clear.
+  const keylessOnly = servedBy.size > 0 && [...servedBy].every((b) => b === "gnews");
   const note =
     `${plan.length} searches across the subject and their companies; ${hits.length - read.hits.length} distinct article(s)` +
     (flagged > 0 ? `, ${flagged} matching a red-flag keyword` : "") +
     (offTarget > 0 ? `. Dropped ${offTarget} naming a different entity` : "") +
     `. ${read.note}` +
+    (keylessOnly
+      ? " Ran on the keyless Google News feed — no search credential was working, so coverage is headlines-only and thinner than usual."
+      : "") +
     (failure ? ` Some searches failed: ${failure}` : "");
 
   return { ...base, status: "done", note, hits, queries: [...ran, ...read.urls], excluded };
@@ -365,15 +394,89 @@ function collect(byKey: Map<string, RawHit>, hit: RawHit): void {
 
 // ── Backends ────────────────────────────────────────────────────────────────
 //
-// No keyless option, deliberately. A news sweep is only as good as the index
-// behind it, and scraping one badly would produce confident nonsense — so with
-// no credential this source skips and says so.
+// This used to end at SerpAPI, on the reasoning that a news sweep is only as
+// good as the index behind it and that scraping one badly produces confident
+// nonsense. The reasoning is right; the conclusion was wrong. With both keyed
+// backends down at once — an expired MUNSHOT_TOKEN answering 403 and a SerpAPI
+// account answering `{"error":"Your account has run out of searches."}` — the
+// whole source reported "Couldn't reach", and a governance brief with no news
+// in it is not a safer brief, it is a brief that silently stopped looking.
+//
+// Google News RSS closes that hole without lowering the bar. It is a published,
+// structured feed from the same index SerpAPI's google_news engine resells —
+// not an HTML page being scraped — so it carries titles, publishers and real
+// publication dates rather than guesses. It is also reachable from a data
+// centre, which the keyless *web* engine (DuckDuckGo HTML) is not: that is why
+// the web sweep's fallback still answers "fetch failed" on Render while this
+// one answers.
+//
+// It stays last. It has no snippets and no query operators, so it is a floor,
+// not a substitute for a keyed backend.
 
 export function newsChain(): Backend[] {
   const chain: Backend[] = [];
   if (env.munshotToken) chain.push("munshot");
   if (env.serpApiKey) chain.push("serpapi");
+  chain.push("gnews");
   return chain;
+}
+
+/** Google News RSS. Keyless, no quota, and reachable from a server — the floor
+ *  the sweep lands on when every credential is down. */
+async function searchGoogleNews(query: string): Promise<NewsResult[]> {
+  // hl/gl/ceid pin the edition to Indian English, matching the `gl=in&hl=en`
+  // the SerpAPI backend already asks for, so the two agree on what is relevant.
+  const url =
+    `https://news.google.com/rss/search?q=${encodeURIComponent(query)}` +
+    `&hl=en-IN&gl=IN&ceid=IN:en`;
+  const res = await fetchWithTimeout(url, { timeoutMs: 20000, headers: { accept: "application/rss+xml, application/xml" } });
+  if (!res.ok) throw await backendFailure("gnews", "Google News", res);
+  return parseRss(await res.text());
+}
+
+/**
+ * Parse the RSS items.
+ *
+ * Deliberately regex rather than an XML parser: the payload is a flat, stable
+ * item list, and adding a dependency to read it would be the larger risk.
+ * Everything is optional-tolerant — a feed that changes shape yields fewer
+ * items, never a throw, so a parsing surprise degrades to "quiet" and the
+ * chain's empty-answer handling takes it from there.
+ */
+export function parseRss(xml: string): NewsResult[] {
+  const items = xml.match(/<item\b[\s\S]*?<\/item>/g) ?? [];
+  return items
+    .map((item) => {
+      const tag = (name: string): string | undefined => {
+        const m = item.match(new RegExp(`<${name}[^>]*>([\\s\\S]*?)</${name}>`));
+        if (!m) return undefined;
+        // Titles arrive either as CDATA or as escaped entities depending on the
+        // field; stripHtml handles the entities, this handles the wrapper.
+        const raw = m[1].replace(/^<!\[CDATA\[([\s\S]*?)\]\]>$/, "$1");
+        const text = stripHtml(raw);
+        return text.length > 0 ? text : undefined;
+      };
+
+      // Google formats every title as "Headline - Publisher". Splitting the
+      // publisher off keeps it out of the entity-match test, where a publisher
+      // name could otherwise satisfy a search for a company that the story
+      // never actually mentions.
+      const full = tag("title") ?? "";
+      const publisher = tag("source");
+      const title =
+        publisher && full.endsWith(` - ${publisher}`) ? full.slice(0, -(publisher.length + 3)).trim() : full;
+
+      return {
+        title,
+        url: tag("link"),
+        // No snippet in this feed — the description is just the headline again
+        // as a link. Naming the publisher is more use than repeating the title,
+        // and it is what the reader would look at to weigh the source.
+        snippet: publisher,
+        date: tag("pubDate"),
+      };
+    })
+    .filter((r) => r.title.length > 0 || r.url);
 }
 
 /**
@@ -383,30 +486,59 @@ export function newsChain(): Backend[] {
  * and a "recent news" filter is exactly how a two-year-old allegation gets
  * missed by a check meant to surface it.
  */
-async function runNewsChain(query: string): Promise<{ results: NewsResult[]; reused: boolean }> {
-  let failure: string | undefined;
+async function runNewsChain(query: string): Promise<{ results: NewsResult[]; reused: boolean; backend?: Backend }> {
+  // Every failure, not just the last. The old version overwrote `failure` on
+  // each backend, so the message the UI showed was whichever backend happened
+  // to be last in the chain — which is how "SerpAPI news 429" ended up being
+  // reported while the actionable cause (a rejected Munshot token, one rung
+  // above it) was silently discarded.
+  const failures: string[] = [];
+  const kinds: FailureKind[] = [];
   let sawEmpty = false;
-  for (const backend of newsChain()) {
+
+  const chain = newsChain();
+  const plan = planAttempts(chain, serviceOf);
+  for (const backend of plan.attempt) {
     try {
       const { value, reused } = await cachedWithMeta(`news:${backend}:${query}`, async () => {
-        const r = await withRetry(() => (backend === "munshot" ? searchMunshotNews(query) : searchSerpApiNews(query)));
+        const r = await withRetry(() => runNewsBackend(backend, query));
         // Prefer a backend with something to say, and never retain an empty
         // that a changed response shape could have caused.
         if (r.length === 0) throw new EmptyAnswer(backend);
         return r;
       });
-      return { results: value, reused };
+      noteBackendSuccess(serviceOf(backend));
+      return { results: value, reused, backend };
     } catch (err) {
       if (err instanceof EmptyAnswer) {
         sawEmpty = true;
         continue;
       }
-      failure = err instanceof Error ? err.message : String(err);
+      const kind = classifyError(err);
+      const message = err instanceof Error ? err.message : String(err);
+      kinds.push(kind);
+      failures.push(message);
+      noteBackendFailure(serviceOf(backend), kind, message);
     }
   }
   // Nothing anywhere, but nothing broke — a quiet subject, not a dead source.
   if (sawEmpty) return { results: [], reused: false };
-  throw new Error(failure ?? "No news backend configured.");
+  if (failures.length === 0 && plan.knownFailures.length > 0) {
+    throw new Error(`${plan.knownFailures.join(" / ")}${remedyFor(plan.knownKinds)}`);
+  }
+  if (failures.length === 0) throw new Error("No news backend configured.");
+  throw new Error(`${failures.join(" / ")}${remedyFor(kinds)}`);
+}
+
+function runNewsBackend(backend: Backend, query: string): Promise<NewsResult[]> {
+  switch (backend) {
+    case "munshot":
+      return searchMunshotNews(query);
+    case "serpapi":
+      return searchSerpApiNews(query);
+    default:
+      return searchGoogleNews(query);
+  }
 }
 
 interface NewsResult extends WebResult {
@@ -426,7 +558,7 @@ async function searchMunshotNews(query: string): Promise<NewsResult[]> {
     },
     body: JSON.stringify({ query, country: env.munshotCountry }),
   });
-  if (!res.ok) throw new Error(`Munshot news ${await describe(res)}`);
+  if (!res.ok) throw await backendFailure("munshot", "Munshot news", res);
   return parseNews(await res.json());
 }
 
@@ -452,7 +584,7 @@ function parseNews(data: unknown): NewsResult[] {
 async function searchSerpApiNews(query: string): Promise<NewsResult[]> {
   const url = `https://serpapi.com/search.json?engine=google_news&q=${encodeURIComponent(query)}&gl=in&hl=en&api_key=${env.serpApiKey}`;
   const res = await fetchWithTimeout(url, { timeoutMs: 20000 });
-  if (!res.ok) throw new Error(`SerpAPI news ${await describe(res)}`);
+  if (!res.ok) throw await backendFailure("serpapi", "SerpAPI news", res);
   const data = await res.json();
   const items = Array.isArray(data.news_results) ? data.news_results : [];
   // google_news groups related coverage under `stories`; flatten one level.

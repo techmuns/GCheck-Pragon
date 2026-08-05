@@ -11,6 +11,17 @@ import {
 import { env } from "./env";
 import { fetchWithTimeout, noteExcluded, stripHtml, type Collector } from "./types";
 import { cached } from "../searchCache";
+import {
+  BackendError,
+  classifyError,
+  classifyStatus,
+  isRetryable,
+  noteBackendFailure,
+  planAttempts,
+  noteBackendSuccess,
+  remedyFor,
+  type FailureKind,
+} from "./backendHealth";
 
 // ── Google / News collector ────────────────────────────────────────────────
 // Sweeps each entity against the red-flag keyword set. Three backends, picked
@@ -30,7 +41,22 @@ export interface WebResult {
 
 const MAX_PER_ENTITY = 8;
 
-export type Backend = "munshot" | "serpapi" | "programmable" | "fallback";
+export type Backend = "munshot" | "serpapi" | "programmable" | "fallback" | "gnews";
+
+/**
+ * The breaker key for a backend: the *service* behind it, not its slot in a
+ * chain.
+ *
+ * Munshot and SerpAPI each serve both the web sweep and the news sweep off one
+ * credential, so an exhausted SerpAPI quota discovered by the web sweep must
+ * also bench SerpAPI for news — that shared key is the point. But "fallback"
+ * names two unrelated keyless services (DuckDuckGo for web, Google News RSS for
+ * news), and letting a blocked DuckDuckGo bench a working news feed would
+ * reintroduce the very outage this is meant to prevent.
+ */
+export function serviceOf(backend: Backend): string {
+  return backend === "fallback" ? "ddg" : backend;
+}
 
 export function backendName(): Backend {
   return backendChain()[0];
@@ -55,6 +81,7 @@ const BACKEND_NOTE: Record<Backend, string | undefined> = {
   serpapi: undefined,
   programmable: undefined,
   fallback: "Keyless fallback engine (blocked from most servers — set MUNSHOT_TOKEN, SERPAPI_KEY, or GOOGLE_API_KEY).",
+  gnews: "Keyless Google News feed — headlines only, and no web results.",
 };
 
 export const googleCollector: Collector = async ({ subject, keywords, emit }) => {
@@ -239,7 +266,14 @@ function collect(byKey: Map<string, RawHit>, hit: RawHit): void {
 export async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
-  } catch {
+  } catch (err) {
+    // A standing failure answers the retry exactly as it answered the first
+    // call. A rejected token is still rejected 1.2s later, and an account that
+    // has run out of searches has not been topped up in the meantime — so the
+    // retry buys nothing and costs a round-trip plus 1.2s of the run's
+    // deadline. Across a 24-query news sweep that was ~29s of sleeping to
+    // re-learn one fact.
+    if (!isRetryable(classifyError(err))) throw err;
     await sleep(1200);
     return fn();
   }
@@ -270,8 +304,12 @@ async function runChain(
   query: string,
 ): Promise<{ results: WebResult[]; backend: Backend; failure?: string }> {
   const failures: string[] = [];
+  const kinds: FailureKind[] = [];
   let emptyFrom: Backend | undefined;
-  for (const backend of chain) {
+  // Backends already known to be down are skipped rather than re-asked. This is
+  // what stops one expired token costing every query in the plan its own 403.
+  const plan = planAttempts(chain, serviceOf);
+  for (const backend of plan.attempt) {
     try {
       const results = await cached(`web:${backend}:${query}`, async () => {
         const r = await withRetry(() => runBackend(backend, query));
@@ -281,21 +319,35 @@ async function runChain(
         if (r.length === 0) throw new EmptyAnswer(backend);
         return r;
       });
+      noteBackendSuccess(serviceOf(backend));
       return { results, backend, failure: failures[0] };
     } catch (err) {
       if (err instanceof EmptyAnswer) {
+        // An empty answer is not a fault — don't hold it against the backend.
         emptyFrom = backend;
         continue;
       }
-      failures.push(err instanceof Error ? err.message : String(err));
+      const kind = classifyError(err);
+      const message = err instanceof Error ? err.message : String(err);
+      kinds.push(kind);
+      failures.push(message);
+      noteBackendFailure(serviceOf(backend), kind, message);
     }
   }
   // Nothing anywhere, but nothing broke either — an honest silence.
   if (emptyFrom) return { results: [], backend: emptyFrom, failure: failures[0] };
   // Every backend is down. Report them all — the head of the chain holds the
   // actionable cause (an expired token), which a last-backend-wins message
-  // would bury under the keyless engine's rate-limit notice.
-  throw new Error(failures.join(" / ") || "No search backend configured.");
+  // would bury under the keyless engine's rate-limit notice — and close with
+  // the one instruction that resolves it.
+  // Nothing was attempted because every backend is standing-failed. Report the
+  // recorded cause — it is the same failure, and naming it beats spending a
+  // round-trip to re-derive it.
+  if (failures.length === 0 && plan.knownFailures.length > 0) {
+    throw new Error(`${plan.knownFailures.join(" / ")}${remedyFor(plan.knownKinds)}`);
+  }
+  if (failures.length === 0) throw new Error("No search backend configured.");
+  throw new Error(`${failures.join(" / ")}${remedyFor(kinds)}`);
 }
 
 /** The web sweep as other collectors need it: full chain, cached, retried.
@@ -332,7 +384,7 @@ async function searchMunshot(query: string): Promise<WebResult[]> {
     },
     body: JSON.stringify({ query, country: env.munshotCountry }),
   });
-  if (!res.ok) throw new Error(`Munshot search ${await describe(res)}`);
+  if (!res.ok) throw await backendFailure("munshot", "Munshot search", res);
   const data = await res.json();
   return parseMunshot(data);
 }
@@ -342,22 +394,46 @@ async function searchMunshot(query: string): Promise<WebResult[]> {
 // is the only thing that tells them apart — so it goes in the message rather
 // than being thrown away.
 export async function describe(res: Response): Promise<string> {
-  const detail = await res
-    .text()
-    .then((t) => {
-      try {
-        const parsed = JSON.parse(t) as { detail?: unknown };
-        return typeof parsed.detail === "string" ? parsed.detail : t;
-      } catch {
-        return t;
+  return (await failureText(res)).message;
+}
+
+/** Read the body once, and report both how to describe the failure and what
+ *  kind it is. Read once because a Response body can only be consumed once —
+ *  classifying and describing separately would have meant one of them getting
+ *  an empty string. */
+async function failureText(res: Response): Promise<{ message: string; kind: FailureKind }> {
+  const raw = await res.text().catch(() => "");
+  const detail = (() => {
+    try {
+      const parsed = JSON.parse(raw) as { detail?: unknown; error?: unknown; message?: unknown };
+      for (const v of [parsed.detail, parsed.error, parsed.message]) {
+        if (typeof v === "string") return v;
       }
-    })
-    .catch(() => "");
+      return raw;
+    } catch {
+      return raw;
+    }
+  })();
+
+  const kind = classifyStatus(res.status, raw);
+  // Say what the status MEANS. "429" is a fact; "the account has no searches
+  // left this period" is the same fact in a form the reader can act on.
   const hint =
-    res.status === 401 || res.status === 403
-      ? " — the bearer token is a user session JWT and expires; issue a fresh MUNSHOT_TOKEN or configure SERPAPI_KEY"
-      : "";
-  return `${res.status}${detail ? `: ${detail.slice(0, 200)}` : ""}${hint}`;
+    kind === "auth"
+      ? " — the credential was rejected; the Munshot bearer is a user session JWT and expires"
+      : kind === "exhausted"
+        ? " — the account's search quota for this period is spent"
+        : kind === "throttled"
+          ? " — rate-limited, not out of quota"
+          : "";
+  return { message: `${res.status}${detail ? `: ${detail.slice(0, 200)}` : ""}${hint}`, kind };
+}
+
+/** Build a classified error from a failed response, so the retry logic and the
+ *  breaker both know what they are looking at. */
+export async function backendFailure(backend: string, label: string, res: Response): Promise<BackendError> {
+  const { message, kind } = await failureText(res);
+  return new BackendError(`${label} ${message}`, kind, backend, res.status);
 }
 
 // Handle the likely response shapes: Brave-native ({web:{results:[]}}),
@@ -396,7 +472,11 @@ export function extractRows(data: unknown): unknown[] {
 async function searchSerpApi(query: string): Promise<WebResult[]> {
   const url = `https://serpapi.com/search.json?engine=google&q=${encodeURIComponent(query)}&num=10&api_key=${env.serpApiKey}`;
   const res = await fetchWithTimeout(url);
-  if (!res.ok) throw new Error(`SerpAPI ${res.status}`);
+  // The body matters here: SerpAPI answers 429 both for a burst limit and for a
+  // spent monthly plan, and only `{"error":"Your account has run out of
+  // searches."}` distinguishes them. Throwing away the body — as this did —
+  // made an exhausted account look retryable forever.
+  if (!res.ok) throw await backendFailure("serpapi", "SerpAPI", res);
   const data = await res.json();
   const organic = Array.isArray(data.organic_results) ? data.organic_results : [];
   return organic.map((o: Record<string, unknown>) => ({
@@ -409,7 +489,7 @@ async function searchSerpApi(query: string): Promise<WebResult[]> {
 async function searchProgrammable(query: string): Promise<WebResult[]> {
   const url = `https://www.googleapis.com/customsearch/v1?key=${env.googleApiKey}&cx=${env.googleCx}&q=${encodeURIComponent(query)}&num=10`;
   const res = await fetchWithTimeout(url);
-  if (!res.ok) throw new Error(`Programmable Search ${res.status}`);
+  if (!res.ok) throw await backendFailure("programmable", "Programmable Search", res);
   const data = await res.json();
   const items = Array.isArray(data.items) ? data.items : [];
   return items.map((o: Record<string, unknown>) => ({
@@ -424,12 +504,12 @@ async function searchProgrammable(query: string): Promise<WebResult[]> {
 async function searchDuckDuckGo(query: string): Promise<WebResult[]> {
   const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
   const res = await fetchWithTimeout(url, { timeoutMs: 15000 });
-  if (!res.ok) throw new Error(`DuckDuckGo ${res.status}`);
+  if (!res.ok) throw await backendFailure("fallback", "DuckDuckGo", res);
   const html = await res.text();
   // A 202 (or a body with no result anchors) is the keyless engine's
   // rate-limit challenge — surface it so the retry can back off.
   if (res.status === 202 || !html.includes("result__a")) {
-    throw new Error("Keyless engine rate-limited (retry or add an API key)");
+    throw new BackendError("Keyless engine rate-limited (retry or add an API key)", "throttled", "fallback");
   }
   return parseDuckDuckGo(html);
 }
