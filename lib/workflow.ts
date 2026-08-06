@@ -31,7 +31,10 @@ const SOURCE_DEADLINE_MS = Number(process.env.SOURCE_DEADLINE_SECONDS ?? 240) * 
  * was never coming back.
  */
 const DEADLINE_OVERRIDES: Record<string, number> = {
-  news: 300_000,
+  // Raised with the two-year sweep: the planner now runs year-window queries
+  // on top of the undated ones, and a budget that cut it off mid-lookback
+  // would quietly reinstate the blind spot those windows exist to close.
+  news: 420_000,
   google: 120_000,
   // A few searches, then it opens and reads up to three profile pages and runs
   // an extraction over each — minutes, like the news sweep, not seconds.

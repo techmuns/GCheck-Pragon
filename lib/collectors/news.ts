@@ -1,6 +1,7 @@
 import type { CollectorResult, ExcludedItem, RawHit, Subject } from "../types";
 import { allAnchorsOf, entitiesOf, entityMentioned, gradesIdentity, matchKeywords, subjectConfidence } from "../queries";
 import { env, hasReader, maxArticleReads } from "./env";
+import { NON_ADVERSE_REASON, nonAdverseKind } from "../relevance";
 import { canonicalUrl, fetchWithTimeout, noteExcluded, stripHtml, type Collector, type CollectorContext } from "./types";
 import {
   EmptyAnswer,
@@ -108,6 +109,14 @@ export const newsCollector: Collector = async (ctx) => {
             url: r.url,
             reason: `Does not name ${step.entity} — a different entity`,
           });
+          continue;
+        }
+
+        // A keyword hit is not a finding — job ads and advisers' own press
+        // releases match "legal" and "compliance" as readily as real coverage.
+        const benign = nonAdverseKind(r.title, r.url, r.snippet);
+        if (benign) {
+          noteExcluded(excluded, { title: r.title, url: r.url, reason: NON_ADVERSE_REASON[benign] });
           continue;
         }
 
@@ -367,12 +376,62 @@ export function queryLadder(subject: Subject, keywords: string[]): Step[] {
     }
   }
 
+  // ── The back years ──────────────────────────────────────────────────────
+  // Everything above asks "what is there", and an engine answers that with
+  // this quarter's news. These rungs ask the same thing about each year in the
+  // lookback, which is what actually reaches an eighteen-month-old matter.
+  // Last in the list, so a tight query budget still spends itself on the
+  // undated sweeps first.
+  const windows = lookbackWindows().slice(1); // the current year is covered above
+  for (const year of windows) {
+    if (person) {
+      push({ entity: person, query: `"${person}" ${year}`, tier: "subject", label: `${person} — ${year}` });
+    }
+    for (const company of companies.slice(0, 2)) {
+      push({ entity: company, query: `"${company}" ${year}`, tier: "company", label: `${company} — ${year}` });
+    }
+    if (orClause) {
+      for (const company of companies.slice(0, 1)) {
+        push({
+          entity: company,
+          query: `"${company}"${orClause} ${year}`,
+          tier: "keyword",
+          label: `${company} + red-flag terms — ${year}`,
+        });
+      }
+    }
+  }
+
   return steps.slice(0, maxQueries());
 }
 
 function maxQueries(): number {
   const raw = Number(process.env.MAX_NEWS_QUERIES);
-  return Number.isFinite(raw) && raw > 0 ? raw : 24;
+  return Number.isFinite(raw) && raw > 0 ? raw : 40;
+}
+
+/**
+ * How far back the sweep reaches, in years.
+ *
+ * A single undated query returns whatever the engine ranks highest, which is
+ * almost always the last few months — so a matter from eighteen months ago,
+ * exactly the kind a pre-screen exists to surface, simply never appeared. The
+ * planner therefore asks the same question once per year window as well, which
+ * forces the engine to answer for periods its relevance ranking would
+ * otherwise bury.
+ */
+function lookbackYears(): number {
+  const raw = Number(process.env.NEWS_LOOKBACK_YEARS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 2;
+}
+
+/** Year windows to sweep, newest first — ["2026", "2025", "2024"] for a
+ *  two-year lookback started in 2026. Exported for the checks. */
+export function lookbackWindows(now: Date = new Date()): string[] {
+  const thisYear = now.getFullYear();
+  const out: string[] = [];
+  for (let i = 0; i <= lookbackYears(); i++) out.push(String(thisYear - i));
+  return out;
 }
 
 /** Fold a repeat sighting into the hit we already have — never downgrade it. */

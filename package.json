@@ -22,6 +22,7 @@
     "check:substance": "tsx scripts/check-substance.mts",
     "check:related": "tsx scripts/check-related.mts",
     "check:golden": "tsx scripts/check-golden.mts",
+    "check:relevance": "tsx scripts/check-relevance.mts",
     "check:archive": "tsx scripts/check-archive.mts",
     "check:history": "tsx scripts/check-history-store.mts",
     "healthcheck:llm": "node scripts/llm-healthcheck.mjs",

@@ -11,6 +11,7 @@ import {
 import { env } from "./env";
 import { fetchWithTimeout, noteExcluded, stripHtml, type Collector } from "./types";
 import { cached } from "../searchCache";
+import { NON_ADVERSE_REASON, nonAdverseKind } from "../relevance";
 import {
   BackendError,
   classifyError,
@@ -162,6 +163,14 @@ export const googleCollector: Collector = async ({ subject, keywords, emit }) =>
             url: r.url,
             reason: `Does not name ${e.name} — a different entity`,
           });
+          continue;
+        }
+        // A keyword hit is not a finding. "legal" and "compliance" appear in
+        // job ads and in law firms' own press releases, and both were being
+        // filed as adverse — see lib/relevance.ts.
+        const benign = nonAdverseKind(r.title, r.url, r.snippet);
+        if (benign) {
+          noteExcluded(excluded, { title: r.title, url: r.url, reason: NON_ADVERSE_REASON[benign] });
           continue;
         }
         collect(byKey, {
