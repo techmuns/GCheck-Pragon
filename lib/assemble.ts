@@ -61,7 +61,10 @@ function unidentified(subject: Subject): boolean {
 function hasUnattributedConcern(collected: CollectorResult[]): boolean {
   return collected.some((c) =>
     c.hits.some(
-      (h) => h.confidence === "unverified" && (c.sourceId === "indiankanoon" || (h.matchedKeywords?.length ?? 0) > 0),
+      (h) =>
+        h.confidence !== undefined &&
+        h.confidence !== "confirmed" &&
+        (c.sourceId === "indiankanoon" || (h.matchedKeywords?.length ?? 0) > 0),
     ),
   );
 }
@@ -193,7 +196,10 @@ function redFlagSection(title: string, ctx: Ctx): RenderedSection {
     // tied to their DIN or one of their companies get a risk severity, and so
     // only those can move the verdict.
     const all = [...flagged.values()];
-    const attributable = all.filter(({ hit }) => hit.confidence !== "unverified");
+    // "company" joins "unverified" here: a matter naming the person's employer
+    // rather than the person is the employer's, and must not be counted
+    // against them.
+    const attributable = all.filter(({ hit }) => hit.confidence === "confirmed");
     const nameOnly = all.length - attributable.length;
     for (const { hit: h, source } of attributable.slice(0, 4)) {
       // A story about the company that never names the person is a fact about
@@ -229,7 +235,7 @@ function redFlagSection(title: string, ctx: Ctx): RenderedSection {
   // some other Rajesh Kumar is not this Rajesh Kumar's case.
   const ik = ctx.byId["indiankanoon"];
   if (ik?.status === "done" && ik.hits.length > 0) {
-    const attributable = ik.hits.filter((h) => h.confidence !== "unverified").length;
+    const attributable = ik.hits.filter((h) => h.confidence === "confirmed").length;
     const nameOnly = ik.hits.length - attributable;
     if (attributable > 0) {
       findings.push({ severity: "amber", text: `${attributable} litigation record(s) surfaced on Indian Kanoon.` });
@@ -640,8 +646,13 @@ function sourceSection(id: string, title: string, sourceId: string, ctx: Ctx, hi
       // Shown, but demoted and labelled: a record that only matched the
       // subject's name is evidence about *a* person of that name, not proof it
       // is this one. Info severity keeps it out of the verdict.
-      severity: h.confidence === "unverified" ? ("info" as Severity) : hitSeverity,
-      text: h.confidence === "unverified" ? `${h.title} — name match only, not confirmed as this person` : h.title,
+      severity: h.confidence === "confirmed" ? hitSeverity : ("info" as Severity),
+      text:
+        h.confidence === "company"
+          ? `${h.title} — the company's matter; this person is an officer of it, not a named party`
+          : h.confidence === "unverified"
+            ? `${h.title} — name match only, not confirmed as this person`
+            : h.title,
       sourceRef: ctx.cite(c.sourceName, h.title, h.url),
     })),
   };
@@ -815,6 +826,9 @@ function rankHit(h: RawHit): number {
  * companies that never names them, and a story that merely matched the name.
  */
 function pressText(h: RawHit): string {
+  if (h.confidence === "company") {
+    return `${h.title} — the company's matter; this person is an officer of it, not a named party`;
+  }
   if (h.confidence === "unverified") return `${h.title} — name match only, not confirmed as this person`;
   if (h.extra?.namesSubject === false && h.entity) return `${h.title} — coverage of ${h.entity}; the subject is not named`;
   return h.title;
@@ -878,7 +892,7 @@ function positivesSection(id: string, title: string, ctx: Ctx): RenderedSection 
       if (h.extra?.category === "insight") continue;
       if ((h.matchedKeywords?.length ?? 0) > 0) continue;
       // A namesake's award is not this person's award.
-      if (h.confidence === "unverified") continue;
+      if (h.confidence !== "confirmed") continue;
       if (!POSITIVE_PRESS.test(h.title)) continue;
       const key = canonicalUrl(h.url) ?? h.title.toLowerCase();
       if (!key || seen.has(key) || alreadyRead.has(key)) continue;

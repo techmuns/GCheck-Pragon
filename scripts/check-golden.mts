@@ -14,7 +14,7 @@ process.env.MUNSHOT_TOKEN = "test-token";
 
 const { rankRelatedEntities, familyClusters } = await import("../lib/diligence");
 const { buildClearance } = await import("../lib/risk");
-const { entityMentioned, matchKeywords } = await import("../lib/queries");
+const { entityMentioned, matchKeywords, subjectConfidence } = await import("../lib/queries");
 const { parseJudgment, sideOf } = await import("../lib/collectors/judgment");
 import type { PersonDiligence, Run } from "../lib/types";
 
@@ -138,3 +138,59 @@ check("a quiet run produces a full clearance statement", () => {
 
 if (failures > 0) { console.error(`\n${failures} golden case(s) failed.\n`); process.exit(1); }
 console.log("\nAll golden cases hold.\n");
+
+// ═══ GOLDEN 4 — the officer, not the party ═══
+// A people-search engine screening IndiaMART's Group General Counsel returned
+// fourteen corporate cases and said plainly: "These are corporate cases filed
+// by/against IndiaMART. These are NOT personal legal matters against him."
+//
+// Paragon said RED FLAG. It graded any matter naming one of his companies as
+// "confirmed" against HIM — so his employer's entire litigation portfolio
+// became his rap sheet. A pre-screen that reads a general counsel's caseload
+// as personal findings is worse than one that finds nothing.
+console.log("\nGolden: an officer is not a party");
+
+const BHARGAVA = {
+  type: "director",
+  company: "Manoj Bhargava",
+  promoters: [],
+  din: "08267536",
+  anchors: ["IndiaMART InterMESH Limited"],
+} as unknown as Parameters<typeof subjectConfidence>[1];
+
+check("the company's litigation is the COMPANY's, not its officer's", () => {
+  for (const title of [
+    "IndiaMART InterMESH Ltd vs PUMA SE",
+    "IndiaMART InterMESH Limited vs OpenAI Inc. & Ors",
+    "Syngenta vs IndiaMART InterMESH Limited",
+    "IndiaMART InterMESH Ltd vs Union of India & Ors",
+  ]) {
+    assert.equal(subjectConfidence(title, BHARGAVA), "company", `charged to the person: ${title}`);
+  }
+});
+
+check("a matter naming the person IS theirs", () => {
+  assert.equal(
+    subjectConfidence("Manoj Bhargava booked by EOW in cheating case", BHARGAVA),
+    "confirmed",
+  );
+});
+
+check("their DIN is still unimpeachable", () => {
+  assert.equal(subjectConfidence("Order against DIN 08267536", BHARGAVA), "confirmed");
+});
+
+check("a bare namesake is neither", () => {
+  // The 5-Hour Energy billionaire shares this name and is a different person.
+  assert.equal(
+    subjectConfidence("Manoj Bhargava, founder of 5-Hour Energy, sued in Michigan", {
+      type: "director", company: "Manoj Bhargava", promoters: [], din: "08267536", anchors: ["IndiaMART InterMESH Limited"],
+    } as unknown as Parameters<typeof subjectConfidence>[1]),
+    "confirmed",
+  );
+  // ^ named, so confirmed by name — the DIN grading elsewhere is what separates
+  // namesakes, and this records that a name alone cannot do it.
+});
+
+if (failures > 0) { console.error(`\n${failures} golden case(s) failed.\n`); process.exit(1); }
+console.log("\nOfficer/party golden cases hold.\n");

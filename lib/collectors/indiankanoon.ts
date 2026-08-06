@@ -23,7 +23,12 @@ import { readJudgmentSubstance } from "../judgmentSubstance";
 //   2. Resilient web search, site-scoped (Munshot → SerpAPI → Google → keyless)
 //   3. Public indiankanoon.org search   (keyless; blocked from most servers)
 
-const MAX_CASES = 5;
+/** Cases kept per search term. Was 5 — a cap set when the section printed
+ *  cause titles. A benchmark search of the same company found fourteen, and a
+ *  litigation portfolio truncated at five is not a portfolio, it is a sample.
+ *  The judgment reads stay capped separately (MAX_JUDGMENT_READS), so the extra
+ *  rows cost search results rather than scrape calls. */
+const MAX_CASES = Number(process.env.MAX_COURT_CASES) > 0 ? Number(process.env.MAX_COURT_CASES) : 15;
 
 interface CaseHit {
   title: string;

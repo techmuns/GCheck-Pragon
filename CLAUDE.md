@@ -94,6 +94,12 @@ down because each looked like a small thing and cost a customer's trust.
   are one company, and so are "Larsen & Toubro" and "Larsen and Toubro". The
   sibling-brand guard still holds — "reliancepower" is nowhere inside
   "reliancedigital".
+- **An officer is not a party.** A matter naming a company the person sits on,
+  but not the person, is the COMPANY's matter. Grading it "confirmed" against
+  them turned a general counsel's entire caseload into his rap sheet and
+  returned RED FLAG for a man who had signed filings in his official capacity.
+  `subjectConfidence` returns `company` for that case: real context, never a
+  personal finding, and it says so on the row.
 - **Enrichment may add to a finding, never lose one.** Every read, parse and
   model call is wrapped so a failure leaves the finding exactly as the source
   gave it.

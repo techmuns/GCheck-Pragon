@@ -192,7 +192,13 @@ export interface RawHit {
    *  companies alongside the name. "unverified" — the name matched and nothing
    *  else did. Absent for sources that identify the subject by key rather than
    *  by name search (a registry record is not a guess). */
-  confidence?: "confirmed" | "unverified";
+  /** How firmly this hit attaches to the SUBJECT.
+   *
+   *  `company` is the one that had to be added: a matter naming a company the
+   *  person sits on, but not the person, is the COMPANY's matter. A general
+   *  counsel signs their employer's litigation; charging that portfolio to
+   *  them personally is defamation dressed as diligence. */
+  confidence?: "confirmed" | "company" | "unverified";
   /** Source-specific extra fields, kept for the record. */
   extra?: Record<string, unknown>;
 }

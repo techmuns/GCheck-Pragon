@@ -247,9 +247,26 @@ function dinMentioned(text: string, din: string): boolean {
  * dressed up as confirmed.
  */
 export function subjectConfidence(text: string, subject: Subject): NonNullable<RawHit["confidence"]> {
+  // The DIN is unimpeachable — nobody else has it.
   if (subject.din && dinMentioned(text, subject.din)) return "confirmed";
+  // The person, by name.
+  if (entityMentioned(text, subject.company)) return "confirmed";
+
+  // ── One of their companies, but not them ────────────────────────────────
+  // This used to return "confirmed", and it was the most damaging line in the
+  // file. A company's entire litigation portfolio names the company, never its
+  // officers — so screening IndiaMART's General Counsel returned every suit
+  // IndiaMART had ever filed or defended, each graded as confirmed against
+  // HIM, and the board card came back RED FLAG for a man who had signed the
+  // filings in his official capacity and done nothing else.
+  //
+  // A matter naming the company is the COMPANY's matter. It is real context
+  // for the person — it is what their job consists of — and it is not a
+  // personal governance finding. Attribution is the whole product here: a
+  // pre-screen that reads a lawyer's caseload as their rap sheet is worse than
+  // one that finds nothing.
   for (const anchor of allAnchorsOf(subject)) {
-    if (usableAnchor(anchor) && entityMentioned(text, anchor)) return "confirmed";
+    if (usableAnchor(anchor) && entityMentioned(text, anchor)) return "company";
   }
   return "unverified";
 }
