@@ -359,3 +359,64 @@ check("the parser survives a full-page scrape, header furniture and all", () => 
 
 if (failures > 0) { console.error(`\n${failures} check(s) failed.\n`); process.exit(1); }
 console.log("\nRead-chain checks passed.\n");
+
+// ── A real tribunal order, exactly as Firecrawl returns it ────────────────
+// indiankanoon.org/doc/95581558/. Every assumption the High Court fixtures
+// baked in is wrong here, which is why the parse came back empty on a live
+// run: no "IN THE …" heading, a bare "Dated :", a spelled-out case number,
+// and BOTH parties on one line inside a code block with the dotted leaders
+// inline. Kept verbatim.
+const CONSUMER_COMMISSION = [
+  "[Skip to main content](https://indiankanoon.org/doc/95581558/#main-content)",
+  "## Legal Document View",
+  "[**Unlock Advanced Research with PRISMAI** ... Upgrade to Premium](https://indiankanoon.org/prism/)",
+  "\\[Cites [3](https://indiankanoon.org/search/?formInput=cites:95581558), Cited by [0](...)\\]",
+  "### National Consumer Disputes Redressal",
+  "## India Mart Intermesh Ltd. vs Dr. Rajanala Nirmala & Anr. on 18 August, 2023",
+  "```",
+  "          NATIONAL CONSUMER DISPUTES REDRESSAL COMMISSION  NEW DELHI          REVISION PETITION NO. 692 OF  2020  (Against the Order dated 05/02/2020 in Appeal No. 25/2019     of the State Commission Goa)        1. INDIA MART INTERMESH LTD.  REGISTERED OFFICE, 1ST FLOOR, 29, DARYAGANJ, NETAJI SUBHASH MARG,  NEW DELHI-110022 ...........Petitioner(s)  Versus        1. DR. RAJANALA NIRMALA & ANR.   W/O. DR. RAJANALA KRISHNA GOPAL, R/O. HOUSE NO. 851-B, LANE 1, ST. AUGUSTINHO MARROD, SANTA CRUZ, GOA  2. MR. HARINANDAN SHARMA, KING FURNITURE  02, TARABARIYARPUR, KHODAVNANDPUR, BEGUSARAI, BIHAR - 848202.  ...........Respondent(s)",
+  "```",
+  "```",
+  "     BEFORE:      HON'BLE MR. BINOY KUMAR,PRESIDING MEMBER",
+  "      FOR THE PETITIONER     :     MR. PRAVIN BAHADUR, ADVOCATE",
+  "      FOR THE RESPONDENT      :     MS. ANUBHA AGARWAL, AMICUS CURIAE",
+  "      Dated : 18 August 2023  \tORDER",
+  "```",
+  "The present Revision Petition under Section 21(b) of the Consumer Protection Act, 1986 has been filed by Indiamart InterMESH Ltd.",
+  "In view of the discussion above, the present Revision Petition is allowed. The Order of the State Commission and the District Forum are set aside and the Complaint is dismissed.",
+].join("\n\n");
+
+console.log("\nA real tribunal order (National Consumer Commission)");
+
+const consumer = parseJudgment(CONSUMER_COMMISSION);
+
+check("finds the forum even with no 'IN THE' heading", () => {
+  assert.match(String(consumer.court), /National Consumer Disputes Redressal Commission/i);
+});
+
+check("reads a bare 'Dated :' line", () => {
+  assert.equal(consumer.decidedOn, "2023-08-18");
+});
+
+check("reads a spelled-out case number", () => {
+  assert.match(String(consumer.caseNumber), /REVISION PETITION NO\. 692 OF\s+2020/i);
+});
+
+check("splits both parties out of one line, addresses trimmed", () => {
+  const pet = consumer.parties.find((p) => p.side === "petitioner");
+  const res = consumer.parties.find((p) => p.side === "respondent");
+  assert.ok(pet, `no petitioner: ${JSON.stringify(consumer.parties)}`);
+  assert.match(pet!.name, /India Mart Intermesh/i);
+  assert.doesNotMatch(pet!.name, /DARYAGANJ|FLOOR/i, "the registered address is not part of the name");
+  assert.ok(res, "no respondent");
+  assert.match(res!.name, /Rajanala Nirmala/i);
+});
+
+check("puts the subject on the right side of a tribunal matter", () => {
+  // IndiaMART BROUGHT this revision petition and won it. Reading it the other
+  // way would file a case the company won as one brought against it.
+  assert.equal(sideOf(consumer, "IndiaMART InterMESH", entityMentioned), "petitioner");
+});
+
+if (failures > 0) { console.error(`\n${failures} check(s) failed.\n`); process.exit(1); }
+console.log("\nTribunal-format checks passed.\n");

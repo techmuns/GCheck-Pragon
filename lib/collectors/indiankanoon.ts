@@ -348,10 +348,6 @@ async function enrichWithJudgments(
     }
 
     const facts = parseJudgment(got.text);
-    if (facts.parties.length === 0 && !facts.court) {
-      hit.extra = { ...hit.extra, readFail: `opened via ${got.via}, but the page did not read as a judgment` };
-      continue;
-    }
 
     const name = hit.entity ?? subject.company;
     const side = sideOf(facts, name, entityMentioned);
@@ -365,19 +361,51 @@ async function enrichWithJudgments(
       emit?.(note, { level: "warn" }),
     );
 
+    // Whatever the parser could not reach, the model supplies — quote-checked,
+    // so an unsupported answer is dropped rather than shown. Between them a
+    // page that reads as a judgment to neither is the only one left thin, and
+    // it says so.
+    const parties = facts.parties.map((p) => `${p.name} (${p.side})`);
+    if (parties.length === 0) {
+      if (substance.claimant) parties.push(`${substance.claimant} (petitioner)`);
+      if (substance.respondent) parties.push(`${substance.respondent} (respondent)`);
+    }
+    const court = facts.court ?? substance.court;
+    const caseNumber = facts.caseNumber ?? substance.caseNumber;
+
+    // The side has to follow the merged parties, not the parsed ones: on a page
+    // the parser could not read, the model's cause title is the only thing that
+    // says which way round the matter runs — and that is the one fact this
+    // whole path exists to get right.
+    const merged =
+      side ??
+      (substance.claimant && entityMentioned(substance.claimant, name)
+        ? ("petitioner" as const)
+        : substance.respondent && entityMentioned(substance.respondent, name)
+          ? ("respondent" as const)
+          : undefined);
+
+    if (parties.length === 0 && !court && !caseNumber) {
+      hit.extra = {
+        ...hit.extra,
+        readFail: `opened via ${got.via}, but neither the parser nor the reader could read it as a judgment`,
+      };
+      continue;
+    }
+
     hit.extra = {
       ...hit.extra,
       // `court` already feeds the brief's authority line — prefer the court the
       // judgment names over whatever the search result guessed.
-      court: facts.court ?? hit.extra?.court,
-      caseNumber: facts.caseNumber,
+      court: court ?? hit.extra?.court,
+      caseNumber,
       decidedOn: facts.decidedOn,
-      side,
-      defending: side ? isDefendingSide(side) : undefined,
-      parties: facts.parties.map((p) => `${p.name} (${p.side})`),
+      side: merged,
+      defending: merged ? isDefendingSide(merged) : undefined,
+      parties,
       bench: facts.bench,
       counsel: facts.counsel.map((c) => `${c.side}: ${c.advocates}`),
-      judgmentSummary: summariseJudgment(facts, side, name),
+      judgmentSummary: summariseJudgment(facts, merged, name),
       dispute: substance.dispute,
       reliefSought: substance.reliefSought,
       outcome: substance.outcome,
@@ -386,10 +414,10 @@ async function enrichWithJudgments(
       evidence: substance.evidence,
     };
 
-    if (side) {
+    if (merged) {
       emit?.(
-        `${name} is the ${side} in ${facts.caseNumber ?? "this matter"}` +
-          (facts.court ? ` before the ${facts.court}` : ""),
+        `${name} is the ${merged} in ${caseNumber ?? "this matter"}` +
+          (court ? ` before the ${court}` : ""),
         { url: hit.url },
       );
     }

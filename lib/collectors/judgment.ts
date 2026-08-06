@@ -96,16 +96,21 @@ function readCourt(ls: string[]): string | undefined {
       return titleCase(m[1].replace(/\s*[:,]\s*$/, ""));
     }
   }
+  // A shouted forum heading with no "IN THE" — tribunals and commissions.
+  for (const l of ls.slice(0, 40)) {
+    const head = /^([A-Z][A-Z0-9 ,.'()&-]{10,90}?(?:COURT|TRIBUNAL|COMMISSION|FORUM))\b/.exec(l.trim());
+    if (head) return titleCase(head[1].replace(/\s*[:,]\s*$/, ""));
+  }
   return undefined;
 }
 
 /** The delivery date, however the registry labelled it. */
 function readDate(ls: string[]): string | undefined {
   const LABEL =
-    /(?:judg?e?ment|order|decision)\s*(?:was\s*)?(?:delivered|pronounced|reserved)?\s*on\s*:?\s*(.+)$|date of (?:decision|judgment|order)\s*:?\s*(.+)$/i;
+    /(?:judg?e?ment|order|decision)\s*(?:was\s*)?(?:delivered|pronounced|reserved)?\s*on\s*:?\s*(.+)$|date of (?:decision|judgment|order)\s*:?\s*(.+)$|^\W{0,4}dated\s*:\s*(.+)$/i;
   for (const l of ls.slice(0, 60)) {
     const m = LABEL.exec(l);
-    const raw = m?.[1] ?? m?.[2];
+    const raw = m?.[1] ?? m?.[2] ?? m?.[3];
     if (raw && /\d/.test(raw)) return normaliseJudgmentDate(raw);
   }
   return undefined;
@@ -116,9 +121,17 @@ function readCaseNumber(ls: string[]): string | undefined {
   // Case types as the registries abbreviate them, followed by a number/year.
   const RE =
     /\b((?:FAO|RFA|CS|CM|CRL|CRP|CWP|WP|SLP|LPA|CA|CO|OMP|ARB|IA|MAT|TR|EFA|RSA)[A-Z()\s.]{0,12}\s*(?:No\.?\s*)?\d+\s*(?:of\s*|\/)\s*\d{4})/i;
+  // Tribunals and commissions spell it out: "REVISION PETITION NO. 692 OF
+  // 2020", "FIRST APPEAL NO. 25/2019", "COMPLAINT CASE NO. 63 OF 2018".
+  const LONG_FORM =
+    /\b((?:REVISION|FIRST|SECOND|EXECUTION|CONSUMER|COMPANY|TRANSFER|MISC(?:ELLANEOUS)?|CIVIL|CRIMINAL|WRIT)?\s*(?:PETITION|APPEAL|APPLICATION|COMPLAINT|CASE|SUIT)\s*(?:NO\.?|NUMBER)?\s*\d+\s*(?:OF|\/)\s*\d{4})/i;
   for (const l of ls.slice(0, 60)) {
     const m = RE.exec(l);
     if (m) return m[1].replace(/\s+/g, " ").trim();
+  }
+  for (const l of ls.slice(0, 60)) {
+    const m = LONG_FORM.exec(l);
+    if (m) return m[1].replace(/\s+/g, " ").trim().toUpperCase();
   }
   return undefined;
 }
@@ -130,11 +143,38 @@ function readCaseNumber(ls: string[]): string | undefined {
  * is what makes this readable without guessing. Some pages print the side on
  * the following line instead, so that shape is accepted too.
  */
-function readParties(ls: string[]): JudgmentParty[] {
+function readParties(input: string[]): JudgmentParty[] {
+  let ls = input;
   const out: JudgmentParty[] = [];
   const sideWord = SIDES.join("|");
   const inline = new RegExp(`^(.+?)\\s*\\.{2,}\\s*(${sideWord})s?\\b`, "i");
   const bare = new RegExp(`^(${sideWord})s?\\b`, "i");
+
+  // ── Cause titles that live on one line ──────────────────────────────────
+  // A tribunal order scraped to markdown arrives as one long line inside a
+  // code block: "1. INDIA MART INTERMESH LTD. REGISTERED OFFICE… …………
+  // Petitioner(s) Versus 1. DR. RAJANALA NIRMALA & ANR. … …………Respondent(s)".
+  // A line-anchored match sees one enormous party and misses the second
+  // entirely, so any line carrying more than one dotted leader is split on
+  // them first and each fragment treated as its own cause-title line.
+  const expanded: string[] = [];
+  for (const l of ls) {
+    const leaders = l.match(/\.{3,}\s*[A-Za-z]/g);
+    if (leaders && leaders.length > 1) {
+      let rest = l;
+      const re = new RegExp(`\\.{3,}\\s*(${sideWord})s?\\(?s?\\)?`, "i");
+      let m = re.exec(rest);
+      while (m) {
+        expanded.push(`${rest.slice(0, m.index)} ..... ${m[1]}`);
+        rest = rest.slice(m.index + m[0].length);
+        m = re.exec(rest);
+      }
+      if (rest.trim()) expanded.push(rest);
+    } else {
+      expanded.push(l);
+    }
+  }
+  ls = expanded;
 
   for (let i = 0; i < Math.min(ls.length, 80); i++) {
     const l = ls[i];
@@ -163,17 +203,43 @@ function readParties(ls: string[]): JudgmentParty[] {
   });
 }
 
+/**
+ * The party's name, out of whatever the cause title wraps it in.
+ *
+ * On a tribunal order that is a lot: the forum heading, the case number, a
+ * parenthetical about the order under challenge, a numbered list marker, the
+ * registered address, and often a second respondent in the same fragment.
+ * Each is stripped in the order it appears, because the name is the only part
+ * of it a reader can use.
+ */
 function cleanParty(raw: string): string | undefined {
-  const name = raw
+  // Everything before the last "Versus" belongs to the other side.
+  let name = raw.split(/\bversus\b|\bv\/s\b|\bvs\.?\b/i).pop() ?? raw;
+  // "(Against the Order dated … of the State Commission Goa)" and friends.
+  name = name.replace(/\([^)]*\)/g, " ");
+  // The cause title numbers its parties. Everything before the first marker is
+  // the forum heading and the case number; everything from the second marker
+  // on is a different party.
+  const first = /\d+\.\s+/.exec(name);
+  if (first) name = name.slice(first.index + first[0].length);
+  const second = /\s\d+\.\s+/.exec(name);
+  if (second) name = name.slice(0, second.index);
+
+  name = name
     .replace(/^[*%+\d.\s]+/, "")
-    .replace(/\s*(?:&|and)\s*(?:ors?|anr)\.?$/i, "")
+    // The registered or residential address is not part of the name.
+    .replace(/\s+(REGISTERED OFFICE|R\/O\.?|W\/O\.?|S\/O\.?|D\/O\.?|HAVING ITS|THROUGH ITS)\b.*$/i, "")
+    .replace(/\s*(?:&|and)\s*(?:ors?|anr)\.?\s*$/i, "")
     .replace(/\s*\.{2,}.*$/, "")
     .replace(/\s*[:,]\s*$/, "")
+    .replace(/\s+/g, " ")
     .trim();
+
   if (name.length < 2 || name.length > 120) return undefined;
-  if (/^(versus|vs\.?|coram|judgment|order)$/i.test(name)) return undefined;
+  if (/^(versus|vs\.?|coram|judgment|order|before)$/i.test(name)) return undefined;
   return titleCase(name);
 }
+
 
 /** The bench, from the CORAM block. */
 function readBench(ls: string[]): string[] {
@@ -230,7 +296,22 @@ function titleCase(s: string): string {
 export function judgmentBody(text: string): string {
   const ls = text.replace(/\r/g, "\n").split("\n");
   for (let i = 0; i < ls.length; i++) {
-    if (/^\W{0,8}IN THE\b.*\b(COURT|TRIBUNAL|COMMISSION|FORUM)\b/i.test(ls[i].trim())) {
+    const line = ls[i].trim();
+    // "IN THE HIGH COURT OF DELHI" — the High Court house style.
+    if (/^\W{0,8}IN THE\b.*\b(COURT|TRIBUNAL|COMMISSION|FORUM)\b/i.test(line)) {
+      return ls.slice(i).join("\n");
+    }
+    // Tribunals, commissions and consumer forums do not use it: a real page
+    // opens "NATIONAL CONSUMER DISPUTES REDRESSAL COMMISSION NEW DELHI". The
+    // tell is a shouted line naming a forum, which is how they all head their
+    // orders — and missing it meant the slicer never found the start and the
+    // whole parse came back empty.
+    const shouted = line.replace(/[^A-Za-z ]/g, "").trim();
+    if (
+      shouted.length > 12 &&
+      !/[a-z]/.test(shouted) &&
+      /\b(COURT|TRIBUNAL|COMMISSION|FORUM|BENCH|AUTHORITY)\b/.test(shouted)
+    ) {
       return ls.slice(i).join("\n");
     }
   }

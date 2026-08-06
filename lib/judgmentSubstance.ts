@@ -35,6 +35,17 @@ export interface JudgmentSubstance {
   amounts: string[];
   /** The verbatim lines the fields above rest on, for checking. */
   evidence: string[];
+  // ── Header fields, for what the deterministic parser could not reach ──────
+  // The parser handles the formats it knows exactly and for free. Indian
+  // forums do not share one house style, though — a High Court judgment, a
+  // consumer commission order and a company-law tribunal order agree on almost
+  // nothing about headings, dates and cause titles — so whatever it misses is
+  // asked of the model here, under the same rule as everything else:
+  // supported by a verbatim quote or dropped.
+  court?: string;
+  caseNumber?: string;
+  claimant?: string;
+  respondent?: string;
 }
 
 /**
@@ -83,12 +94,26 @@ const SCHEMA = {
     outcome: { type: "string", description: "How the court disposed of it, if the judgment says. Empty if not stated." },
     outcomeQuote: { type: "string", description: "Verbatim sentence supporting `outcome`." },
     stake: { type: "string", description: "One sentence: what this means commercially for the named subject." },
+    court: { type: "string", description: "The court, tribunal or commission, exactly as the document names it. Empty if not stated." },
+    courtQuote: { type: "string", description: "Verbatim fragment naming the forum." },
+    caseNumber: { type: "string", description: "The registry's case number, exactly as printed. Empty if not stated." },
+    caseNumberQuote: { type: "string", description: "Verbatim fragment carrying the case number." },
+    claimant: { type: "string", description: "The party who BROUGHT the matter — petitioner, appellant or plaintiff. Empty if unclear." },
+    respondent: { type: "string", description: "The party answering it. Empty if unclear." },
+    partiesQuote: { type: "string", description: "Verbatim fragment of the cause title naming both sides." },
   },
   required: ["dispute", "disputeQuote"],
   additionalProperties: false,
 } as const;
 
 interface RawSubstance {
+  court?: string;
+  courtQuote?: string;
+  caseNumber?: string;
+  caseNumberQuote?: string;
+  claimant?: string;
+  respondent?: string;
+  partiesQuote?: string;
   dispute?: string;
   disputeQuote?: string;
   reliefSought?: string;
@@ -120,7 +145,7 @@ function userPrompt(subject: string, text: string): string {
   return [
     `Subject of the pre-screen: ${subject}`,
     "",
-    "Read the judgment below and report what the dispute is about, what was sought, how it ended, and what it means for the subject.",
+    "Read the judgment below and report: the forum, the registry's case number, which party brought the matter and which answered it, what the dispute is about, what was sought, how it ended, and what it means for the subject.",
     "",
     body,
   ].join("\n");
@@ -196,6 +221,10 @@ export function validate(raw: RawSubstance, text: string, amounts: string[]): Ju
     return value.trim();
   };
 
+  const court = keep(raw.court, raw.courtQuote);
+  const caseNumber = keep(raw.caseNumber, raw.caseNumberQuote);
+  const claimant = keep(raw.claimant, raw.partiesQuote);
+  const respondent = keep(raw.respondent, raw.partiesQuote);
   const dispute = keep(raw.dispute, raw.disputeQuote);
   const reliefSought = keep(raw.reliefSought, raw.reliefQuote);
   const outcome = keep(raw.outcome, raw.outcomeQuote);
@@ -209,6 +238,10 @@ export function validate(raw: RawSubstance, text: string, amounts: string[]): Ju
     stake: dispute && raw.stake?.trim() ? raw.stake.trim() : undefined,
     amounts,
     evidence,
+    court,
+    caseNumber,
+    claimant,
+    respondent,
   };
 }
 
