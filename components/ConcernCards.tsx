@@ -110,12 +110,6 @@ function ConcernCard({ c, url, defaultOpen }: { c: Concern; url?: string; defaul
             </p>
           )}
 
-          <p className="mt-3 text-[12.5px] leading-relaxed text-ink-primary">
-            <span className="mr-1.5 text-[9.5px] font-semibold uppercase tracking-[0.08em] text-ink-secondary">
-              What to ask
-            </span>
-            {c.whyItMatters}
-          </p>
         </div>
       )}
     </li>

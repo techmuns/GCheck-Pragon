@@ -691,9 +691,6 @@ function ConcernCard({ c }: { c: Concern }) {
           {c.evidenceSource && <span className="pb-evidence-src"> — {c.evidenceSource}</span>}
         </div>
       )}
-      <div className="pb-concern-why">
-        <span className="pb-why-label">So what</span> {c.whyItMatters}
-      </div>
     </li>
   );
 }
