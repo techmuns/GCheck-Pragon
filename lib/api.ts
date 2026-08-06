@@ -30,3 +30,48 @@ export function authHeaders(token: string | null | undefined): Record<string, st
 export function jsonAuthHeaders(token: string | null | undefined): Record<string, string> {
   return { "Content-Type": "application/json", ...authHeaders(token) };
 }
+
+// ── Waking the backend before it is needed ─────────────────────────────────
+// The engine runs on a host that sleeps when idle, and the first request after
+// a sleep pays the whole cold start — which landed squarely on "Run
+// pre-screen", the one click where the user is watching. So the app knocks on
+// the backend the moment it loads, and again on a slow heartbeat while the tab
+// stays open. By the time a company name has been typed the server is awake,
+// and the POST that starts the run is a few hundred milliseconds instead of
+// most of a minute.
+//
+// Deliberately fire-and-forget against the cheapest endpoint there is: nothing
+// downstream may wait on it, and a failed warm-up must be invisible.
+
+let warming = false;
+
+export function warmBackend(): void {
+  if (typeof window === "undefined" || warming) return;
+  warming = true;
+  void fetch(apiUrl("/api/health"), { method: "GET", cache: "no-store", keepalive: true })
+    .catch(() => {})
+    .finally(() => {
+      warming = false;
+    });
+}
+
+/** Keep it awake while the dashboard is open. Returns an unsubscribe. */
+export function keepBackendWarm(intervalMs = 10 * 60 * 1000): () => void {
+  if (typeof window === "undefined") return () => {};
+  warmBackend();
+  const id = setInterval(() => {
+    // Only while the tab is actually being looked at — a backgrounded tab
+    // holding a server awake is someone else's bill.
+    if (document.visibilityState === "visible") warmBackend();
+  }, intervalMs);
+  // Coming back to a tab left open for an hour is exactly when the server has
+  // gone to sleep again.
+  const onVisible = () => {
+    if (document.visibilityState === "visible") warmBackend();
+  };
+  document.addEventListener("visibilitychange", onVisible);
+  return () => {
+    clearInterval(id);
+    document.removeEventListener("visibilitychange", onVisible);
+  };
+}

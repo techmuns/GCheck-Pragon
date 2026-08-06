@@ -22,26 +22,47 @@ const BEATS = [
   { n: 3, label: "Setting the checks", sub: "Governance keywords and red-flag rules" },
 ] as const;
 
-const BEAT_MS = 850;
+const BEAT_MS = 480;
 // A short hold on the closed ring, so "Ready" registers before the walk begins.
-const READY_MS = 620;
+const READY_MS = 300;
+// When the run has already landed there is no wait to dress up, so the beats
+// collapse to an acknowledgement. The lead-in exists to make an unavoidable
+// pause feel deliberate; spending it against a backend that answered in
+// milliseconds is just a slower product.
+const LANDED_MS = 90;
 
 export default function PrepCountdown({ subject, onDone, holding = false }: Props) {
   // 0..2 = counting, 3 = ring closed / "Ready".
   const [beat, setBeat] = useState(0);
 
+  // How long the run has been waiting past the beats, so the caption can stop
+  // saying the same thing at second two and second forty.
+  const [heldMs, setHeldMs] = useState(0);
+
   useEffect(() => {
     if (beat > BEATS.length) return;
     const last = beat === BEATS.length;
+    // `holding` false means the run has already landed — rush to the walk.
+    const landed = !holding;
     const t = setTimeout(
       () => {
         if (last) onDone?.();
         setBeat((b) => b + 1);
       },
-      last ? READY_MS : BEAT_MS,
+      landed ? LANDED_MS : last ? READY_MS : BEAT_MS,
     );
     return () => clearTimeout(t);
-  }, [beat, onDone]);
+  }, [beat, onDone, holding]);
+
+  useEffect(() => {
+    if (!holding) {
+      setHeldMs(0);
+      return;
+    }
+    const started = Date.now();
+    const id = setInterval(() => setHeldMs(Date.now() - started), 1000);
+    return () => clearInterval(id);
+  }, [holding]);
 
   const ready = beat >= BEATS.length;
   const current = ready ? null : BEATS[beat];
@@ -113,7 +134,9 @@ export default function PrepCountdown({ subject, onDone, holding = false }: Prop
         <p key={`s-${beat}-${holding}`} className="msg-swap mt-1 text-[12.5px] text-ink-secondary">
           {ready
             ? holding
-              ? "This can take a minute — hang tight, your brief is on the way"
+              ? heldMs > 8000
+                ? "The engine sleeps when idle — the first run after a quiet spell takes a moment to wake it. Starting now."
+                : "Starting the sweep"
               : `Screening ${subject.company}`
             : current!.sub}
         </p>

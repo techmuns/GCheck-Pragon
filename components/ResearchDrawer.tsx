@@ -367,6 +367,7 @@ export default function ResearchDrawer({ events, progress, running }: Props) {
                 the scrim, and the wait is the thing the reader came to check. */}
             <div className="mt-0.5 text-[12px] text-ink-secondary">
               {timing || (running ? "Still working — this updates live" : "Every step, in the order it happened")}
+              {running && <span className="scan-orb ml-1.5" aria-hidden>·</span>}
             </div>
           </div>
           <button

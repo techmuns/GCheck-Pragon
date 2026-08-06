@@ -11,6 +11,11 @@ interface Props {
   events?: RunEvent[];
   /** Per-director verdicts, streamed onto the run as each screen lands. */
   diligence?: PersonDiligence[];
+  /** Whether the RUN is still going — not whether the sources are done. The
+   *  two diverge for minutes on a company run, and conflating them is what
+   *  froze the clock and filled the bar while the board was still being
+   *  screened. */
+  running?: boolean;
 }
 
 const STATUS_LABEL: Record<SourceProgress["status"], string> = {
@@ -63,28 +68,54 @@ const VISITING: Record<string, string> = {
 
 const RESOLVED = new Set(["done", "skipped", "error", "locked"]);
 
-export default function ResearchProgress({ subject, progress, events = [], diligence = [] }: Props) {
-  const total = progress.length;
-
-  const resolved = progress.filter((p) => RESOLVED.has(p.status)).length;
+export default function ResearchProgress({
+  subject,
+  progress,
+  events = [],
+  diligence = [],
+  running: runActive = true,
+}: Props) {
+  // ── What "done" means, from the reader's side ────────────────────────────
+  // The bar used to measure the SOURCES alone. So on a company run every
+  // source settled, the bar filled, the ring read "11 of 11", the drawer's
+  // clock stopped at "took 1m 39s" — and then the board screening ran for
+  // several more minutes behind a screen that said, in every visual it had,
+  // that the work was finished. Customers reasonably concluded it had hung.
+  //
+  // Screening nine directors IS the run, so it counts as the run: the total is
+  // the sources plus the people, and every element below measures against
+  // that. Nothing reads complete until the whole thing is.
+  const sourceTotal = progress.length;
+  const sourcesResolved = progress.filter((p) => RESOLVED.has(p.status)).length;
   const running = progress.filter((p) => p.status === "running");
+
+  const boardTotal = diligence.length;
+  const boardDone = diligence.filter((p) => p.status === "done" || p.status === "error").length;
+  const boardRunning = diligence.filter((p) => p.status === "running");
+
+  const total = sourceTotal + boardTotal;
+  const resolved = sourcesResolved + boardDone;
   const step = total ? Math.min(resolved + (resolved < total ? 1 : 0), total) : 0;
 
-  // Ring geometry — a sweep that closes as the sources actually settle.
+  // Ring geometry — a sweep that closes as the work actually settles.
   const R = 26;
   const CIRC = useMemo(() => 2 * Math.PI * R, [R]);
-  const walked = total ? resolved / total : 0;
+  // Never quite closed while the run is live: a full ring under a run that is
+  // still working is the picture that reads as stuck.
+  const walked = total ? Math.min(resolved / total, runActive ? 0.97 : 1) : 0;
 
   // The live line is whatever the run last reported. The per-source narration
   // is the fallback for the moment before the first event lands.
   const latest = events[events.length - 1];
   const line = latest
     ? latest.text
-    : running.length > 0
-      ? `${VISITING[running[0].sourceId] ?? `Checking ${running[0].name}`}…`
-      : resolved >= total && total > 0
-        ? "Putting the brief together…"
-        : "Starting up…";
+    : boardRunning.length > 0
+      ? `Screening ${boardRunning[0].name}…`
+      : running.length > 0
+        ? `${VISITING[running[0].sourceId] ?? `Checking ${running[0].name}`}…`
+        : resolved >= total && total > 0
+          ? "Putting the brief together…"
+          : "Starting up…";
 
   return (
     <div className="card-surface fade-in mx-auto w-full max-w-3xl p-6 sm:p-8">
@@ -148,6 +179,56 @@ export default function ResearchProgress({ subject, progress, events = [], dilig
         </div>
       </div>
 
+      {/* MOVED ABOVE THE SOURCE ROWS while it runs: once every source has
+          settled, this is the only thing still happening, and it sat below a
+          screenful of finished green ticks where the reader never saw it. */}
+      {/* Board diligence, person by person — the phase that used to be a
+          silent multi-minute wait. The people stream onto the run as each
+          screen lands, so this list is live off the same poll as everything
+          else: who is queued, who is being checked right now, and what each
+          verdict came back as. */}
+      {diligence.length > 0 && (
+        <div className="mt-6">
+          <div className="mb-2 flex items-baseline justify-between">
+            <span className="text-[13px] font-semibold text-navy-deep">Screening the board</span>
+            <span className="tabular text-[12px] text-ink-secondary">
+              {diligence.filter((p) => p.status === "done" || p.status === "error").length}/{diligence.length} done
+            </span>
+          </div>
+          <ul className="space-y-1">
+            {diligence.map((p) => (
+              <li
+                key={p.id}
+                className="flex items-center justify-between gap-3 rounded-lg border border-[rgba(23,43,77,0.10)] bg-white/70 px-3 py-1.5"
+              >
+                <span className="min-w-0 truncate text-[12.5px] text-ink-primary">
+                  {p.name}
+                  {p.role && <span className="ml-1.5 text-[11px] text-ink-secondary">· {p.role}</span>}
+                </span>
+                <span className="shrink-0 text-[11px] font-semibold">
+                  {p.status === "pending" && <span className="text-ink-secondary/60">Queued</span>}
+                  {p.status === "running" && (
+                    <span className="flex items-center gap-1.5 text-[#B7791F]">
+                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#B7791F]" />
+                      Checking…
+                    </span>
+                  )}
+                  {p.status === "error" && <span className="text-ink-secondary">Couldn’t complete</span>}
+                  {p.status === "done" &&
+                    (p.verdict === "red" ? (
+                      <span className="text-[#C75D54]">Red flag</span>
+                    ) : p.verdict === "amber" ? (
+                      <span className="text-[#B7791F]">{p.concerns.length} to review</span>
+                    ) : (
+                      <span className="text-[#2F855A]">Clear</span>
+                    ))}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* Per-source rows. All of them, from the start: the backend fans out in
           parallel, so several are genuinely in flight at once and showing that
           is the honest picture. Every running row is highlighted, not one. */}
@@ -198,60 +279,18 @@ export default function ResearchProgress({ subject, progress, events = [], dilig
         })}
       </ul>
 
-      {/* Board diligence, person by person — the phase that used to be a
-          silent multi-minute wait. The people stream onto the run as each
-          screen lands, so this list is live off the same poll as everything
-          else: who is queued, who is being checked right now, and what each
-          verdict came back as. */}
-      {diligence.length > 0 && (
-        <div className="mt-6">
-          <div className="mb-2 flex items-baseline justify-between">
-            <span className="text-[13px] font-semibold text-navy-deep">Screening the board</span>
-            <span className="tabular text-[12px] text-ink-secondary">
-              {diligence.filter((p) => p.status === "done" || p.status === "error").length}/{diligence.length} done
-            </span>
-          </div>
-          <ul className="space-y-1">
-            {diligence.map((p) => (
-              <li
-                key={p.id}
-                className="flex items-center justify-between gap-3 rounded-lg border border-[rgba(23,43,77,0.10)] bg-white/70 px-3 py-1.5"
-              >
-                <span className="min-w-0 truncate text-[12.5px] text-ink-primary">
-                  {p.name}
-                  {p.role && <span className="ml-1.5 text-[11px] text-ink-secondary">· {p.role}</span>}
-                </span>
-                <span className="shrink-0 text-[11px] font-semibold">
-                  {p.status === "pending" && <span className="text-ink-secondary/60">Queued</span>}
-                  {p.status === "running" && <span className="text-[#B7791F]">Checking…</span>}
-                  {p.status === "error" && <span className="text-ink-secondary">Couldn’t complete</span>}
-                  {p.status === "done" &&
-                    (p.verdict === "red" ? (
-                      <span className="text-[#C75D54]">Red flag</span>
-                    ) : p.verdict === "amber" ? (
-                      <span className="text-[#B7791F]">{p.concerns.length} to review</span>
-                    ) : (
-                      <span className="text-[#2F855A]">Clear</span>
-                    ))}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
       {/* The full research reads in its own panel now. Ninety-odd log lines
           under the source rows buried the rows themselves, and the reader who
           wants the detail wants it grouped by what it establishes, not by the
           order the queries fired. */}
-      <ResearchDrawer events={events} progress={progress} running={resolved < total} />
+      <ResearchDrawer events={events} progress={progress} running={runActive} />
 
       <p className="mt-4 text-center text-[12px] text-ink-secondary/80">
-        {resolved >= total && total > 0
-          ? diligence.length > 0 && diligence.some((p) => p.status === "pending" || p.status === "running")
-            ? "Sources are in — screening the board director by director. The report follows once every verdict is settled, so the score you get is final."
-            : "Almost there — writing it up."
-          : "This one runs deep, so give it a few minutes. Open “View the research” on the right to follow every step."}
+        {boardTotal > 0 && boardDone < boardTotal
+          ? `Screening the board — ${boardDone} of ${boardTotal} directors done. The report follows once every verdict is in, so the score you get is final.`
+          : sourcesResolved >= sourceTotal && sourceTotal > 0
+            ? "Almost there — writing it up."
+            : "This one runs deep, so give it a few minutes. Open “View the research” on the right to follow every step."}
       </p>
     </div>
   );

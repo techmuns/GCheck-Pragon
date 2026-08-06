@@ -13,6 +13,7 @@ import BriefView from "@/components/BriefView";
 import RunSidebar from "@/components/RunSidebar";
 import HistoryView from "@/components/HistoryView";
 import { useRuns } from "@/lib/useRuns";
+import { keepBackendWarm } from "@/lib/api";
 import { useArchive, type OpenedRun } from "@/lib/useArchive";
 import { countSearches } from "@/lib/archive";
 import { formatSuggestion } from "@/lib/directorId";
@@ -98,6 +99,11 @@ export default function Home() {
       })),
     },
   });
+
+  // Wake the backend as the dashboard loads, and keep it awake while the tab is
+  // open. The cold start then happens while the user is choosing a company
+  // rather than after they have asked for a brief.
+  useEffect(() => keepBackendWarm(), []);
 
   useEffect(() => {
     // 1) Visual snapshot — a PNG Blob of the dashboard's content area.
@@ -317,6 +323,7 @@ export default function Home() {
             progress={active.run.progress}
             events={active.run.events}
             diligence={active.run.diligence}
+            running={active.phase === "running" || active.phase === "starting"}
           />
         )}
 
