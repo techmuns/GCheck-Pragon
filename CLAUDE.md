@@ -70,5 +70,81 @@ problems rather than one).
 ## Checks
 
 `npm test` runs them all. Individually: `check:keywords`, `check:attribution`,
-`check:clarifications`, `check:search`, `check:host-token`, `check:firecrawl`.
+`check:clarifications`, `check:search`, `check:host-token`, `check:firecrawl`,
+`check:entity`, `check:judgment`, `check:substance`, `check:related`,
+`check:relevance`, `check:golden`, `check:archive`.
 `npm run typecheck` and `npm run lint` are both expected to be clean.
+
+## Hard-won rules
+
+Every one of these came from a real failure on a real run. They are written
+down because each looked like a small thing and cost a customer's trust.
+
+### Findings
+
+- **A keyword hit is not a finding.** "legal" and "compliance" are ordinary
+  corporate words. A run once filed a job posting and a law firm's press
+  release about advising the company's funding round under *Key concerns*.
+  `lib/relevance.ts` recognises recruitment pages, advisers announcing their
+  own mandates, funding rounds and directory listings — and any unambiguous
+  adverse word overrules it, because a raise by a company under investigation
+  is still a story about the investigation.
+- **Losing a real record is worse than showing a near-miss.** Name matching is
+  boundary-tolerant: "IndiaMART InterMESH" and "India Mart Intermesh Limited"
+  are one company, and so are "Larsen & Toubro" and "Larsen and Toubro". The
+  sibling-brand guard still holds — "reliancepower" is nowhere inside
+  "reliancedigital".
+- **Enrichment may add to a finding, never lose one.** Every read, parse and
+  model call is wrapped so a failure leaves the finding exactly as the source
+  gave it.
+
+### Reading documents
+
+- **Indian forums share no house style.** A High Court judgment, a consumer
+  commission order and a tribunal order agree on nothing — headings, dates,
+  case numbers, cause titles all differ. Parse what fits (free, exact), ask the
+  model for the rest, and expect a format nobody has seen yet.
+- **Every model-supplied fact carries a verbatim quote from the source, checked
+  here, or it is dropped.** A model that paraphrases its own evidence has not
+  shown the sentence exists.
+- **Money is never asked of a model.** Amounts come from the document by regex.
+  A hallucinated ₹ figure would be read aloud in a meeting as the exposure.
+- **`onlyMainContent` destroys a judgment.** The cause title, CORAM block and
+  case number live in page furniture. Scrape the whole page; `judgmentBody()`
+  cuts the noise.
+
+### Searching
+
+- **One query is one point of failure.** `site:` is not honoured by every
+  backend, and the backend changes. Ladder the query: operator, then no
+  operator, then no quotes.
+- **An undated query returns this quarter.** A matter from eighteen months ago
+  — exactly what a pre-screen is for — never appears unless you sweep year
+  windows explicitly.
+- **Name the failing route on the artifact itself.** "Could not be opened" with
+  no reason cost a full run of debugging. Rows now say which door was shut.
+
+### The report
+
+- **Never show a number that will change.** The score climbed 45 → 80 as
+  directors resolved, so what a reader saw depended on when they looked. The
+  brief waits until the run is settled.
+- **Measure the whole run, not the phase you happen to be in.** Sources
+  finishing filled the bar, closed the ring and stopped the clock while board
+  screening ran for minutes more — every visual said "done" over working
+  software, and customers concluded it had hung.
+- **Find where a thing actually renders before fixing it.** Court data had
+  three renderers; enriching the collector twice changed nothing on screen
+  because the section a reader looks at read from a fourth path.
+- **A quiet report must say what it screened and found clear.** Otherwise it
+  reads as "not looked at" rather than "looked at and clean".
+
+### Keeping it honest
+
+`npm run check:golden` holds findings-level truths from real analyst
+governance checks — the ED/PMLA matter reachable only through a director's
+other ventures, the sibling entity in a fund trail, the family board, the side
+of an appeal. Unit suites prove the code runs; this proves the product still
+finds what matters. **When a miss is found in the wild, add it here** — that is
+the ratchet, and it is the only thing that stops a refactor silently losing a
+finding.
