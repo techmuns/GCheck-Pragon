@@ -134,6 +134,25 @@ export default function AutocompleteField({
     setLoading(true);
 
     const mine = ++seq.current;
+
+    // The index-only answer, asked for straight away and with no debounce: it
+    // costs the server no network at all, so waiting to send it would be
+    // spending the user's time to save nothing. It fills the dropdown while
+    // the metered lookup below is still in flight, and never overwrites a
+    // richer list that has already landed.
+    void fetch(apiUrl(`/api/autocomplete?fast=1&kind=${kind}&q=${encodeURIComponent(q)}`), {
+      headers: authHeaders(tokenRef.current),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        const list: Suggestion[] = Array.isArray(data.suggestions) ? data.suggestions : [];
+        if (mine === seq.current && list.length > 0 && !cache.current.has(key)) {
+          setSuggestions((cur) => (cur.length > 0 ? cur : list));
+          setActive(-1);
+        }
+      })
+      .catch(() => {});
+
     const t = setTimeout(async () => {
       inflight.current?.abort();
       const controller = new AbortController();

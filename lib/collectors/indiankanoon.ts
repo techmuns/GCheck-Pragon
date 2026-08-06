@@ -172,15 +172,52 @@ export function kanoonDocId(url: string): string | undefined {
 }
 
 /**
+ * Scrape one judgment through Firecrawl.
+ *
+ * Separate from the general article reader on purpose: that reader asks for
+ * main content only, which is correct for an article and destroys a judgment,
+ * and it puts the Munshot reader first — a door Indian Kanoon keeps shut.
+ */
+async function scrapeJudgment(url: string): Promise<string | undefined> {
+  return cached(`kanoon:doc:${url}`, async () => {
+    const res = await fetchWithTimeout(env.firecrawlUrl, {
+      method: "POST",
+      timeoutMs: 45000,
+      headers: {
+        "Content-Type": "application/json",
+        accept: "application/json",
+        Authorization: `Bearer ${env.firecrawlApiKey}`,
+      },
+      body: JSON.stringify({
+        url,
+        formats: ["markdown"],
+        // Keep the whole page — see the note at the call site.
+        onlyMainContent: false,
+        // These pages are server-rendered; a short settle is enough and keeps
+        // a judgment read from costing the run half a minute.
+        waitFor: 1200,
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`Firecrawl ${res.status}${body ? `: ${body.slice(0, 120)}` : ""}`);
+    }
+    const data = (await res.json()) as { data?: { markdown?: string } };
+    const text = (data.data?.markdown ?? "").trim();
+    return text.length > 200 ? text : undefined;
+  });
+}
+
+/**
  * Open one judgment, by whichever door answers first.
  *
  * The general article reader was the only route here, and on a real run all
  * five reads came back unusable — Indian Kanoon actively blocks automated
- * readers. So the chain now leads with the OFFICIAL Indian Kanoon API when a
- * token is configured (the same INDIANKANOON_API_TOKEN the search rung already
- * uses; its /doc/ endpoint serves the judgment itself), then a plain page
- * fetch, and only then the reader chain. Every failure is named, because "could
- * not be opened" with no reason burned a whole run's worth of debugging time.
+ * readers, and its official API is paid. So the chain leads with a Firecrawl
+ * scrape tuned for judgments, then the official API if a token ever exists,
+ * then a plain page fetch, then the generic reader. Every failure is named,
+ * because "could not be opened" with no reason burned a whole run of
+ * debugging time.
  */
 async function fetchJudgmentText(
   url: string,
@@ -189,7 +226,34 @@ async function fetchJudgmentText(
   const fails: string[] = [];
   const docId = kanoonDocId(url);
 
-  // 1. The official API — authoritative, and immune to scraper-blocking.
+  // 1. Firecrawl, called directly. Indian Kanoon blocks plain automated
+  //    readers, and its official API is paid, so a rendering scraper is the
+  //    route that actually works — it is the primary here rather than a last
+  //    resort behind two doors that are known to be shut.
+  //
+  //    `onlyMainContent` is deliberately OFF. It is the right setting for a
+  //    news article and the wrong one here: the cause title, the CORAM block
+  //    and the case number sit in the page's header furniture, which is
+  //    exactly what "main content only" throws away — and those five fields
+  //    are the entire point of opening the judgment. The noise it leaves
+  //    behind is what `judgmentBody()` was written to cut.
+  if (env.firecrawlApiKey) {
+    try {
+      const text = await scrapeJudgment(url);
+      if (text) {
+        emit?.("Read the judgment via Firecrawl", { url, level: "step" });
+        return { text, via: "Firecrawl" };
+      }
+      fails.push("Firecrawl returned no readable text");
+    } catch (err) {
+      fails.push(`Firecrawl: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  } else {
+    fails.push("no FIRECRAWL_API_KEY set — it is the route that reads these pages");
+  }
+
+  // 2. The official API, when a token happens to be configured. Authoritative
+  //    and immune to scraper-blocking, but paid, so it is never assumed.
   if (docId && env.indianKanoonToken) {
     try {
       const res = await fetchWithTimeout(`https://api.indiankanoon.org/doc/${docId}/`, {
@@ -208,11 +272,9 @@ async function fetchJudgmentText(
     } catch (err) {
       fails.push(`Indian Kanoon API: ${err instanceof Error ? err.message : String(err)}`);
     }
-  } else if (docId && !env.indianKanoonToken) {
-    fails.push("no INDIANKANOON_API_TOKEN set (the official API is the reliable route)");
   }
 
-  // 2. The page itself. Works from some networks; costs one GET to find out.
+  // 3. The page itself. Free, and works from some networks; one GET to find out.
   try {
     const res = await fetchWithTimeout(url, { timeoutMs: 15000, headers: { accept: "text/html" } });
     if (!res.ok) throw new Error(`page ${res.status}`);
@@ -223,7 +285,7 @@ async function fetchJudgmentText(
     fails.push(`public page: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // 3. The general article-reader chain (Munshot reader → Firecrawl).
+  // 4. The general article-reader chain (Munshot reader).
   if (hasReader()) {
     try {
       const articles = await readArticles(

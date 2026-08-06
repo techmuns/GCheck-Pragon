@@ -322,3 +322,40 @@ if (failures > 0) {
   process.exit(1);
 }
 console.log("\nAll court-case row checks passed.\n");
+
+// ── The read chain ─────────────────────────────────────────────────────────
+// Indian Kanoon blocks plain automated readers and its API is paid, so
+// Firecrawl is the route that actually works. What matters is that the scrape
+// asks for the WHOLE page: `onlyMainContent` would strip the cause title, the
+// CORAM block and the case number — the five fields the judgment is opened for.
+
+const { kanoonDocId } = await import("../lib/collectors/indiankanoon");
+
+console.log("\nRead chain");
+
+check("a judgment URL yields its document id", () => {
+  assert.equal(kanoonDocId("https://indiankanoon.org/doc/85285346/"), "85285346");
+  assert.equal(kanoonDocId("https://indiankanoon.org/docfragment/123/?formInput=x"), "123");
+  assert.equal(kanoonDocId("https://example.com/nope"), undefined);
+});
+
+check("the parser survives a full-page scrape, header furniture and all", () => {
+  // What Firecrawl returns with onlyMainContent off: markdown chrome wrapped
+  // around the judgment. This is the shape the chain now feeds the parser, so
+  // it has to hold — and it is the reason main-content-only is NOT used.
+  const SCRAPED =
+    "[Indian Kanoon](https://indiankanoon.org/) - Search engine for Indian Law\n\n" +
+    "* [Premium Members](/premium/)\n* [Advanced Search](/advanced.html)\n\n" +
+    "**Cites 18 docs** - [View All](/docfragment/85285346/)\n\n" +
+    "[Puma Se vs Indiamart Intermesh Ltd on 3 January, 2024](/doc/1111/)\n\n" +
+    "## Delhi High Court\n\n```\n" + INDIAMART_PUMA + "\n```\n";
+  const f = parseJudgment(SCRAPED);
+  assert.match(String(f.court), /High Court of Delhi/i);
+  assert.equal(f.decidedOn, "2025-06-02");
+  assert.match(String(f.caseNumber), /FAO\(OS\)/i);
+  assert.equal(sideOf(f, "IndiaMART InterMESH", entityMentioned), "appellant");
+  assert.equal(f.bench.length, 2);
+});
+
+if (failures > 0) { console.error(`\n${failures} check(s) failed.\n`); process.exit(1); }
+console.log("\nRead-chain checks passed.\n");

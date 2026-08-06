@@ -50,12 +50,20 @@ const DIRECTOR_BUDGET_MS = 2500;
 export async function GET(req: NextRequest) {
   const raw = (req.nextUrl.searchParams.get("q") ?? "").trim();
   const kind = req.nextUrl.searchParams.get("kind") === "promoter" ? "promoter" : "company";
+  // ── The instant half ──────────────────────────────────────────────────────
+  // The live lookups below are metered and slow, and the response used to wait
+  // on them: the local index had an answer in microseconds and the box still
+  // spun for up to a second on a company and two and a half on a director,
+  // because one HTTP response cannot arrive twice. So the client asks twice —
+  // `fast=1` for the index alone, then the enriched list — and the dropdown
+  // opens on the first while the second improves it in place.
+  const fast = req.nextUrl.searchParams.get("fast") === "1";
   if (!raw) return NextResponse.json({ suggestions: [] });
 
   // The company typeahead runs on the live stock search, which authenticates
   // with the caller's Munshot session token when the request came from the host.
   const suggestions = await withHostToken(bearerFrom(req), () =>
-    kind === "promoter" ? directorSuggestions(raw) : companySuggestions(raw),
+    kind === "promoter" ? directorSuggestions(raw, fast) : companySuggestions(raw, fast),
   );
   // A typed prefix repeats constantly as the user backspaces and retypes. The
   // client caches too; this makes the browser's own reuse free as well.
@@ -75,8 +83,9 @@ export async function GET(req: NextRequest) {
  * is the better anchor for a run. Nothing here can fail: `searchStocks` is
  * already budgeted, breaker-guarded and cached, and its rejection is swallowed.
  */
-async function companySuggestions(raw: string): Promise<Suggestion[]> {
+async function companySuggestions(raw: string, fast = false): Promise<Suggestion[]> {
   const local = matchLocal(SEED_COMPANIES, raw);
+  if (fast) return local;
   const live = await withBudget(searchStocks(raw), LOOKUP_BUDGET_MS);
   if (!live || live.length === 0) return local;
   return mergeSuggestions(live, local);
@@ -97,9 +106,10 @@ function mergeSuggestions(live: Suggestion[], local: Suggestion[], limit = 8): S
   return out.slice(0, limit);
 }
 
-async function directorSuggestions(raw: string): Promise<Suggestion[]> {
+async function directorSuggestions(raw: string, fast = false): Promise<Suggestion[]> {
   const parsed = parseDirectorInput(raw);
   const local = matchLocal(SEED_DIRECTORS, parsed.name);
+  if (fast) return local;
   const worthLooking = Boolean(parsed.din) || parsed.name.length >= MIN_LOOKUP_CHARS;
 
   if (worthLooking) {
